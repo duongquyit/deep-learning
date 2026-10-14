@@ -1,0 +1,15 @@
+#!/bin/sh
+# Block a commit whose roadmap, learning log and dashboard disagree.
+#
+# Install:  ln -sf ../../.claude/scripts/pre-commit .git/hooks/pre-commit
+# Bypass:   git commit --no-verify   (for a work-in-progress commit)
+
+if git diff --cached --name-only | grep -qE '^(\.claude/docs/(ROADMAP|LEARNING_LOG)\.md|\.claude/docs/progress\.json|roadmap\.html)$'; then
+    if ! python3 .claude/scripts/progress.py check; then
+        echo
+        echo "pre-commit: roadmap, log and dashboard disagree."
+        echo "  Fix the markdown, then run: python3 .claude/scripts/progress.py sync"
+        echo "  To commit anyway:           git commit --no-verify"
+        exit 1
+    fi
+fi

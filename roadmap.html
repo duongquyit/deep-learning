@@ -1,0 +1,1206 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lộ trình 6 tháng — Backend Engineer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg-0:#0A0812;
+  --shell-bg:#0E0B16; --sidebar-bg:#110D1B;
+  --card-bg:#161220; --card-bg-2:#1C1729;
+  --border:rgba(255,255,255,.08); --border-strong:rgba(255,255,255,.16);
+  --text-0:#F3F1F7; --text-1:#B9B3C7; --text-2:#7D7791;
+
+  --violet:#7C3AED; --violet-2:#A78BFA;
+  --pink:#DB2777; --pink-2:#F472B6;
+  --blue:#3B82F6; --blue-2:#60A5FA;
+  --rose:#F43F5E; --rose-2:#FB7185;
+  --green:#22C55E; --green-tint:#4ADE80;
+  --amber:#F59E0B; --amber-tint:#FBBF24;
+
+  --sans:"Inter",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+  --r-l:18px; --r-m:12px; --r-s:9px;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important;animation:none!important}}
+body{margin:0;color:var(--text-1);font:400 15px/1.6 var(--sans);
+  background-color:var(--bg-0);
+  background-image:
+    radial-gradient(900px 600px at -10% -10%, rgba(124,58,237,.30), transparent 60%),
+    radial-gradient(900px 700px at 110% 110%, rgba(219,39,119,.22), transparent 60%);
+  background-attachment:fixed}
+a{color:var(--violet-2)}
+:focus-visible{outline:2px solid var(--violet-2);outline-offset:2px}
+h1,h2,h3{font-family:var(--sans);color:var(--text-0)}
+button{font-family:inherit}
+
+/* app shell */
+.app-shell{max-width:1360px;margin:36px auto;min-height:calc(100vh - 72px);background:var(--shell-bg);
+  border:1px solid var(--border-strong);border-radius:28px;overflow:hidden;display:flex;
+  box-shadow:0 50px 140px rgba(124,58,237,.18), 0 20px 60px rgba(0,0,0,.55)}
+
+/* sidebar */
+.sidebar{width:252px;flex-shrink:0;background:var(--sidebar-bg);border-right:1px solid var(--border);
+  padding:26px 16px;display:flex;flex-direction:column;gap:26px}
+.brand{display:flex;align-items:center;gap:10px;padding:0 6px}
+.brand .mark-logo{width:34px;height:34px;border-radius:10px;flex-shrink:0;
+  background:linear-gradient(135deg,var(--violet),var(--pink));display:flex;align-items:center;justify-content:center;
+  color:#fff;font-weight:800;font-size:14px}
+.brand strong{display:block;font-size:13.5px;color:var(--text-0);font-weight:700}
+.brand span{display:block;font-size:11px;color:var(--text-2);margin-top:1px}
+nav.side-nav{display:flex;flex-direction:column;gap:2px}
+nav.side-nav a{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:var(--r-s);
+  color:var(--text-1);text-decoration:none;font-size:13px;font-weight:500;border:1px solid transparent}
+nav.side-nav a .dot{width:6px;height:6px;border-radius:50%;background:var(--text-2);flex-shrink:0}
+nav.side-nav a:hover{color:var(--text-0)}
+nav.side-nav a.active{color:var(--text-0);background:linear-gradient(135deg,rgba(124,58,237,.30),rgba(219,39,119,.18));
+  border-color:rgba(255,255,255,.10)}
+nav.side-nav a.active .dot{background:var(--violet-2)}
+nav.side-nav .grp-label{font-size:11px;color:var(--text-2);text-transform:none;font-weight:600;margin:14px 0 2px 10px}
+.sidebar-foot{margin-top:auto;padding-top:14px;border-top:1px solid var(--border)}
+.sidebar-foot a{display:block;font-size:12px;color:var(--text-2);text-decoration:none;padding:6px 10px}
+.sidebar-foot a:hover{color:var(--violet-2)}
+
+/* main */
+main{flex:1;min-width:0;display:flex;flex-direction:column}
+.topbar{position:sticky;top:0;z-index:5;display:flex;align-items:center;justify-content:space-between;gap:16px;
+  padding:20px 32px;border-bottom:1px solid var(--border);background:rgba(14,11,22,.82);backdrop-filter:blur(10px)}
+.search{position:relative;flex:1;max-width:420px}
+.search svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);opacity:.5}
+.search input{width:100%;background:var(--card-bg);border:1px solid var(--border);border-radius:var(--r-m);
+  padding:10px 14px 10px 36px;color:var(--text-0);font:400 13.5px var(--sans)}
+.search input::placeholder{color:var(--text-2)}
+.search input:focus{outline:none;border-color:var(--violet-2)}
+.top-actions{display:flex;align-items:center;gap:10px;flex-shrink:0}
+.pill-static{background:var(--card-bg);border:1px solid var(--border);padding:8px 14px;border-radius:999px;
+  font-size:12px;font-weight:600;color:var(--text-1);white-space:nowrap}
+
+.content{padding:28px 32px 8px}
+.content h1{font-size:25px;font-weight:700;letter-spacing:-.015em;margin:0 0 4px}
+.content > p.lede{color:var(--text-2);font-size:13.5px;margin:0 0 24px}
+
+/* bracket status marks */
+.mark{display:inline-flex;align-items:center;justify-content:center;font:700 10.5px var(--mono);
+  border-radius:999px;padding:3px 9px;flex-shrink:0;letter-spacing:.01em}
+.mark.not-started{background:rgba(255,255,255,.07);color:var(--text-2)}
+.mark.progress{background:rgba(245,158,11,.16);color:var(--amber-tint)}
+.mark.done{background:rgba(34,197,94,.17);color:var(--green-tint)}
+.mark.blocked{background:rgba(244,63,94,.17);color:var(--rose-2)}
+
+/* hero stat cards */
+.stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:18px}
+.stat-card{background:var(--card-bg);border:1px solid var(--border);border-radius:var(--r-l);padding:18px 19px;
+  box-shadow:0 10px 26px rgba(0,0,0,.28);display:flex;flex-direction:column;gap:11px}
+.badge{width:38px;height:38px;border-radius:11px;display:flex;align-items:center;justify-content:center;
+  color:#fff;font-size:16px;font-weight:700}
+.badge.grad-a{background:linear-gradient(135deg,var(--rose),var(--rose-2))}
+.badge.grad-b{background:linear-gradient(135deg,var(--violet),var(--violet-2))}
+.badge.grad-c{background:linear-gradient(135deg,var(--blue),var(--blue-2))}
+.badge.grad-d{background:linear-gradient(135deg,var(--violet),var(--pink))}
+.s-label{font-size:12px;color:var(--text-2);font-weight:500}
+.s-value{font-size:23px;font-weight:700;color:var(--text-0);font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.s-value small{font-size:13px;color:var(--text-2);font-weight:600;margin-left:1px}
+.trend{align-self:flex-start;font-size:11px;font-weight:600;padding:3px 9px;border-radius:999px}
+.trend.positive{background:rgba(34,197,94,.15);color:var(--green-tint)}
+.trend.neutral{background:rgba(255,255,255,.06);color:var(--text-2)}
+.trend.negative{background:rgba(244,63,94,.15);color:var(--rose-2)}
+
+/* chart + sessions row */
+.panel-row{display:grid;grid-template-columns:1.7fr 1fr;gap:16px;margin-bottom:18px;align-items:start}
+.chart-card,.side-card{background:var(--card-bg);border:1px solid var(--border);border-radius:var(--r-l);
+  padding:20px 22px;box-shadow:0 10px 26px rgba(0,0,0,.28)}
+.chart-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px;flex-wrap:wrap}
+.chart-head h2{font-size:15px;font-weight:700;margin:0 0 3px}
+.chart-head p{font-size:12px;color:var(--text-2);margin:0}
+.legend{display:flex;gap:14px;font-size:11.5px;color:var(--text-2);align-items:center;flex-shrink:0}
+.legend .ld{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:5px}
+.legend .ld.planned{background:var(--violet-2)}
+.legend .ld.logged{background:var(--pink-2)}
+svg#chart{width:100%;height:auto;display:block;overflow:visible}
+.chart-axis{display:flex;justify-content:space-between;font-size:10.5px;color:var(--text-2);margin-top:6px;padding:0 2px}
+
+.side-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+.side-head h2{font-size:15px;font-weight:700;margin:0}
+.side-head a{font-size:12px;text-decoration:none}
+.session-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:15px}
+.session-list li{display:flex;gap:10px;align-items:flex-start}
+.s-badge{width:30px;height:30px;border-radius:9px;flex-shrink:0;display:flex;align-items:center;justify-content:center;
+  font-size:13px;color:#fff}
+.session-list .body{flex:1;min-width:0}
+.session-list strong{display:block;font-size:13px;font-weight:600}
+.session-list strong a{color:var(--text-0);text-decoration:none}
+.session-list strong a:hover,.session-list strong a:focus-visible{color:var(--violet-2)}
+.session-list p{margin:3px 0 0;font-size:11.5px;color:var(--text-2);line-height:1.5}
+.session-list .tag-feeds{display:inline-block;margin-top:6px;font:700 10px var(--mono);color:var(--violet-2);
+  background:rgba(124,58,237,.14);padding:2px 8px;border-radius:999px}
+.session-list .dot{width:7px;height:7px;border-radius:50%;margin-top:6px;flex-shrink:0;background:var(--green-tint)}
+
+/* mini cards */
+.mini-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:30px}
+.mini-card{background:var(--card-bg);border:1px solid var(--border);border-radius:var(--r-m);padding:15px 17px}
+.mini-head{display:flex;justify-content:space-between;align-items:baseline;font-size:12px;color:var(--text-2);margin-bottom:11px}
+.mini-val{font-size:14.5px;font-weight:700;color:var(--text-0)}
+.mini-bars{display:flex;align-items:flex-end;gap:5px;height:34px}
+.mini-bars i{flex:1;display:block;border-radius:3px 3px 1px 1px;background:linear-gradient(180deg,var(--violet-2),var(--violet))}
+.mini-dots{display:flex;align-items:center;gap:7px;height:34px}
+.mini-dots span{width:11px;height:11px;border-radius:50%;flex-shrink:0;border:1.5px solid var(--border-strong)}
+.mini-dots span.on{background:var(--green-tint);border-color:var(--green-tint)}
+
+/* months */
+section.months{padding:4px 32px 8px}
+.section-title{font-size:16px;font-weight:700;color:var(--text-0);margin:10px 0 14px}
+details.month-card{background:var(--card-bg);border:1px solid var(--border);border-radius:var(--r-l);
+  margin-bottom:14px;overflow:hidden;scroll-margin-top:86px}
+details.month-card[open]{border-color:var(--border-strong)}
+summary.m-head{list-style:none;cursor:pointer;padding:16px 20px;display:flex;align-items:center;gap:14px}
+summary.m-head::-webkit-details-marker{display:none}
+summary.m-head .idx-badge{width:34px;height:34px;border-radius:10px;flex-shrink:0;display:flex;align-items:center;
+  justify-content:center;color:#fff;font:700 13px var(--mono)}
+summary.m-head .ti{flex:1;min-width:0}
+summary.m-head h3{font-size:15.5px;font-weight:700;margin:0 0 2px;color:var(--text-0)}
+summary.m-head .range{font-size:12px;color:var(--text-2)}
+summary.m-head .car{color:var(--text-2);transition:transform .15s;flex-shrink:0}
+details.month-card[open] summary.m-head .car{transform:rotate(90deg)}
+.m-body{padding:0 20px 22px;border-top:1px solid var(--border);color:var(--text-1)}
+.m-body .focus{margin:17px 0 19px;max-width:620px}
+.m-body .focus p.h{margin:0 0 8px;font-size:12.5px;font-weight:600;color:var(--text-2)}
+.m-body .focus ul{margin:0;padding-left:18px;font-size:14px}
+.m-body .focus li{margin:3px 0}
+.block{margin:0 0 19px}
+.block > p.h{margin:0 0 9px;font-size:12.5px;font-weight:600;color:var(--text-2)}
+.wk{display:grid;grid-template-columns:auto auto 1fr;gap:3px 10px;align-items:baseline;margin:0 0 9px;font-size:13.5px;max-width:650px}
+.wk .w{font:700 11px var(--mono);color:var(--text-2)}
+.item-row{display:flex;gap:10px;align-items:flex-start;margin:7px 0;font-size:14px;max-width:650px}
+.item-row .mark{margin-top:2px}
+.exit{border-left:2px solid var(--border-strong);padding-left:13px}
+.scope{font-size:13px;color:var(--text-1);background:var(--card-bg-2);border:1px solid var(--border);
+  border-radius:var(--r-s);padding:11px 14px;margin:0 0 19px;max-width:620px}
+.scope b{color:var(--text-0);font-weight:600}
+.aipractice{font-size:13px;color:var(--text-2);border-top:1px solid var(--border);padding-top:14px;margin:4px 0 0;max-width:620px}
+.aipractice b{color:var(--text-0);font-weight:600}
+
+/* finish line */
+.finish-card{margin:6px 32px 0;background:var(--card-bg);border:1px solid var(--border);border-radius:var(--r-l);
+  padding:24px 26px;box-shadow:0 10px 26px rgba(0,0,0,.28)}
+.finish-card h2{font-size:16px;font-weight:700;margin:0 0 4px}
+.finish-card p.lede{margin:0 0 16px}
+.finish-card .item-row{max-width:none}
+
+footer.page-foot{margin:26px 32px 36px;font-size:12px;color:var(--text-2);border-top:1px solid var(--border);padding-top:16px;max-width:680px}
+footer.page-foot a{color:var(--text-1)}
+
+/* responsive */
+@media (max-width:980px){
+  .app-shell{margin:0;border-radius:0;min-height:100vh}
+  .stat-grid{grid-template-columns:repeat(2,1fr)}
+  .panel-row{grid-template-columns:1fr}
+  .mini-grid{grid-template-columns:1fr}
+}
+@media (max-width:760px){
+  .app-shell{flex-direction:column}
+  .sidebar{width:100%;flex-direction:row;align-items:center;overflow-x:auto;padding:14px 16px;gap:16px;
+    border-right:none;border-bottom:1px solid var(--border)}
+  nav.side-nav{flex-direction:row;gap:4px}
+  nav.side-nav .grp-label{display:none}
+  .sidebar-foot{display:none}
+  .topbar{padding:16px 18px}
+  .content,section.months{padding-left:18px;padding-right:18px}
+  .finish-card{margin-left:18px;margin-right:18px}
+  footer.page-foot{margin-left:18px;margin-right:18px}
+  .stat-grid{grid-template-columns:1fr 1fr}
+}
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="mark-logo">6M</span>
+      <div><strong>Backend Track</strong><span>Chương trình 6 tháng</span></div>
+    </div>
+    <nav class="side-nav" id="side-nav">
+      <a href="#overview" data-id="overview"><span class="dot"></span>Tổng quan</a>
+      <span class="grp-label">Kế hoạch theo tháng</span>
+      <a href="#m1" data-id="m1"><span class="dot"></span>01 &nbsp;Database</a>
+      <a href="#m2" data-id="m2"><span class="dot"></span>02 &nbsp;Architecture</a>
+      <a href="#m3" data-id="m3"><span class="dot"></span>03 &nbsp;Transactions</a>
+      <a href="#m4" data-id="m4"><span class="dot"></span>04 &nbsp;Production</a>
+      <a href="#m5" data-id="m5"><span class="dot"></span>05 &nbsp;System design</a>
+      <a href="#m6" data-id="m6"><span class="dot"></span>06 &nbsp;Capstone</a>
+      <span class="grp-label">Khác</span>
+      <a href="#sessions" data-id="sessions"><span class="dot"></span>Buổi học</a>
+      <a href="#finish" data-id="finish"><span class="dot"></span>Đích đến</a>
+    </nav>
+    <div class="sidebar-foot">
+      <a href=".claude/docs/ROADMAP.md">Xem ROADMAP.md</a>
+      <a href=".claude/docs/LEARNING_LOG.md">Xem LEARNING_LOG.md</a>
+    </div>
+  </aside>
+
+  <main>
+    <div class="topbar">
+      <div class="search">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" id="search" placeholder="Tìm tuần, sản phẩm bàn giao, tiêu chí hoàn thành…" autocomplete="off">
+      </div>
+      <div class="top-actions">
+        <span class="pill-static" id="pill-start">&ndash;</span>
+      </div>
+    </div>
+
+    <section id="overview" class="content">
+      <h1>Tổng quan chương trình</h1>
+      <p class="lede">Từ Database internals đến Capstone, xây qua các lab dùng-rồi-bỏ và các buổi review công việc thực tế. Đây là tình trạng kế hoạch tính đến hôm nay, <span id="lede-today">&ndash;</span>.</p>
+
+      <div class="stat-grid">
+        <div class="stat-card">
+          <span class="badge grad-c">⏱</span>
+          <span class="s-label">Ngày chương trình</span>
+          <span class="s-value" id="stat-day">&ndash;</span>
+          <span class="trend neutral" id="trend-day">&ndash;</span>
+        </div>
+        <div class="stat-card">
+          <span class="badge grad-b">▣</span>
+          <span class="s-label">Tuần hiện tại</span>
+          <span class="s-value" id="stat-week">&ndash;</span>
+          <span class="trend neutral" id="trend-week">&ndash;</span>
+        </div>
+        <div class="stat-card">
+          <span class="badge grad-a">✓</span>
+          <span class="s-label">Sản phẩm đã ghi nhận</span>
+          <span class="s-value" id="stat-deliv">&ndash;</span>
+          <span class="trend neutral" id="trend-deliv">&ndash;</span>
+        </div>
+        <div class="stat-card">
+          <span class="badge grad-d">◆</span>
+          <span class="s-label">Buổi học đã hoàn tất</span>
+          <span class="s-value" id="stat-sessions">&ndash;</span>
+          <span class="trend neutral" id="trend-sessions">&ndash;</span>
+        </div>
+      </div>
+
+      <div class="panel-row">
+        <div class="chart-card">
+          <div class="chart-head">
+            <div><h2>Tiến trình chương trình</h2><p>Sản phẩm bàn giao: kế hoạch so với thực tế, 10/2026 đến 4/2027</p></div>
+            <div class="legend"><span><span class="ld planned"></span>Kế hoạch</span><span><span class="ld logged"></span>Đã ghi nhận</span></div>
+          </div>
+          <svg id="chart" viewBox="-34 -8 646 190" preserveAspectRatio="none" role="img" aria-label="Số sản phẩm bàn giao cộng dồn: đường kế hoạch so với đường đã ghi nhận, kèm vạch đánh dấu hôm nay.">
+            <defs>
+              <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#A78BFA" stop-opacity=".35"/>
+                <stop offset="100%" stop-color="#A78BFA" stop-opacity="0"/>
+              </linearGradient>
+            </defs>
+            <g id="chart-grid" stroke="rgba(255,255,255,.08)" stroke-width="1"></g>
+            <g id="chart-yaxis" fill="var(--text-2)" font-size="10" font-family="Inter,sans-serif" text-anchor="end"></g>
+            <path id="chart-area" fill="url(#areaGrad)"/>
+            <path id="chart-planned" fill="none" stroke="#A78BFA" stroke-width="2.5" stroke-linejoin="round"/>
+            <path id="chart-logged" fill="none" stroke="#F472B6" stroke-width="2" stroke-dasharray="5 4"/>
+            <g id="chart-dots" fill="#A78BFA"></g>
+            <g id="chart-today"></g>
+          </svg>
+          <div class="chart-axis" id="chart-axis"></div>
+        </div>
+
+        <div class="side-card" id="sessions">
+          <div class="side-head"><h2>Buổi học</h2><a href=".claude/docs/LEARNING_LOG.md">Xem nhật ký</a></div>
+          <ul class="session-list" id="session-list"></ul>
+        </div>
+      </div>
+
+      <div class="mini-grid">
+        <div class="mini-card">
+          <div class="mini-head"><span>Số tuần đã lên lịch</span><span class="mini-val" id="mini-weeks-val">&ndash;</span></div>
+          <div class="mini-bars" id="mini-weeks"></div>
+        </div>
+        <div class="mini-card">
+          <div class="mini-head"><span>Sản phẩm / tháng</span><span class="mini-val" id="mini-deliv-val">&ndash;</span></div>
+          <div class="mini-bars" id="mini-deliv"></div>
+        </div>
+        <div class="mini-card">
+          <div class="mini-head"><span>Số tháng có tiêu chí hoàn thành</span><span class="mini-val" id="mini-exit-val">&ndash;</span></div>
+          <div class="mini-dots" id="mini-exit"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="months">
+      <h2 class="section-title">Kế hoạch theo tháng</h2>
+
+      <details class="month-card" id="m1" open>
+        <summary class="m-head">
+          <span class="idx-badge grad-b">01</span>
+          <span class="ti"><h3>Database internals và tối ưu query</h3><span class="range">&ndash;</span></span>
+          <span class="mark not-started" data-kind="month">[ ]</span>
+          <span class="car">▸</span>
+        </summary>
+        <div class="m-body">
+          <div class="focus">
+            <p class="h">Trọng tâm</p>
+            <ul>
+              <li>Cách InnoDB lưu trữ và hành vi của B+ tree</li>
+              <li>Clustered index so với secondary index</li>
+              <li>Composite index và query plan</li>
+              <li>Đánh đổi giữa đọc và ghi của index</li>
+              <li>Transactions và kiến thức nền về isolation</li>
+            </ul>
+          </div>
+          <div class="block">
+            <p class="h">Kế hoạch theo tuần</p>
+            <div class="wk"><span class="mark not-started" data-kind="week">[ ]</span><span class="w">Tuần 1</span><span>Baseline và dựng lab &mdash; đánh giá baseline của database, MySQL 8.4 chạy trong Docker với performance_schema và sys schema, một bộ sinh dữ liệu 5&ndash;10 triệu dòng, một bộ đo latency/throughput có thể lặp lại. Chủ đề: InnoDB page, cấu trúc B+ tree, clustered index.</span></div>
+            <div class="wk"><span class="mark not-started" data-kind="week">[ ]</span><span class="w">Tuần 2</span><span>Đọc dữ liệu &mdash; tra cứu qua secondary index và lượt tra cứu clustered index phát sinh thêm, composite index và leftmost prefix, covering index, điều kiện range, cardinality và histogram, EXPLAIN và EXPLAIN ANALYZE.</span></div>
+            <div class="wk"><span class="mark not-started" data-kind="week">[ ]</span><span class="w">Tuần 3</span><span>Ghi dữ liệu &mdash; bảo trì index khi insert/update/delete, page split, change buffer, primary key tuần tự so với ngẫu nhiên (auto-increment so với UUIDv4 so với UUIDv7), đo throughput khi insert và dung lượng lưu trữ ở 0/2/5/8 secondary index.</span></div>
+            <div class="wk"><span class="mark not-started" data-kind="week">[ ]</span><span class="w">Tuần 4</span><span>Transactions &mdash; MVCC và read view, các isolation level (mặc định REPEATABLE READ), consistent read so với locking read, record/gap/next-key lock, tự tái hiện một lost update và một deadlock. Chốt lại cuối tháng.</span></div>
+          </div>
+          <div class="block">
+            <p class="h">Sản phẩm bàn giao</p>
+            <div class="item-row"><span class="mark not-started" data-kind="deliv">[ ]</span><span>Thí nghiệm SQL có thể lặp lại (script được commit, dự đoán được viết trước khi chạy)</span></div>
+            <div class="item-row"><span class="mark not-started" data-kind="deliv">[ ]</span><span>So sánh các query plan</span></div>
+            <div class="item-row"><span class="mark not-started" data-kind="deliv">[ ]</span><span>Một case study thiết kế index dựa trên một query chậm thực tế ở công việc (đã ẩn danh)</span></div>
+            <div class="item-row"><span class="mark not-started" data-kind="deliv">[ ]</span><span>Một ghi chú kỹ thuật giải thích hành vi quan sát được và ảnh hưởng khi lên production</span></div>
+          </div>
+          <div class="block">
+            <p class="h">Tiêu chí hoàn thành</p>
+            <div class="item-row exit"><span class="mark not-started" data-kind="exit">[ ]</span><span>Với một table, workload và query chưa từng thấy, dự đoán được plan và chi phí khi thêm index, sau đó xác nhận hoặc giải thích chênh lệch bằng số đo thực tế (các chủ đề index của Track A ở Cấp độ 3).</span></div>
+          </div>
+          <p class="aipractice"><b>Thực hành AI.</b> Dùng AI như một trợ lý nghiên cứu về hành vi của InnoDB, sau đó kiểm chứng từng khẳng định với tài liệu tham khảo MySQL 8.4 hoặc bằng thí nghiệm; ghi lại bất kỳ khẳng định nào của AI mà sau này hoá ra sai.</p>
+        </div>
+      </details>
+
+      <details class="month-card" id="m2">
+        <summary class="m-head">
+          <span class="idx-badge grad-c">02</span>
+          <span class="ti"><h3>Backend Architecture và testing</h3><span class="range">&ndash;</span></span>
+          <span class="mark not-started" data-kind="month">[ ]</span>
+          <span class="car">▸</span>
+        </summary>
+        <div class="m-body">
+          <div class="focus">
+            <p class="h">Trọng tâm</p>
+            <ul>
+              <li>Thiết kế với TypeScript và NestJS</li>
+              <li>API contract và ranh giới domain</li>
+              <li>Tích hợp Database</li>
+              <li>Xử lý lỗi và validation</li>
+              <li>Integration testing và chiến lược test</li>
+            </ul>
+          </div>
+          <p class="scope"><b>Phạm vi thực hành.</b> Một lab dùng-rồi-bỏ, dựng riêng cho bài tập tháng này rồi xoá sau khi xong &mdash; chỉ cần một domain nhỏ có invariant thật (ví dụ một ledger gồm account, entry và balance, trong đó tiền được lưu dưới dạng integer minor unit hoặc DECIMAL chứ không bao giờ dùng floating point, và việc cập nhật balance chạy trong database transaction, theo đúng Tuần 4 của Tháng 1). Chọn một domain có ít nhất một invariant thật sự khó giữ đúng khi có concurrency; trọng tâm là invariant đó, không phải số lượng tính năng. Song song đó, codebase thật ở công việc là đối tượng để review và phân tích ranh giới.</p>
+          <div class="block">
+            <p class="h">Sản phẩm bàn giao</p>
+            <div class="item-row"><span class="mark not-started" data-kind="deliv">[ ]</span><span>Một lab service hiện thực một domain với các invariant rõ ràng, chia theo controller/service/repository với ranh giới module có chủ đích</span></div>
+            <div class="item-row"><span class="mark not-started" data-kind="deliv">[ ]</span><span>Một đặc tả business rule và API rõ ràng cho lab đó, nêu rõ từng invariant được enforce ở đâu</span></div>
+            <div class="item-row"><span class="mark not-started" data-kind="deliv">[ ]</span><span>Automated test bao phủ các case thành công, thất bại và biên, chạy trên một MySQL instance thật trong CI</span></div>
+            <div class="item-row"><span class="mark not-started" data-kind="deliv">[ ]</span><span>Một bản review bằng văn bản cho một module thật ở công việc: business rule nằm ở đâu, ranh giới nào đang bị rò, và sẽ thay đổi gì</span></div>
+          </div>
+          <div class="block">
+            <p class="h">Tiêu chí hoàn thành</p>
+            <div class="item-row exit"><span class="mark not-started" data-kind="exit">[ ]</span><span>Giải thích được từng business rule được enforce ở đâu và vì sao, đồng thời test phải bắt được một vi phạm invariant được cố tình đưa vào.</span></div>
+          </div>
+          <p class="aipractice"><b>Thực hành AI.</b> Viết một file hướng dẫn project (CLAUDE.md) cho lab, tách rõ business rule khỏi quy ước kỹ thuật; dùng AI để soạn một implementation plan, sau đó tự phản biện trước khi code.</p>
+        </div>
+      </details>
+
+      <details class="month-card" id="m3">
+        <summary class="m-head">
+          <span class="idx-badge grad-a">03</span>
+          <span class="ti"><h3>Transactions và xử lý bất đồng bộ đáng tin cậy</h3><span class="range">&ndash;</span></span>
+          <span class="mark not-started" data-kind="month">[ ]</span>
+          <span class="car">▸</span>
+        </summary>
+        <div class="m-body">
+          <div class="focus">
+            <p class="h">Trọng tâm</p>
+            <ul>
+              <li>Tính đúng đắn của transaction</li>
+              <li>Concurrency và locking</li>
+              <li>Idempotency</li>
+              <li>Background worker và retry</li>
+              <li>Sự kiện trùng lặp và lỗi một phần (partial failure)</li>
+              <li>Transactional outbox</li>
+            </ul>
+          </div>
+          <p class="scope"><b>Phạm vi thực hành.</b> Một lab batch-import &mdash; upload CSV, parse, chuẩn hoá, loại trùng, ghi các dòng ảnh hưởng đến một tổng đang chạy (running total). Xây trên lab service của Tháng 2, hoặc làm độc lập nếu lab đó đã bị xoá. Chỉ chuyển sang background worker (BullMQ) khi bản chạy đồng bộ thật sự cho thấy cần thiết. Đối tượng chính là các failure mode, không phải domain.</p>
+          <div class="block">
+            <p class="h">Sản phẩm bàn giao</p>
+            <div class="item-row"><span class="mark not-started" data-kind="deliv">[ ]</span><span>Một workflow xử lý nền (background)</span></div>
+            <div class="item-row"><span class="mark not-started" data-kind="deliv">[ ]</span><span>Automated test cho việc xử lý trùng lặp và hành vi retry</span></div>
+            <div class="item-row"><span class="mark not-started" data-kind="deliv">[ ]</span><span>Một chiến lược khôi phục sau lỗi (failure-recovery) được viết thành tài liệu</span></div>
+            <div class="item-row"><span class="mark not-started" data-kind="deliv">[ ]</span><span>Một thí nghiệm concurrency có thể lặp lại (cập nhật balance đồng thời, so sánh ít nhất hai chiến lược concurrency-control)</span></div>
+          </div>
+          <div class="block">
+            <p class="h">Tiêu chí hoàn thành</p>
+            <div class="item-row exit"><span class="mark not-started" data-kind="exit">[ ]</span><span>Quá trình import vẫn đúng khi cùng một file được upload hai lần, khi một worker bị kill giữa chừng, và khi cùng một transaction đến đồng thời &mdash; được chứng minh bằng test, không phải bằng lập luận.</span></div>
+          </div>
+          <p class="aipractice"><b>Thực hành AI.</b> Nhờ AI review workflow import để tìm failure mode, sau đó so sánh kết quả của AI với danh sách tự làm; ghi lại những gì mỗi bên bỏ sót.</p>
+        </div>
+      </details>
+
+      <details class="month-card" id="m4">
+        <summary class="m-head">
+          <span class="idx-badge grad-d">04</span>
+          <span class="ti"><h3>Sẵn sàng production và observability</h3><span class="range" data-note="có thêm 1 tuần đệm cho Tết">&ndash;</span></span>
+          <span class="mark not-started" data-kind="month">[ ]</span>
+          <span class="car">▸</span>
+        </summary>
+        <div class="m-body">
+          <div class="focus">
+            <p class="h">Trọng tâm</p>
+            <ul>
+              <li>Docker và deployment</li>
+              <li>Quản lý tài nguyên và hành vi runtime của Node.js</li>
+              <li>Logging, metrics và tracing</li>
+              <li>Chẩn đoán performance (load testing, profiling, flame graph)</li>
+              <li>Timeout, circuit breaker, graceful shutdown</li>
+              <li>Bảo mật và khả năng chống chịu khi vận hành (resilience)</li>
+            </ul>
+          </div>
+          <div class="block">
+            <p class="h">Sản phẩm bàn giao</p>
+            <div class="item-row"><span class="mark not-started" data-kind="deliv">[ ]</span><span>Một ứng dụng có thể deploy (Docker image multi-stage, chạy non-root, có CI pipeline)</span></div>
+            <div class="item-row"><span class="mark not-started" data-kind="deliv">[ ]</span><span>Health check và telemetry vận hành hữu ích (structured log kèm correlation ID, RED metrics, trace)</span></div>
+            <div class="item-row"><span class="mark not-started" data-kind="deliv">[ ]</span><span>Một bài test performance có thể lặp lại, với một bottleneck đã được profile và một fix đã được đo đạc</span></div>
+            <div class="item-row"><span class="mark not-started" data-kind="deliv">[ ]</span><span>Một kịch bản mô phỏng incident (ví dụ một dependency chậm gây cascading failure) và một bản phân tích root-cause không quy trách nhiệm cá nhân (blameless)</span></div>
+          </div>
+          <div class="block">
+            <p class="h">Tiêu chí hoàn thành</p>
+            <div class="item-row exit"><span class="mark not-started" data-kind="exit">[ ]</span><span>Với một triệu chứng performance hoặc reliability chưa từng gặp, định vị được nguyên nhân bằng công cụ và giải thích được nó, thay vì đoán.</span></div>
+          </div>
+          <p class="aipractice"><b>Thực hành AI.</b> Dùng AI để điều tra một incident mô phỏng từ log và trace; tự nêu giả thuyết trước, sau đó xác nhận bằng bằng chứng.</p>
+        </div>
+      </details>
+
+      <details class="month-card" id="m5">
+        <summary class="m-head">
+          <span class="idx-badge grad-c">05</span>
+          <span class="ti"><h3>System design và các đánh đổi nâng cao</h3><span class="range">&ndash;</span></span>
+          <span class="mark not-started" data-kind="month">[ ]</span>
+          <span class="car">▸</span>
+        </summary>
+        <div class="m-body">
+          <div class="focus">
+            <p class="h">Trọng tâm</p>
+            <ul>
+              <li>Làm rõ yêu cầu</li>
+              <li>Ước lượng workload</li>
+              <li>Data modeling và ranh giới Architecture</li>
+              <li>Quyết định về caching và khả năng mở rộng (scalability)</li>
+              <li>Tính nhất quán phân tán (outbox, saga, CAP/PACELC) ở mức thiết kế</li>
+              <li>Đánh đổi giữa reliability, chi phí và bảo mật</li>
+            </ul>
+          </div>
+          <div class="block">
+            <p class="h">Sản phẩm bàn giao</p>
+            <div class="item-row"><span class="mark not-started" data-kind="deliv">[ ]</span><span>Một tài liệu System design cho một hệ thống thật ở công việc, giả định tải gấp 100&times; hiện tại</span></div>
+            <div class="item-row"><span class="mark not-started" data-kind="deliv">[ ]</span><span>Ít nhất hai phương án thiết kế thay thế, nêu rõ đánh đổi</span></div>
+            <div class="item-row"><span class="mark not-started" data-kind="deliv">[ ]</span><span>Một architecture decision record (ADR)</span></div>
+            <div class="item-row"><span class="mark not-started" data-kind="deliv">[ ]</span><span>Một buổi design review được thực hiện theo cách một senior engineer sẽ làm</span></div>
+            <div class="item-row"><span class="mark not-started" data-kind="deliv">[ ]</span><span>Bài tập thiết kế có tính giờ hàng tuần (45 phút mỗi lần, ít nhất 4 lần trong tháng)</span></div>
+          </div>
+          <div class="block">
+            <p class="h">Tiêu chí hoàn thành</p>
+            <div class="item-row exit"><span class="mark not-started" data-kind="exit">[ ]</span><span>Trong một bài tập có tính giờ với một bài toán chưa từng thấy, đưa ra được ước lượng, thiết kế và các đánh đổi đứng vững trước các câu hỏi đào sâu.</span></div>
+          </div>
+          <p class="aipractice"><b>Thực hành AI.</b> Dùng AI như một người review tài liệu thiết kế, đóng vai một senior engineer hay hoài nghi; tự quyết định chấp nhận nhận xét nào và ghi lại lý do.</p>
+        </div>
+      </details>
+
+      <details class="month-card" id="m6">
+        <summary class="m-head">
+          <span class="idx-badge grad-a">06</span>
+          <span class="ti"><h3>Capstone và đánh giá mức độ sẵn sàng</h3><span class="range">&ndash;</span></span>
+          <span class="mark not-started" data-kind="month">[ ]</span>
+          <span class="car">▸</span>
+        </summary>
+        <div class="m-body">
+          <div class="focus">
+            <p class="h">Trọng tâm</p>
+            <ul>
+              <li>Làm chủ end-to-end</li>
+              <li>Tự ra quyết định kỹ thuật độc lập</li>
+              <li>Triển khai hướng tới production</li>
+              <li>Kiểm chứng performance và reliability</li>
+              <li>Giao tiếp kỹ thuật, kể cả bằng tiếng Anh</li>
+              <li>Sẵn sàng cho phỏng vấn</li>
+            </ul>
+          </div>
+          <div class="block">
+            <p class="h">Sản phẩm bàn giao</p>
+            <div class="item-row"><span class="mark not-started" data-kind="deliv">[ ]</span><span>Một năng lực backend hoàn chỉnh, có thể trình diễn, làm chủ end-to-end (mặc định: pipeline import của Tháng 3 được mở rộng để resumable, observable và đã load-test). Một tính năng mình sở hữu ở công việc cũng tính, nếu có thể công bố một bản tường thuật đã ẩn danh</span></div>
+            <div class="item-row"><span class="mark not-started" data-kind="deliv">[ ]</span><span>Một tài liệu Architecture ngắn gọn</span></div>
+            <div class="item-row"><span class="mark not-started" data-kind="deliv">[ ]</span><span>Bằng chứng automated test và tài liệu vận hành</span></div>
+            <div class="item-row"><span class="mark not-started" data-kind="deliv">[ ]</span><span>Một bản retrospective nêu sai lầm, đánh đổi và cải tiến</span></div>
+            <div class="item-row"><span class="mark not-started" data-kind="deliv">[ ]</span><span>Chuẩn bị phỏng vấn: hai buổi mock phỏng vấn System design, một ngân hàng câu hỏi kỹ thuật chuyên sâu từ ghi chú của chính mình, năm câu chuyện STAR từ công việc thật</span></div>
+            <div class="item-row"><span class="mark not-started" data-kind="deliv">[ ]</span><span>Một đánh giá năng lực cuối cùng, so với baseline ban đầu</span></div>
+          </div>
+          <p class="aipractice"><b>Thực hành AI.</b> Xây một skill hoặc workflow có thể tái sử dụng, thực sự dùng ít nhất ba lần trong suốt chương trình, và đánh giá xem nó có tiết kiệm thời gian không.</p>
+        </div>
+      </details>
+    </section>
+
+    <section id="finish" class="finish-card">
+      <h2>Đích đến</h2>
+      <p class="lede">Mục tiêu cấp độ sau sáu tháng, nhắc lại ở đây để roadmap tự nêu rõ đích đến của chính nó.</p>
+      <div class="item-row"><span class="mark not-started" data-kind="target">[ ]</span><span>Cấp độ 3 ở Track A (database), transactions/concurrency, và xử lý async có idempotent</span></div>
+      <div class="item-row"><span class="mark not-started" data-kind="target">[ ]</span><span>Cấp độ 3 ở ít nhất hai trong số: observability, chẩn đoán performance, System design</span></div>
+      <div class="item-row"><span class="mark not-started" data-kind="target">[ ]</span><span>Tối thiểu Cấp độ 2 ở mọi mảng còn lại trong bảng baseline, không mảng nào còn ở Cấp độ 0</span></div>
+      <div class="item-row"><span class="mark not-started" data-kind="target">[ ]</span><span>Cấp độ 4 ở ít nhất một chủ đề, được chứng minh trên một bài toán thật ở công việc</span></div>
+    </section>
+
+    <footer class="page-foot">
+      Trang này hiển thị nội dung từ <a href=".claude/docs/ROADMAP.md">ROADMAP.md</a>. Các track trong chương trình nằm ở <a href=".claude/docs/TECHNICAL_GROWTH.md">TECHNICAL_GROWTH.md</a>, bằng chứng nằm ở <a href=".claude/docs/LEARNING_LOG.md">LEARNING_LOG.md</a>. Sửa file markdown rồi tạo lại trang này &mdash; đây chỉ là một cách hiển thị, không phải nguồn dữ liệu gốc.
+    </footer>
+  </main>
+
+</div>
+
+<!-- progress:begin — generated by .claude/scripts/progress.py, do not edit -->
+<script id="progress-data" type="application/json">
+{
+  "generated_at": "2026-10-14",
+  "program": {
+    "start": "2026-10-19",
+    "end": "2027-04-18",
+    "weeks": 26,
+    "days": 182
+  },
+  "months": [
+    {
+      "n": 1,
+      "title": "Database Internals and Query Optimization",
+      "status": " ",
+      "start": "2026-10-19",
+      "end": "2026-11-15",
+      "weeks_planned": 4,
+      "weeks": [
+        {
+          "n": 1,
+          "status": " ",
+          "start": "2026-10-19",
+          "end": "2026-10-25",
+          "title": "Baseline and lab setup: database baseline assessment (TECHNICAL_GROWTH.md Section 11); MySQL 8.4 in Docker with performance_schema and sys schema enabled; a data generator for 5–10M rows; a repeatable way to measure query latency and insert throughput. Topic: InnoDB pages, B+ tree structure, clustered index."
+        },
+        {
+          "n": 2,
+          "status": " ",
+          "start": "2026-10-26",
+          "end": "2026-11-01",
+          "title": "Reads: secondary index lookups and the extra clustered-index lookup, composite indexes and leftmost prefix, covering indexes, range conditions, cardinality and histograms, EXPLAIN and EXPLAIN ANALYZE."
+        },
+        {
+          "n": 3,
+          "status": " ",
+          "start": "2026-11-02",
+          "end": "2026-11-08",
+          "title": "Writes: index maintenance on insert/update/delete, page splits, change buffer, sequential vs random primary keys (auto-increment vs UUIDv4 vs UUIDv7), measuring insert throughput and storage with 0, 2, 5, and 8 secondary indexes."
+        },
+        {
+          "n": 4,
+          "status": " ",
+          "start": "2026-11-09",
+          "end": "2026-11-15",
+          "title": "Transactions: MVCC and read views, isolation levels with REPEATABLE READ as default, consistent vs locking reads, record/gap/next-key locks, reproducing a lost update and a deadlock by hand. Monthly checkpoint."
+        }
+      ],
+      "deliverables": [
+        {
+          "status": " ",
+          "text": "Reproducible SQL experiments (scripts committed, with predictions written before running)."
+        },
+        {
+          "status": " ",
+          "text": "Query-plan comparisons."
+        },
+        {
+          "status": " ",
+          "text": "An index-design case study based on a real slow query from my job (anonymized)."
+        },
+        {
+          "status": " ",
+          "text": "A technical note explaining the observed behavior and production implications."
+        }
+      ],
+      "deliverables_done": 0,
+      "exit": {
+        "status": " ",
+        "text": "given an unseen table, workload, and query, I can predict the plan and the cost of adding an index, then confirm or explain the discrepancy with measurements (Track A index topics at Level 3)."
+      }
+    },
+    {
+      "n": 2,
+      "title": "Backend Architecture and Testing",
+      "status": " ",
+      "start": "2026-11-16",
+      "end": "2026-12-13",
+      "weeks_planned": 4,
+      "weeks": [],
+      "deliverables": [
+        {
+          "status": " ",
+          "text": "A lab service implementing one domain with explicit invariants, structured into controller/service/repository with deliberate module boundaries."
+        },
+        {
+          "status": " ",
+          "text": "An explicit business-rule and API specification for it, naming where each invariant is enforced."
+        },
+        {
+          "status": " ",
+          "text": "Automated tests covering success, failure, and boundary cases, running against a real MySQL instance in CI."
+        },
+        {
+          "status": " ",
+          "text": "A written review of one real module at work: where its business rules live, which boundaries leak, and what I would change."
+        }
+      ],
+      "deliverables_done": 0,
+      "exit": {
+        "status": " ",
+        "text": "I can explain where each business rule is enforced and why, and my tests catch a deliberately introduced invariant violation."
+      }
+    },
+    {
+      "n": 3,
+      "title": "Transactions and Reliable Asynchronous Processing",
+      "status": " ",
+      "start": "2026-12-14",
+      "end": "2027-01-10",
+      "weeks_planned": 4,
+      "weeks": [],
+      "deliverables": [
+        {
+          "status": " ",
+          "text": "A background processing workflow."
+        },
+        {
+          "status": " ",
+          "text": "Automated tests for duplicate processing and retry behavior."
+        },
+        {
+          "status": " ",
+          "text": "A documented failure-recovery strategy."
+        },
+        {
+          "status": " ",
+          "text": "A reproducible concurrency experiment (concurrent balance updates with at least two concurrency-control strategies compared)."
+        }
+      ],
+      "deliverables_done": 0,
+      "exit": {
+        "status": " ",
+        "text": "the import stays correct when the same file is uploaded twice, when a worker is killed mid-run, and when the same transaction arrives concurrently — demonstrated by tests, not by argument."
+      }
+    },
+    {
+      "n": 4,
+      "title": "Production Readiness and Observability",
+      "status": " ",
+      "start": "2027-01-11",
+      "end": "2027-02-14",
+      "weeks_planned": 5,
+      "weeks": [],
+      "deliverables": [
+        {
+          "status": " ",
+          "text": "A deployable application (multi-stage Docker image, non-root, CI pipeline)."
+        },
+        {
+          "status": " ",
+          "text": "Health checks and useful operational telemetry (structured logs with correlation IDs, RED metrics, traces)."
+        },
+        {
+          "status": " ",
+          "text": "A reproducible performance test with a profiled bottleneck and a measured fix."
+        },
+        {
+          "status": " ",
+          "text": "An incident simulation (for example, a slow dependency causing cascading failure) and a blameless root-cause analysis."
+        }
+      ],
+      "deliverables_done": 0,
+      "exit": {
+        "status": " ",
+        "text": "given a performance or reliability symptom I have not seen before, I can locate the cause with tools and explain it, rather than guess."
+      }
+    },
+    {
+      "n": 5,
+      "title": "System Design and Advanced Trade-offs",
+      "status": " ",
+      "start": "2027-02-15",
+      "end": "2027-03-14",
+      "weeks_planned": 4,
+      "weeks": [],
+      "deliverables": [
+        {
+          "status": " ",
+          "text": "A system design document for a real system from my job, taken at 100× its current load."
+        },
+        {
+          "status": " ",
+          "text": "At least two alternative designs with explicit trade-offs."
+        },
+        {
+          "status": " ",
+          "text": "An architecture decision record."
+        },
+        {
+          "status": " ",
+          "text": "A design review conducted as a Senior Engineer would conduct it."
+        },
+        {
+          "status": " ",
+          "text": "Weekly timed design exercises (45 minutes each, at least four in the month)."
+        }
+      ],
+      "deliverables_done": 0,
+      "exit": {
+        "status": " ",
+        "text": "in a timed exercise on an unseen problem, I produce estimates, a design, and trade-offs that hold up to follow-up questions."
+      }
+    },
+    {
+      "n": 6,
+      "title": "Capstone and Readiness Assessment",
+      "status": " ",
+      "start": "2027-03-15",
+      "end": "2027-04-18",
+      "weeks_planned": 5,
+      "weeks": [],
+      "deliverables": [
+        {
+          "status": " ",
+          "text": "A completed, demonstrable backend capability, owned end to end (default: the Month 3 import pipeline extended to be resumable, observable, and load-tested). A feature I own at work counts, if I can publish an anonymized account of it."
+        },
+        {
+          "status": " ",
+          "text": "A concise architecture document."
+        },
+        {
+          "status": " ",
+          "text": "Automated test evidence and operational documentation."
+        },
+        {
+          "status": " ",
+          "text": "A retrospective covering mistakes, trade-offs, and improvements."
+        },
+        {
+          "status": " ",
+          "text": "Interview preparation: two mock system design interviews, a bank of deep technical questions drawn from my own notes, and five STAR stories from real work."
+        },
+        {
+          "status": " ",
+          "text": "A final competency assessment against the initial baseline."
+        }
+      ],
+      "deliverables_done": 0,
+      "exit": null
+    }
+  ],
+  "deliverables": {
+    "done": 0,
+    "total": 27
+  },
+  "sessions": [
+    {
+      "date": "2026-10-14",
+      "title": "B+tree index internals",
+      "artifact": "../topics/btree-index-internals/index.html",
+      "planned": false,
+      "feeds": "Month 1, Weeks 1–2"
+    }
+  ],
+  "unplanned": [
+    {
+      "date": "2026-10-14",
+      "work": "B+tree index internals (structure, split, slotted page, buffer pool, covering index, heap/MVCC) — conceptual only, no measurements; PostgreSQL-shaped, see open question 1",
+      "artifact": "topics/btree-index-internals",
+      "feeds": "Month 1, Weeks 1–2"
+    }
+  ],
+  "targets": {
+    "done": 0,
+    "total": 4,
+    "items": [
+      {
+        "status": " ",
+        "text": "Level 3 in Track A (database), transactions/concurrency, and idempotent async processing."
+      },
+      {
+        "status": " ",
+        "text": "Level 3 in at least two of: observability, performance diagnosis, system design."
+      },
+      {
+        "status": " ",
+        "text": "Level 2 minimum in every other area of the baseline table, with no area left at Level 0."
+      },
+      {
+        "status": " ",
+        "text": "Level 4 in at least one topic, demonstrated on a real problem from my job."
+      }
+    ]
+  },
+  "competency": {
+    "rows": [
+      {
+        "topic": "B+tree structure, fan-out, tree height",
+        "level": 2,
+        "provisional": true,
+        "evidence": "btree-index-internals §02",
+        "date": "2026-10-14"
+      },
+      {
+        "topic": "Page layout (slotted page, line pointers)",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §04",
+        "date": "2026-10-14"
+      },
+      {
+        "topic": "Split mechanics (leaf vs internal, rightmost split, fillfactor)",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §03",
+        "date": "2026-10-14"
+      },
+      {
+        "topic": "Buffer pool and eviction",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §05",
+        "date": "2026-10-14"
+      },
+      {
+        "topic": "Pin / latch / lock distinction",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §05",
+        "date": "2026-10-14"
+      },
+      {
+        "topic": "WAL ordering (WAL before data page)",
+        "level": 1,
+        "provisional": false,
+        "evidence": "same, §06",
+        "date": "2026-10-14"
+      },
+      {
+        "topic": "Reading EXPLAIN (ANALYZE, BUFFERS)",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §07",
+        "date": "2026-10-14"
+      },
+      {
+        "topic": "Covering index / Index Only Scan and its cost",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §08",
+        "date": "2026-10-14"
+      },
+      {
+        "topic": "TOAST and the real cost of SELECT *",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §08",
+        "date": "2026-10-14"
+      },
+      {
+        "topic": "Heap, TID, MVCC versions, HOT, bloat",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §09",
+        "date": "2026-10-14"
+      },
+      {
+        "topic": "InnoDB specifics (clustered index, secondary→PK lookup, undo log)",
+        "level": 1,
+        "provisional": false,
+        "evidence": "same, contrast boxes only",
+        "date": "2026-10-14"
+      }
+    ],
+    "levels": {
+      "2": 9,
+      "1": 2
+    }
+  }
+}
+</script>
+<!-- progress:end -->
+
+<script>
+(function(){
+  // ---------------------------------------------------------------------
+  // Every mark, count and date below comes from the block above, which
+  // .claude/scripts/progress.py derives from .claude/docs/ROADMAP.md + .claude/docs/LEARNING_LOG.md.
+  // Nothing time-relative is stored there: the day count, the current week
+  // and the slippage are computed here against the clock, so they stay
+  // correct even if nobody re-ran the script. Edit the markdown, not this.
+  // ---------------------------------------------------------------------
+  var el = function(id){ return document.getElementById(id); };
+  var raw = el('progress-data');
+  var DATA = {};
+  try { DATA = JSON.parse(raw.textContent) || {}; } catch(e){ DATA = {}; }
+
+  var MARK_CLASS = {' ':'not-started','~':'progress','x':'done','!':'blocked'};
+  var MS_DAY = 86400000;
+
+  function date(s){ var p = String(s).split('-'); return new Date(+p[0], +p[1]-1, +p[2]); }
+  function today(){ var n = new Date(); return new Date(n.getFullYear(), n.getMonth(), n.getDate()); }
+  function days(a, b){ return Math.round((b - a) / MS_DAY); }
+  function dmy(d){ return ('0'+d.getDate()).slice(-2)+'/'+('0'+(d.getMonth()+1)).slice(-2)+'/'+d.getFullYear(); }
+  function dm(d){ return ('0'+d.getDate()).slice(-2)+'/'+('0'+(d.getMonth()+1)).slice(-2); }
+  function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
+  function plural(n, word){ return n + ' ' + word; }
+
+  if(!DATA.program){
+    document.body.insertAdjacentHTML('afterbegin',
+      '<div style="padding:12px 20px;background:rgba(244,63,94,.17);color:#fda4af;'+
+      'font:600 13px Inter,sans-serif">Chưa có dữ liệu tiến độ &mdash; chạy '+
+      '<code>python3 .claude/scripts/progress.py sync</code>.</div>');
+    return;
+  }
+
+  var NOW    = today();
+  var START  = date(DATA.program.start);
+  var END    = date(DATA.program.end);
+  var TOTAL  = DATA.program.days;
+  var WEEKS  = DATA.program.weeks;
+  var months = DATA.months || [];
+
+  // ---- where are we, in days and weeks --------------------------------
+  var dayIdx  = clamp(days(START, NOW) + 1, 0, TOTAL);   // 0 before the program opens
+  var weekIdx = NOW < START ? 0 : clamp(Math.floor(days(START, NOW) / 7) + 1, 1, WEEKS);
+  var curMonth = null, curWeek = null;
+  months.forEach(function(m){
+    if(!m.start || !m.end) return;
+    if(NOW >= date(m.start) && NOW <= date(m.end)){
+      curMonth = m;
+      (m.weeks || []).forEach(function(w){
+        if(NOW >= date(w.start) && NOW <= date(w.end)) curWeek = w;
+      });
+    }
+  });
+
+  el('lede-today').textContent = dmy(NOW);
+  el('pill-start').textContent = NOW < START
+    ? 'Bắt đầu ' + dmy(START) + ', còn ' + plural(days(NOW, START), 'ngày')
+    : (NOW > END ? 'Kết thúc ' + dmy(END) : 'Tuần ' + weekIdx + '/' + WEEKS + ' · đến ' + dmy(END));
+
+  el('stat-day').innerHTML = 'Ngày ' + dayIdx + '<small>&nbsp;/ ' + TOTAL + '</small>';
+  el('trend-day').textContent = NOW < START
+    ? 'bắt đầu sau ' + plural(days(NOW, START), 'ngày')
+    : (NOW > END ? 'chương trình đã kết thúc' : 'còn ' + plural(days(NOW, END), 'ngày'));
+
+  el('stat-week').innerHTML = (NOW < START ? '&ndash;' : weekIdx) + '<small>&nbsp;/ ' + WEEKS + '</small>';
+  el('trend-week').textContent = curMonth
+    ? 'Tháng ' + curMonth.n + (curWeek ? ' · tuần ' + curWeek.n + ' của tháng' : '')
+    : (NOW < START ? 'chưa bắt đầu' : 'ngoài lịch');
+
+  // ---- deliverables, against what the plan expected by now ------------
+  var deliv = DATA.deliverables || {done:0, total:0};
+  var expected = 0;
+  months.forEach(function(m){ if(m.end && NOW > date(m.end)) expected += (m.deliverables||[]).length; });
+  var gap = deliv.done - expected;
+  el('stat-deliv').innerHTML = deliv.done + '<small>&nbsp;/ ' + deliv.total + '</small>';
+  var td = el('trend-deliv');
+  td.textContent = NOW < START ? 'chưa bắt đầu'
+    : gap === 0 ? 'đúng tiến độ (' + expected + ' theo kế hoạch)'
+    : gap > 0 ? 'vượt ' + plural(gap, 'sản phẩm')
+    : 'chậm ' + plural(-gap, 'sản phẩm');
+  td.className = 'trend ' + (NOW < START || gap === 0 ? 'neutral' : gap > 0 ? 'positive' : 'negative');
+
+  // ---- sessions -------------------------------------------------------
+  var sessions = DATA.sessions || [];
+  el('stat-sessions').innerHTML = sessions.length + '<small>&nbsp;buổi</small>';
+  var ts = el('trend-sessions');
+  if(sessions.length){
+    var last = date(sessions[0].date), since = days(last, NOW);
+    ts.textContent = since === 0 ? 'ghi nhận hôm nay'
+      : 'gần nhất ' + dm(last) + ' · ' + plural(since, 'ngày') + ' trước';
+    ts.className = 'trend ' + (since > 14 ? 'negative' : 'neutral');
+  } else {
+    ts.textContent = 'chưa có buổi nào';
+  }
+
+  el('session-list').innerHTML = sessions.map(function(s){
+    var link = s.artifact
+      ? '<a href="' + s.artifact + '">' + s.title + '</a>'
+      : s.title;
+    return '<li><span class="s-badge grad-b">◆</span><div class="body">'
+      + '<strong>' + link + '</strong>'
+      + '<p>Ghi nhận ' + dmy(date(s.date)) + (s.planned ? '.' : ', ngoài kế hoạch chính thức.') + '</p>'
+      + (s.feeds ? '<span class="tag-feeds">bổ sung cho ' + s.feeds + '</span>' : '')
+      + '</div><span class="dot" data-kind="unplanned" data-done="1"></span></li>';
+  }).join('') || '<li><div class="body"><p>Chưa có buổi học nào trong nhật ký.</p></div></li>';
+
+  // ---- marks, month ranges -------------------------------------------
+  var mismatch = [];
+  function apply(node, status){
+    if(!node) return;
+    node.className = 'mark ' + MARK_CLASS[status];
+    node.textContent = '[' + status + ']';
+  }
+  months.forEach(function(m){
+    var card = el('m' + m.n);
+    if(!card) return;
+    apply(card.querySelector('[data-kind="month"]'), m.status);
+
+    var range = card.querySelector('.range');
+    if(range){
+      var note = range.getAttribute('data-note');
+      range.textContent = dm(date(m.start)) + '–' + dm(date(m.end))
+        + ' (' + plural(m.weeks_planned, 'tuần') + (note ? ', ' + note : '') + ')';
+    }
+
+    var pairs = [['week', m.weeks || []], ['deliv', m.deliverables || []]];
+    pairs.forEach(function(p){
+      var nodes = card.querySelectorAll('[data-kind="' + p[0] + '"]');
+      if(nodes.length !== p[1].length){
+        mismatch.push('Tháng ' + m.n + ': ' + nodes.length + ' dòng "' + p[0]
+          + '" trên trang nhưng ' + p[1].length + ' trong ROADMAP.md');
+      }
+      for(var i = 0; i < Math.min(nodes.length, p[1].length); i++) apply(nodes[i], p[1][i].status);
+    });
+    if(m.exit) apply(card.querySelector('[data-kind="exit"]'), m.exit.status);
+  });
+
+  var targets = (DATA.targets && DATA.targets.items) || [];
+  var tNodes = document.querySelectorAll('#finish [data-kind="target"]');
+  if(tNodes.length !== targets.length){
+    mismatch.push('Đích đến: ' + tNodes.length + ' dòng trên trang nhưng ' + targets.length + ' trong ROADMAP.md');
+  }
+  for(var i = 0; i < Math.min(tNodes.length, targets.length); i++) apply(tNodes[i], targets[i].status);
+
+  if(mismatch.length){
+    document.body.insertAdjacentHTML('afterbegin',
+      '<div style="padding:12px 20px;background:rgba(245,158,11,.16);color:#fcd34d;'+
+      'font:600 13px Inter,sans-serif">Trang này lệch với ROADMAP.md &mdash; '
+      + mismatch.join(' · ') + '</div>');
+  }
+
+  // ---- mini cards ------------------------------------------------------
+  function bars(host, values, label){
+    var max = Math.max.apply(null, values) || 1;
+    el(host).innerHTML = values.map(function(v, i){
+      return '<i style="height:' + (34 * v / max).toFixed(1) + 'px" title="Tháng '
+        + (i+1) + ': ' + v + ' ' + label + '"></i>';
+    }).join('');
+  }
+  var wkPer = months.map(function(m){ return m.weeks_planned; });
+  var dvPer = months.map(function(m){ return (m.deliverables || []).length; });
+  bars('mini-weeks', wkPer, 'tuần');
+  bars('mini-deliv', dvPer, 'sản phẩm');
+  el('mini-weeks-val').textContent = wkPer.reduce(function(a,b){ return a+b; }, 0);
+  el('mini-deliv-val').textContent = 'TB ' + (deliv.total / (months.length || 1)).toFixed(1);
+  var withExit = months.filter(function(m){ return !!m.exit; }).length;
+  el('mini-exit-val').textContent = withExit + ' / ' + months.length;
+  el('mini-exit').innerHTML = months.map(function(m){
+    return '<span class="' + (m.exit ? 'on' : '') + '" title="Tháng ' + m.n + ': '
+      + (m.exit ? 'có tiêu chí hoàn thành' : 'chưa nêu — chỉ có mục tiêu cấp độ sau 6 tháng')
+      + '"></span>';
+  }).join('');
+
+  // ---- timeline: planned vs logged, with a today marker ---------------
+  (function(){
+    var W = 600, H = 170, span = days(START, END) || 1;
+    var max = deliv.total || 1;
+    var X = function(d){ return clamp(days(START, d) / span * W, 0, W); };
+    var Y = function(v){ return H - (v / max) * H; };
+
+    var grid = '', lines = 4;
+    for(var g = 0; g <= lines; g++) {
+      var y = (H * g / lines).toFixed(1);
+      grid += '<line x1="0" y1="' + y + '" x2="' + W + '" y2="' + y + '"/>';
+    }
+    el('chart-grid').innerHTML = grid;
+    el('chart-yaxis').innerHTML =
+      '<text x="-10" y="' + (H + 3) + '">0</text>' +
+      '<text x="-10" y="' + (Y(max/2) + 4).toFixed(1) + '">' + Math.round(max/2) + '</text>' +
+      '<text x="-10" y="4">' + max + '</text>';
+
+    // planned: a step up at the end of each month
+    var planned = 'M0,' + H, dots = '<circle cx="0" cy="' + H + '" r="3"/>', run = 0;
+    months.forEach(function(m){
+      run += (m.deliverables || []).length;
+      var x = X(date(m.end)).toFixed(1), y = Y(run).toFixed(1);
+      planned += ' H' + x + ' V' + y;
+      dots += '<circle cx="' + x + '" cy="' + y + '" r="3"/>';
+    });
+    el('chart-planned').setAttribute('d', planned);
+    el('chart-area').setAttribute('d', planned + ' L' + W + ',' + H + ' L0,' + H + ' Z');
+    el('chart-dots').innerHTML = dots;
+
+    // logged: cumulative done, drawn only as far as today
+    var tx = X(NOW < START ? START : NOW);
+    var logged = 'M0,' + H, doneRun = 0;
+    months.forEach(function(m){
+      doneRun += m.deliverables_done || 0;
+      var x = X(date(m.end));
+      if(x <= tx) logged += ' H' + x.toFixed(1) + ' V' + Y(doneRun).toFixed(1);
+    });
+    logged += ' H' + tx.toFixed(1);
+    el('chart-logged').setAttribute('d', logged);
+
+    if(NOW >= START && NOW <= END){
+      el('chart-today').innerHTML =
+        '<line x1="' + tx.toFixed(1) + '" y1="-6" x2="' + tx.toFixed(1) + '" y2="' + H + '" '
+        + 'stroke="var(--text-2)" stroke-width="1" stroke-dasharray="3 3"/>'
+        + '<text x="' + (tx + 4).toFixed(1) + '" y="4" fill="var(--text-2)" font-size="9" '
+        + 'font-family="Inter,sans-serif">hôm nay</text>';
+    }
+
+    el('chart-axis').innerHTML = months.map(function(m){
+      return '<span>T' + (date(m.start).getMonth() + 1) + '</span>';
+    }).join('') + '<span>T' + (END.getMonth() + 1) + '</span>';
+  })();
+
+  // search / filter across weekly plan and deliverable rows
+  var cards = document.querySelectorAll('details.month-card');
+  var input = document.getElementById('search');
+  input.addEventListener('input', function(){
+    var q = input.value.trim().toLowerCase();
+    cards.forEach(function(card){
+      var anyMatch = false;
+      card.querySelectorAll('.wk, .item-row').forEach(function(row){
+        var match = !q || row.textContent.toLowerCase().indexOf(q) !== -1;
+        row.style.display = match ? '' : 'none';
+        if(match && q) anyMatch = true;
+      });
+      if(q){ card.open = anyMatch || card.open; }
+    });
+  });
+
+  // sidebar scroll-spy
+  var navLinks = document.querySelectorAll('#side-nav a');
+  var targets = Array.prototype.map.call(navLinks, function(a){ return document.getElementById(a.getAttribute('data-id')); }).filter(Boolean);
+  if('IntersectionObserver' in window){
+    var obs = new IntersectionObserver(function(entries){
+      entries.forEach(function(entry){
+        if(entry.isIntersecting){
+          var id = entry.target.id;
+          navLinks.forEach(function(a){ a.classList.toggle('active', a.getAttribute('data-id') === id); });
+        }
+      });
+    }, {rootMargin:'-20% 0px -70% 0px', threshold:0});
+    targets.forEach(function(t){ obs.observe(t); });
+  }
+
+  // clicking a nav link opens the target month card
+  navLinks.forEach(function(a){
+    a.addEventListener('click', function(){
+      var el = document.getElementById(a.getAttribute('data-id'));
+      if(el && el.tagName === 'DETAILS'){ el.open = true; }
+    });
+  });
+})();
+</script>
+</body>
+</html>

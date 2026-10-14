@@ -4,144 +4,230 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Deep Learning Notes</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
-    :root {
-      --bg: #f7f6f2; --card: #ffffff; --text: #1d1d1b; --muted: #6b6a65;
-      --border: #e4e2db; --accent: #2f6f5e; --accent-soft: #e6f0ec;
+    :root{
+      --bg-0:#0A0812;
+      --shell-bg:#0E0B16; --sidebar-bg:#110D1B;
+      --card-bg:#161220; --card-bg-2:#1C1729;
+      --border:rgba(255,255,255,.08); --border-strong:rgba(255,255,255,.16);
+      --text-0:#F3F1F7; --text-1:#B9B3C7; --text-2:#7D7791;
+      --violet:#7C3AED; --violet-2:#A78BFA;
+      --pink:#DB2777; --pink-2:#F472B6;
+      --blue:#3B82F6; --blue-2:#60A5FA;
+      --rose:#F43F5E; --rose-2:#FB7185;
+      --sans:"Inter",system-ui,sans-serif;
+      --r-l:18px; --r-m:12px; --r-s:9px;
     }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --bg: #161615; --card: #1f1f1d; --text: #ecebe6; --muted: #9a9890;
-        --border: #2e2e2b; --accent: #7cc2a9; --accent-soft: #1f2e28;
-      }
+    *{box-sizing:border-box}
+    html{scroll-behavior:smooth}
+    @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+    body{margin:0;color:var(--text-1);font:400 15px/1.6 var(--sans);
+      background-color:var(--bg-0);
+      background-image:
+        radial-gradient(900px 600px at -10% -10%, rgba(124,58,237,.30), transparent 60%),
+        radial-gradient(900px 700px at 110% 110%, rgba(219,39,119,.22), transparent 60%);
+      background-attachment:fixed}
+    a{color:var(--violet-2)}
+    :focus-visible{outline:2px solid var(--violet-2);outline-offset:2px}
+    h1{font-family:var(--sans);color:var(--text-0)}
+
+    .app-shell{max-width:1100px;margin:36px auto;min-height:calc(100vh - 72px);background:var(--shell-bg);
+      border:1px solid var(--border-strong);border-radius:28px;overflow:hidden;display:flex;
+      box-shadow:0 50px 140px rgba(124,58,237,.18), 0 20px 60px rgba(0,0,0,.55)}
+
+    .sidebar{width:232px;flex-shrink:0;background:var(--sidebar-bg);border-right:1px solid var(--border);
+      padding:26px 16px;display:flex;flex-direction:column;gap:26px}
+    .brand{display:flex;align-items:center;gap:10px;padding:0 6px}
+    .brand .mark-logo{width:34px;height:34px;border-radius:10px;flex-shrink:0;
+      background:linear-gradient(135deg,var(--violet),var(--pink));display:flex;align-items:center;justify-content:center;
+      color:#fff;font-weight:800;font-size:13px}
+    .brand strong{display:block;font-size:13.5px;color:var(--text-0);font-weight:700}
+    .brand span{display:block;font-size:11px;color:var(--text-2);margin-top:1px}
+    nav.side-nav{display:flex;flex-direction:column;gap:2px}
+    nav.side-nav a{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:var(--r-s);
+      color:var(--text-1);text-decoration:none;font-size:13px;font-weight:500;border:1px solid transparent}
+    nav.side-nav a .dot{width:6px;height:6px;border-radius:50%;background:var(--text-2);flex-shrink:0}
+    nav.side-nav a:hover{color:var(--text-0)}
+    nav.side-nav a.active{color:var(--text-0);background:linear-gradient(135deg,rgba(124,58,237,.30),rgba(219,39,119,.18));
+      border-color:rgba(255,255,255,.10)}
+    nav.side-nav a.active .dot{background:var(--violet-2)}
+    .sidebar-foot{margin-top:auto;padding-top:14px;border-top:1px solid var(--border)}
+    .sidebar-foot a{display:block;font-size:12px;color:var(--text-2);text-decoration:none;padding:6px 10px}
+    .sidebar-foot a:hover{color:var(--violet-2)}
+
+    main{flex:1;min-width:0;display:flex;flex-direction:column}
+    .topbar{position:sticky;top:0;z-index:5;display:flex;align-items:center;justify-content:space-between;gap:16px;
+      padding:20px 32px;border-bottom:1px solid var(--border);background:rgba(14,11,22,.82);backdrop-filter:blur(10px)}
+    .search{position:relative;flex:1;max-width:360px}
+    .search svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);opacity:.5}
+    .search input{width:100%;background:var(--card-bg);border:1px solid var(--border);border-radius:var(--r-m);
+      padding:10px 14px 10px 36px;color:var(--text-0);font:400 13.5px var(--sans)}
+    .search input::placeholder{color:var(--text-2)}
+    .search input:focus{outline:none;border-color:var(--violet-2)}
+    .pill-static{background:var(--card-bg);border:1px solid var(--border);padding:8px 14px;border-radius:999px;
+      font-size:12px;font-weight:600;color:var(--text-1);white-space:nowrap;flex-shrink:0}
+
+    .content{padding:28px 32px 40px}
+    .content h1{font-size:25px;font-weight:700;letter-spacing:-.015em;margin:0 0 4px}
+    .content > p.lede{color:var(--text-2);font-size:13.5px;margin:0 0 24px}
+
+    .topic-grid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
+    a.topic-card{display:flex;align-items:flex-start;gap:12px;background:var(--card-bg);border:1px solid var(--border);
+      border-radius:var(--r-l);padding:16px 17px;text-decoration:none;color:inherit;
+      box-shadow:0 10px 26px rgba(0,0,0,.28);transition:border-color .15s,transform .15s}
+    a.topic-card:hover{border-color:var(--border-strong);transform:translateY(-2px)}
+    .t-badge{width:34px;height:34px;border-radius:10px;flex-shrink:0;display:flex;align-items:center;justify-content:center;
+      color:#fff;font-weight:700;font-size:14px}
+    .t-badge.grad-a{background:linear-gradient(135deg,var(--rose),var(--rose-2))}
+    .t-badge.grad-b{background:linear-gradient(135deg,var(--violet),var(--violet-2))}
+    .t-badge.grad-c{background:linear-gradient(135deg,var(--blue),var(--blue-2))}
+    .t-badge.grad-d{background:linear-gradient(135deg,var(--violet),var(--pink))}
+    .t-body{flex:1;min-width:0}
+    .t-name{font-size:14.5px;font-weight:600;color:var(--text-0);margin-bottom:3px}
+    .t-path{font-size:11.5px;color:var(--text-2);word-break:break-all;line-height:1.4}
+    .t-arrow{color:var(--text-2);font-size:15px;flex-shrink:0;margin-top:3px}
+
+    .status-box{background:var(--card-bg-2);border:1px solid var(--border);border-radius:var(--r-s);
+      padding:12px 16px;color:var(--text-2);font-size:13.5px;margin-top:14px}
+
+    @media (max-width:980px){ .app-shell{margin:0;border-radius:0;min-height:100vh} }
+    @media (max-width:760px){
+      .app-shell{flex-direction:column}
+      .sidebar{width:100%;flex-direction:row;align-items:center;overflow-x:auto;padding:14px 16px;gap:16px;
+        border-right:none;border-bottom:1px solid var(--border)}
+      nav.side-nav{flex-direction:row;gap:4px}
+      .sidebar-foot{display:none}
+      .topbar{padding:16px 18px;flex-wrap:wrap}
+      .content{padding:20px 18px 32px}
     }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0; background: var(--bg); color: var(--text);
-      font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    }
-    main { max-width: 760px; margin: 0 auto; padding: 56px 16px 80px; }
-    h1 { font-size: 2rem; margin: 0 0 4px; letter-spacing: -0.02em; }
-    .sub { color: var(--muted); margin: 0 0 32px; }
-    .search {
-      width: 100%; padding: 12px 14px; margin-bottom: 20px; font-size: 1rem;
-      border: 1px solid var(--border); border-radius: 10px;
-      background: var(--card); color: var(--text); outline: none;
-    }
-    .search:focus { border-color: var(--accent); }
-    ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
-    a.topic {
-      display: flex; align-items: center; justify-content: space-between; gap: 12px;
-      padding: 16px 18px; border: 1px solid var(--border); border-radius: 12px;
-      background: var(--card); color: inherit; text-decoration: none;
-      transition: border-color .15s, transform .15s;
-    }
-    a.topic:hover { border-color: var(--accent); transform: translateY(-1px); }
-    .name { font-weight: 600; }
-    .path { color: var(--muted); font-size: .85rem; word-break: break-all; }
-    .arrow { color: var(--accent); font-size: 1.2rem; flex-shrink: 0; }
-    .status {
-      padding: 14px 16px; border-radius: 10px; background: var(--accent-soft);
-      color: var(--muted); font-size: .95rem;
-    }
-    footer { margin-top: 40px; color: var(--muted); font-size: .85rem; }
-    footer a { color: var(--accent); }
   </style>
 </head>
 <body>
+<div class="app-shell">
+
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="mark-logo">DL</span>
+      <div><strong>Deep Learning Notes</strong><span>Tài liệu học tập</span></div>
+    </div>
+    <nav class="side-nav">
+      <a href="index.html" class="active"><span class="dot"></span>Chủ đề</a>
+      <a href="roadmap.html"><span class="dot"></span>Lộ trình 6 tháng</a>
+    </nav>
+    <div class="sidebar-foot">
+      <a href="https://github.com/duongquyit/deep-learning">Mã nguồn trên GitHub</a>
+    </div>
+  </aside>
+
   <main>
-    <h1>Deep Learning Notes</h1>
-    <p class="sub">Tài liệu học tập, chọn một chủ đề để đọc.</p>
+    <div class="topbar">
+      <div class="search">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input class="q" id="q" type="search" placeholder="Tìm chủ đề…" autocomplete="off">
+      </div>
+      <span class="pill-static" id="count-pill">Đang tải…</span>
+    </div>
 
-    <input class="search" id="q" type="search" placeholder="Tìm chủ đề…" autocomplete="off">
-    <ul id="list"></ul>
-    <p class="status" id="status">Đang tải danh sách chủ đề…</p>
+    <section class="content">
+      <h1>Chủ đề</h1>
+      <p class="lede">Chọn một chủ đề để đọc. Danh sách được lấy trực tiếp từ thư mục <code>topics/</code> trên GitHub.</p>
 
-    <footer>
-      Mã nguồn: <a href="https://github.com/duongquyit/deep-learning">duongquyit/deep-learning</a>
-    </footer>
+      <ul id="list" class="topic-grid"></ul>
+      <p class="status-box" id="status">Đang tải danh sách chủ đề…</p>
+    </section>
   </main>
 
-  <script>
-    const OWNER = "duongquyit";
-    const REPO = "deep-learning";
-    const BRANCH = "main";
-    const TOPICS_DIR = "topics";
+</div>
 
-    // Dự phòng khi GitHub API lỗi hoặc hết lượt (60 lần/giờ cho mỗi IP).
-    const FALLBACK = [
-      { name: "btree-index-internals", href: "topics/btree-index-internals/" }
-    ];
+<script>
+  const OWNER = "duongquyit";
+  const REPO = "deep-learning";
+  const BRANCH = "main";
+  const TOPICS_DIR = "topics";
+  const BADGES = ["grad-a", "grad-b", "grad-c", "grad-d"];
 
-    const api = (p) =>
-      `https://api.github.com/repos/${OWNER}/${REPO}/contents/${p}?ref=${BRANCH}`;
+  // Dự phòng khi GitHub API lỗi hoặc hết lượt (60 lần/giờ cho mỗi IP).
+  const FALLBACK = [
+    { name: "btree-index-internals", href: "topics/btree-index-internals/index.html" }
+  ];
 
-    const prettify = (slug) =>
-      slug.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  const api = (p) =>
+    `https://api.github.com/repos/${OWNER}/${REPO}/contents/${p}?ref=${BRANCH}`;
 
-    // Chọn trang đích phù hợp nhất trong một thư mục topic.
-    function pickTarget(dir, files) {
-      const names = files.filter((f) => f.type === "file").map((f) => f.name);
-      const has = (n) => names.some((x) => x.toLowerCase() === n);
-      if (has("index.html") || has("index.md") || has("readme.md")) return `${dir}/`;
-      const html = names.find((n) => /\.html?$/i.test(n));
-      if (html) return `${dir}/${html}`;
-      const md = names.find((n) => /\.md$/i.test(n));
-      if (md) return `${dir}/${md.replace(/\.md$/i, ".html")}`;
-      return null;
-    }
+  const prettify = (slug) =>
+    slug.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
-    async function loadTopics() {
-      const res = await fetch(api(TOPICS_DIR));
-      if (!res.ok) throw new Error(res.status);
-      const dirs = (await res.json()).filter((x) => x.type === "dir");
-      const topics = await Promise.all(dirs.map(async (d) => {
-        const r = await fetch(api(d.path));
-        const files = r.ok ? await r.json() : [];
-        const href = pickTarget(d.path, files)
-          || `https://github.com/${OWNER}/${REPO}/tree/${BRANCH}/${d.path}`;
-        return { name: d.name, href };
-      }));
-      return topics.sort((a, b) => a.name.localeCompare(b.name));
-    }
+  // Chọn trang đích phù hợp nhất trong một thư mục topic.
+  function pickTarget(dir, files) {
+    const names = files.filter((f) => f.type === "file").map((f) => f.name);
+    const has = (n) => names.some((x) => x.toLowerCase() === n);
+    if (has("index.html")) return `${dir}/index.html`;
+    const html = names.find((n) => /\.html?$/i.test(n));
+    if (html) return `${dir}/${html}`;
+    if (has("index.md") || has("readme.md")) return `${dir}/`;
+    const md = names.find((n) => /\.md$/i.test(n));
+    if (md) return `${dir}/${md.replace(/\.md$/i, ".html")}`;
+    return null;
+  }
 
-    function render(topics) {
-      const list = document.getElementById("list");
-      list.innerHTML = "";
-      for (const t of topics) {
-        const li = document.createElement("li");
-        li.dataset.key = (t.name + " " + prettify(t.name)).toLowerCase();
-        li.innerHTML = `
-          <a class="topic" href="${t.href}">
-            <span>
-              <div class="name">${prettify(t.name)}</div>
-              <div class="path">${t.href}</div>
-            </span>
-            <span class="arrow">→</span>
-          </a>`;
-        list.appendChild(li);
-      }
-    }
+  async function loadTopics() {
+    const res = await fetch(api(TOPICS_DIR));
+    if (!res.ok) throw new Error(res.status);
+    const dirs = (await res.json()).filter((x) => x.type === "dir");
+    const topics = await Promise.all(dirs.map(async (d) => {
+      const r = await fetch(api(d.path));
+      const files = r.ok ? await r.json() : [];
+      const href = pickTarget(d.path, files)
+        || `https://github.com/${OWNER}/${REPO}/tree/${BRANCH}/${d.path}`;
+      return { name: d.name, href };
+    }));
+    return topics.sort((a, b) => a.name.localeCompare(b.name));
+  }
 
-    document.getElementById("q").addEventListener("input", (e) => {
-      const q = e.target.value.trim().toLowerCase();
-      document.querySelectorAll("#list li").forEach((li) => {
-        li.style.display = li.dataset.key.includes(q) ? "" : "none";
-      });
+  function render(topics) {
+    const list = document.getElementById("list");
+    list.innerHTML = "";
+    topics.forEach((t, i) => {
+      const li = document.createElement("li");
+      li.dataset.key = (t.name + " " + prettify(t.name)).toLowerCase();
+      li.innerHTML = `
+        <a class="topic-card" href="${t.href}">
+          <span class="t-badge ${BADGES[i % BADGES.length]}">${prettify(t.name).charAt(0)}</span>
+          <span class="t-body">
+            <div class="t-name">${prettify(t.name)}</div>
+            <div class="t-path">${t.href}</div>
+          </span>
+          <span class="t-arrow">›</span>
+        </a>`;
+      list.appendChild(li);
     });
+  }
 
-    (async () => {
-      const status = document.getElementById("status");
-      try {
-        const topics = await loadTopics();
-        render(topics);
-        status.hidden = topics.length > 0;
-        if (!topics.length) status.textContent = "Chưa có chủ đề nào trong thư mục topics/.";
-      } catch {
-        render(FALLBACK);
-        status.textContent = "Không tải được danh sách tự động, đang hiển thị danh sách dự phòng.";
-      }
-    })();
-  </script>
+  document.getElementById("q").addEventListener("input", (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    document.querySelectorAll("#list li").forEach((li) => {
+      li.style.display = li.dataset.key.includes(q) ? "" : "none";
+    });
+  });
+
+  (async () => {
+    const status = document.getElementById("status");
+    const countPill = document.getElementById("count-pill");
+    try {
+      const topics = await loadTopics();
+      render(topics);
+      status.hidden = topics.length > 0;
+      if (!topics.length) status.textContent = "Chưa có chủ đề nào trong thư mục topics/.";
+      countPill.textContent = topics.length === 1 ? "1 chủ đề" : `${topics.length} chủ đề`;
+    } catch {
+      render(FALLBACK);
+      status.textContent = "Không tải được danh sách tự động, đang hiển thị danh sách dự phòng.";
+      countPill.textContent = `${FALLBACK.length} chủ đề (dự phòng)`;
+    }
+  })();
+</script>
 </body>
 </html>

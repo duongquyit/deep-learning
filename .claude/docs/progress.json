@@ -1,0 +1,369 @@
+{
+  "generated_at": "2026-10-14",
+  "program": {
+    "start": "2026-10-19",
+    "end": "2027-04-18",
+    "weeks": 26,
+    "days": 182
+  },
+  "months": [
+    {
+      "n": 1,
+      "title": "Database Internals and Query Optimization",
+      "status": " ",
+      "start": "2026-10-19",
+      "end": "2026-11-15",
+      "weeks_planned": 4,
+      "weeks": [
+        {
+          "n": 1,
+          "status": " ",
+          "start": "2026-10-19",
+          "end": "2026-10-25",
+          "title": "Baseline and lab setup: database baseline assessment (TECHNICAL_GROWTH.md Section 11); MySQL 8.4 in Docker with performance_schema and sys schema enabled; a data generator for 5–10M rows; a repeatable way to measure query latency and insert throughput. Topic: InnoDB pages, B+ tree structure, clustered index."
+        },
+        {
+          "n": 2,
+          "status": " ",
+          "start": "2026-10-26",
+          "end": "2026-11-01",
+          "title": "Reads: secondary index lookups and the extra clustered-index lookup, composite indexes and leftmost prefix, covering indexes, range conditions, cardinality and histograms, EXPLAIN and EXPLAIN ANALYZE."
+        },
+        {
+          "n": 3,
+          "status": " ",
+          "start": "2026-11-02",
+          "end": "2026-11-08",
+          "title": "Writes: index maintenance on insert/update/delete, page splits, change buffer, sequential vs random primary keys (auto-increment vs UUIDv4 vs UUIDv7), measuring insert throughput and storage with 0, 2, 5, and 8 secondary indexes."
+        },
+        {
+          "n": 4,
+          "status": " ",
+          "start": "2026-11-09",
+          "end": "2026-11-15",
+          "title": "Transactions: MVCC and read views, isolation levels with REPEATABLE READ as default, consistent vs locking reads, record/gap/next-key locks, reproducing a lost update and a deadlock by hand. Monthly checkpoint."
+        }
+      ],
+      "deliverables": [
+        {
+          "status": " ",
+          "text": "Reproducible SQL experiments (scripts committed, with predictions written before running)."
+        },
+        {
+          "status": " ",
+          "text": "Query-plan comparisons."
+        },
+        {
+          "status": " ",
+          "text": "An index-design case study based on a real slow query from my job (anonymized)."
+        },
+        {
+          "status": " ",
+          "text": "A technical note explaining the observed behavior and production implications."
+        }
+      ],
+      "deliverables_done": 0,
+      "exit": {
+        "status": " ",
+        "text": "given an unseen table, workload, and query, I can predict the plan and the cost of adding an index, then confirm or explain the discrepancy with measurements (Track A index topics at Level 3)."
+      }
+    },
+    {
+      "n": 2,
+      "title": "Backend Architecture and Testing",
+      "status": " ",
+      "start": "2026-11-16",
+      "end": "2026-12-13",
+      "weeks_planned": 4,
+      "weeks": [],
+      "deliverables": [
+        {
+          "status": " ",
+          "text": "A lab service implementing one domain with explicit invariants, structured into controller/service/repository with deliberate module boundaries."
+        },
+        {
+          "status": " ",
+          "text": "An explicit business-rule and API specification for it, naming where each invariant is enforced."
+        },
+        {
+          "status": " ",
+          "text": "Automated tests covering success, failure, and boundary cases, running against a real MySQL instance in CI."
+        },
+        {
+          "status": " ",
+          "text": "A written review of one real module at work: where its business rules live, which boundaries leak, and what I would change."
+        }
+      ],
+      "deliverables_done": 0,
+      "exit": {
+        "status": " ",
+        "text": "I can explain where each business rule is enforced and why, and my tests catch a deliberately introduced invariant violation."
+      }
+    },
+    {
+      "n": 3,
+      "title": "Transactions and Reliable Asynchronous Processing",
+      "status": " ",
+      "start": "2026-12-14",
+      "end": "2027-01-10",
+      "weeks_planned": 4,
+      "weeks": [],
+      "deliverables": [
+        {
+          "status": " ",
+          "text": "A background processing workflow."
+        },
+        {
+          "status": " ",
+          "text": "Automated tests for duplicate processing and retry behavior."
+        },
+        {
+          "status": " ",
+          "text": "A documented failure-recovery strategy."
+        },
+        {
+          "status": " ",
+          "text": "A reproducible concurrency experiment (concurrent balance updates with at least two concurrency-control strategies compared)."
+        }
+      ],
+      "deliverables_done": 0,
+      "exit": {
+        "status": " ",
+        "text": "the import stays correct when the same file is uploaded twice, when a worker is killed mid-run, and when the same transaction arrives concurrently — demonstrated by tests, not by argument."
+      }
+    },
+    {
+      "n": 4,
+      "title": "Production Readiness and Observability",
+      "status": " ",
+      "start": "2027-01-11",
+      "end": "2027-02-14",
+      "weeks_planned": 5,
+      "weeks": [],
+      "deliverables": [
+        {
+          "status": " ",
+          "text": "A deployable application (multi-stage Docker image, non-root, CI pipeline)."
+        },
+        {
+          "status": " ",
+          "text": "Health checks and useful operational telemetry (structured logs with correlation IDs, RED metrics, traces)."
+        },
+        {
+          "status": " ",
+          "text": "A reproducible performance test with a profiled bottleneck and a measured fix."
+        },
+        {
+          "status": " ",
+          "text": "An incident simulation (for example, a slow dependency causing cascading failure) and a blameless root-cause analysis."
+        }
+      ],
+      "deliverables_done": 0,
+      "exit": {
+        "status": " ",
+        "text": "given a performance or reliability symptom I have not seen before, I can locate the cause with tools and explain it, rather than guess."
+      }
+    },
+    {
+      "n": 5,
+      "title": "System Design and Advanced Trade-offs",
+      "status": " ",
+      "start": "2027-02-15",
+      "end": "2027-03-14",
+      "weeks_planned": 4,
+      "weeks": [],
+      "deliverables": [
+        {
+          "status": " ",
+          "text": "A system design document for a real system from my job, taken at 100× its current load."
+        },
+        {
+          "status": " ",
+          "text": "At least two alternative designs with explicit trade-offs."
+        },
+        {
+          "status": " ",
+          "text": "An architecture decision record."
+        },
+        {
+          "status": " ",
+          "text": "A design review conducted as a Senior Engineer would conduct it."
+        },
+        {
+          "status": " ",
+          "text": "Weekly timed design exercises (45 minutes each, at least four in the month)."
+        }
+      ],
+      "deliverables_done": 0,
+      "exit": {
+        "status": " ",
+        "text": "in a timed exercise on an unseen problem, I produce estimates, a design, and trade-offs that hold up to follow-up questions."
+      }
+    },
+    {
+      "n": 6,
+      "title": "Capstone and Readiness Assessment",
+      "status": " ",
+      "start": "2027-03-15",
+      "end": "2027-04-18",
+      "weeks_planned": 5,
+      "weeks": [],
+      "deliverables": [
+        {
+          "status": " ",
+          "text": "A completed, demonstrable backend capability, owned end to end (default: the Month 3 import pipeline extended to be resumable, observable, and load-tested). A feature I own at work counts, if I can publish an anonymized account of it."
+        },
+        {
+          "status": " ",
+          "text": "A concise architecture document."
+        },
+        {
+          "status": " ",
+          "text": "Automated test evidence and operational documentation."
+        },
+        {
+          "status": " ",
+          "text": "A retrospective covering mistakes, trade-offs, and improvements."
+        },
+        {
+          "status": " ",
+          "text": "Interview preparation: two mock system design interviews, a bank of deep technical questions drawn from my own notes, and five STAR stories from real work."
+        },
+        {
+          "status": " ",
+          "text": "A final competency assessment against the initial baseline."
+        }
+      ],
+      "deliverables_done": 0,
+      "exit": null
+    }
+  ],
+  "deliverables": {
+    "done": 0,
+    "total": 27
+  },
+  "sessions": [
+    {
+      "date": "2026-10-14",
+      "title": "B+tree index internals",
+      "artifact": "../topics/btree-index-internals/index.html",
+      "planned": false,
+      "feeds": "Month 1, Weeks 1–2"
+    }
+  ],
+  "unplanned": [
+    {
+      "date": "2026-10-14",
+      "work": "B+tree index internals (structure, split, slotted page, buffer pool, covering index, heap/MVCC) — conceptual only, no measurements; PostgreSQL-shaped, see open question 1",
+      "artifact": "topics/btree-index-internals",
+      "feeds": "Month 1, Weeks 1–2"
+    }
+  ],
+  "targets": {
+    "done": 0,
+    "total": 4,
+    "items": [
+      {
+        "status": " ",
+        "text": "Level 3 in Track A (database), transactions/concurrency, and idempotent async processing."
+      },
+      {
+        "status": " ",
+        "text": "Level 3 in at least two of: observability, performance diagnosis, system design."
+      },
+      {
+        "status": " ",
+        "text": "Level 2 minimum in every other area of the baseline table, with no area left at Level 0."
+      },
+      {
+        "status": " ",
+        "text": "Level 4 in at least one topic, demonstrated on a real problem from my job."
+      }
+    ]
+  },
+  "competency": {
+    "rows": [
+      {
+        "topic": "B+tree structure, fan-out, tree height",
+        "level": 2,
+        "provisional": true,
+        "evidence": "btree-index-internals §02",
+        "date": "2026-10-14"
+      },
+      {
+        "topic": "Page layout (slotted page, line pointers)",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §04",
+        "date": "2026-10-14"
+      },
+      {
+        "topic": "Split mechanics (leaf vs internal, rightmost split, fillfactor)",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §03",
+        "date": "2026-10-14"
+      },
+      {
+        "topic": "Buffer pool and eviction",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §05",
+        "date": "2026-10-14"
+      },
+      {
+        "topic": "Pin / latch / lock distinction",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §05",
+        "date": "2026-10-14"
+      },
+      {
+        "topic": "WAL ordering (WAL before data page)",
+        "level": 1,
+        "provisional": false,
+        "evidence": "same, §06",
+        "date": "2026-10-14"
+      },
+      {
+        "topic": "Reading EXPLAIN (ANALYZE, BUFFERS)",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §07",
+        "date": "2026-10-14"
+      },
+      {
+        "topic": "Covering index / Index Only Scan and its cost",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §08",
+        "date": "2026-10-14"
+      },
+      {
+        "topic": "TOAST and the real cost of SELECT *",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §08",
+        "date": "2026-10-14"
+      },
+      {
+        "topic": "Heap, TID, MVCC versions, HOT, bloat",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §09",
+        "date": "2026-10-14"
+      },
+      {
+        "topic": "InnoDB specifics (clustered index, secondary→PK lookup, undo log)",
+        "level": 1,
+        "provisional": false,
+        "evidence": "same, contrast boxes only",
+        "date": "2026-10-14"
+      }
+    ],
+    "levels": {
+      "2": 9,
+      "1": 2
+    }
+  }
+}

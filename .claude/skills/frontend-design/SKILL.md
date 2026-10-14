@@ -1,12 +1,24 @@
 ---
 name: frontend-design
-description: Guidance for distinctive, intentional visual design when building new UI or reshaping an existing one. Helps with aesthetic direction, typography, and making choices that don't read as templated defaults.
+description: Guidance for distinctive, intentional visual design when building new UI or reshaping an existing one. Helps with aesthetic direction, typography, and making choices that don't read as templated defaults. Routes dashboard and overview screens to the repo's house design system in .claude/docs/DESIGN_SYSTEM.md instead of designing them fresh.
 license: Complete terms in LICENSE.txt
 ---
 
 # Frontend Design
 
 Approach this as the design lead at a design studio known for giving every client a distinct visual identity that is not mistaken for anyone else's. This client has already rejected proposals that felt cliché or templated, and is paying for a distinctive point of view: make deliberate, opinionated choices about palette, typography, and layout that are specific to this brief, and take aesthetic risk if justified.
+
+## First: which kind of screen is this?
+
+This repo has two kinds of screen, and they get opposite treatment. Decide which one you're building **before** designing anything.
+
+**Dashboard-shaped — follow the house system, don't invent.** A screen that surveys or tracks many items rather than teaching one concept end to end: `roadmap.html`, `index.html`, and anything new that summarizes a program, a log, or a dataset. These already share one visual identity, and a second identity in this slot is a defect, not a point of view. Read [`.claude/docs/DESIGN_SYSTEM.md`](../../docs/DESIGN_SYSTEM.md) and build to it: its tokens (§2), shell and breakpoints (§3), component inventory (§4), interaction rules (§5), and content rules (§6) are binding. Skip the two-pass brainstorm below — the plan already exists. The sections on writing, restraint, and self-critique still apply.
+
+Reuse what's there rather than adding to it. The four `grad-*` icon-badge gradients are the whole palette for badges; a fifth hue is what turns "varied but controlled" into sprawl. Same for the two shadow recipes and the three radii — depth comes from picking the right one, not from a new value. If a genuinely new component is needed, build it from the existing card chrome and then add it to §4, so the file keeps describing what's actually shipped.
+
+**Topic lesson pages — design fresh, per topic.** `topics/<slug>/index.html` deliberately keeps its own palette, type, and motion per topic. `DESIGN_SYSTEM.md` does not apply there, and reaching for its violet/pink dark theme because it's familiar is exactly the templating this skill exists to prevent. Everything below governs these pages.
+
+If a screen sits between the two, ask rather than guess: the cost of wrongly templating a lesson page and the cost of wrongly forking the dashboard identity are both high.
 
 ## Ground your designs in the subject matter
 
@@ -42,6 +54,8 @@ For calibration, AI-generated design right now clusters around some traits:
 4. the SaaS-card kit: content chopped into identical rounded cards, one border-radius on everything regardless of hierarchy, the same soft grey shadow (rgba(0,0,0,.1)) under each, and gradient washes as decoration;
 5. template chrome that appears whatever the subject: a tracked-out ALL-CAPS eyebrow label above every heading; meta strings joined with middle dots ('A · B · C'); labels built as 'WORD — fragment' with a spaced em dash; tinted near-black (#0B0B0B, #111) standing in for black; a monospace face for small data labels; a '→' appended to link and button text.
 
+Two notes on how this list meets the house system. Trait 4 describes the dashboard system's own ingredients — rounded cards, gradient accents, a dark panel — so read it as a warning about *undifferentiated* use of them, not a reason to re-style `roadmap.html` or `index.html`. What keeps those pages out of trait 4 is that the radii are tiered by element (§2), there are exactly two shadow recipes rather than one flat drop on everything, and the gradients are a fixed four-way badge cycle carrying card identity rather than decorative washes. Hold that line when extending them. Trait 5's tells, meanwhile, are already law for dashboards: §6 bans middle-dot meta-joins, trailing `→` glyphs, and ALL-CAPS eyebrows outright, and §2 confines monospace to the `[ ]`/`[~]`/`[x]`/`[!]` status marks, where it's literal notation from the source markdown rather than a small-data-label affectation.
+
 All traits are legitimate for some briefs, but they are defaults rather than choices, and they appear regardless of subject. Where the brief pins down a visual direction, follow it exactly — the brief's own words always win, including when it asks for one of these looks. Where it leaves an axis free, don't spend that freedom on one of these defaults. As with a hired human designer, there's often a careful balance between doing what you're good at and taking each project as a chance to experiment and learn.
 
 Work in two passes. First, brainstorm a short design plan based on the client's design brief: create a compact token system with color, type, layout, and principles.
@@ -65,6 +79,8 @@ Words appear in a design for one reason: to make it easier to understand and use
 Write from the end user's perspective. Name things by what users will understand in simple language, not by how the system is built. A user manages notifications, not webhook config. Describe what something is or does in plain terms rather than selling it. Being specific and legible to new users is always better than being clever.
 
 Use active voice as default. A CTA says exactly what happens when it is used: "Save changes," not "Submit." An action keeps the same name through the whole flow, so the button that says "Publish" produces a toast that says "Published." The vocabulary of an interface is the signposting for someone navigating the product. Cohesion and consistency are how people learn their way around.
+
+Never fabricate a number to fill a slot. A trend pill with no time series behind it, a percentage nobody measured, or a sparkline drawn from nothing is a lie the layout told you to write. Use a short contextual phrase instead ("opens in 5 days", "none yet", "ahead of plan"), or cut the element. On dashboard screens this is `DESIGN_SYSTEM.md` §6 and non-negotiable: every value traces to `ROADMAP.md`, `LEARNING_LOG.md`, or `TECHNICAL_GROWTH.md`, and is counted from the page's own content at load where it can be, so the summary can't drift from what it summarizes.
 
 Treat failure and emptiness as moments for direction, not mood. Explain what went wrong and how to fix it, in the interface's voice rather than a person's. Errors don't apologize, and they are never vague about what happened. An empty screen is an invitation to act.
 
