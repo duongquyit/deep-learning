@@ -1,0 +1,842 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>B+tree index: từ query xuống page trong RAM</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F2F4F6; --surface:#FFFFFF; --ink:#18203A; --ink-2:#56607A; --ink-3:#8A93A8;
+  --rule:#CCD3DD; --rule-strong:#8C96AB;
+  --struct:#3446B8; --struct-bg:#E6E9FA;
+  --row:#16795F; --row-bg:#DDF2EA;
+  --hot:#9A5F00; --hot-bg:#FCEFD2; --hot-line:#E3A21A;
+  --miss:#B5302B; --miss-bg:#FBE1DF;
+  --grid:rgba(52,70,184,.06);
+  --r-s:4px; --r-m:8px;
+  --sans:"Instrument Sans",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --paper:#0F1320; --surface:#171C2B; --ink:#E6E9F2; --ink-2:#A3ABC0; --ink-3:#6E7790;
+  --rule:#2C3448; --rule-strong:#55607A;
+  --struct:#97A3FF; --struct-bg:#232A55;
+  --row:#5FD0AE; --row-bg:#123A31;
+  --hot:#F2BE5C; --hot-bg:#3B2C0E; --hot-line:#E3A21A;
+  --miss:#FF8A84; --miss-bg:#3E1A1A;
+  --grid:rgba(151,163,255,.05);
+}}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important;animation:none!important}}
+body{margin:0;color:var(--ink);font:400 17px/1.65 var(--sans);
+  background-color:var(--paper);
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:24px 24px}
+a{color:var(--struct)}
+:focus-visible{outline:2px solid var(--struct);outline-offset:2px}
+
+/* layout */
+.shell{display:grid;grid-template-columns:230px minmax(0,1fr);gap:56px;max-width:1180px;margin:0 auto;padding:0 32px}
+nav.toc{position:sticky;top:0;align-self:start;height:100vh;padding:48px 0;overflow:auto}
+nav.toc p{font-weight:600;margin:0 0 12px;font-size:15px}
+nav.toc ol{list-style:none;margin:0;padding:0;counter-reset:s}
+nav.toc li{counter-increment:s}
+nav.toc a{display:grid;grid-template-columns:28px 1fr;padding:5px 0;color:var(--ink-2);text-decoration:none;font-size:14.5px;line-height:1.4}
+nav.toc a::before{content:counter(s,decimal-leading-zero);font:500 12px/1.9 var(--mono);color:var(--ink-3)}
+nav.toc a:hover,nav.toc a.on{color:var(--struct)}
+main{min-width:0;padding:56px 0 120px}
+.prose{max-width:720px}
+section{padding-top:72px}
+section > header{display:grid;grid-template-columns:auto 1fr;gap:0 18px;align-items:baseline;max-width:720px;margin-bottom:12px}
+section > header .num{font:500 15px var(--mono);color:var(--struct);border:1.5px solid var(--struct);border-radius:var(--r-s);padding:2px 7px;transform:translateY(-4px)}
+h1,h2,h3,h4{line-height:1.2;letter-spacing:-.015em;margin:0}
+h2{font-size:clamp(1.6rem,3vw,2.1rem);font-weight:650}
+h3{font-size:1.2rem;font-weight:600;margin:36px 0 8px}
+p{margin:0 0 14px}
+ul,ol.list{margin:0 0 16px;padding-left:22px}
+li{margin:4px 0}
+code{font:0.88em var(--mono);background:var(--struct-bg);color:var(--ink);padding:1px 5px;border-radius:3px}
+pre{font:13.5px/1.6 var(--mono);background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:var(--r-s);padding:14px 16px;overflow-x:auto;margin:0 0 18px;max-width:720px}
+pre code{background:none;padding:0}
+table{border-collapse:collapse;width:100%;max-width:720px;margin:0 0 20px;font-size:15px;background:var(--surface)}
+th,td{text-align:left;padding:9px 12px;border:1px solid var(--rule);vertical-align:top}
+th{font-weight:600;background:var(--struct-bg)}
+
+/* hero */
+.hero h1{font-size:clamp(2.3rem,5.4vw,3.9rem);font-weight:700;letter-spacing:-.03em;line-height:1.02;max-width:14ch;margin-bottom:20px}
+.hero .lede{font-size:19px;color:var(--ink-2);max-width:56ch;margin-bottom:28px}
+
+/* widget frame: styled like a page, header strip = page header */
+.frame{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);margin:22px 0 28px;max-width:920px;overflow:hidden}
+.frame > .ph{display:flex;align-items:center;gap:12px;padding:9px 16px;border-bottom:1px solid var(--rule);background:var(--struct-bg);font-size:14px}
+.frame > .ph strong{font-weight:600}
+.frame > .ph .meta{margin-left:auto;font:500 12.5px var(--mono);color:var(--ink-2)}
+.frame .bd{padding:16px}
+.frame svg{display:block;width:100%;height:auto}
+.desc{background:var(--paper);border-radius:var(--r-s);padding:12px 14px;margin-top:12px;min-height:84px;font-size:15.5px;color:var(--ink-2)}
+.desc pre{margin:10px 0 0;font-size:12.5px;border-left-color:var(--rule-strong)}
+.nav{display:flex;gap:8px;margin-top:12px;align-items:center}
+button{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 14px;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--struct);color:var(--struct)}
+button:disabled{opacity:.4;cursor:default}
+button.primary{background:var(--struct);border-color:var(--struct);color:var(--surface)}
+button.primary:hover:not(:disabled){color:var(--surface);filter:brightness(1.1)}
+input,select{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 10px}
+input[type=number]{width:84px}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-top:12px}
+.stat{background:var(--paper);border-radius:var(--r-s);padding:8px 12px}
+.stat span{display:block;font-size:13px;color:var(--ink-2)}
+.stat b{font:600 20px var(--sans)}
+.log{font:12.5px/1.75 var(--mono);color:var(--ink-2);margin-top:12px;min-height:60px}
+.log div:first-child{color:var(--ink)}
+
+/* svg vocabulary */
+.n rect{fill:var(--surface);stroke:var(--rule-strong);stroke-width:1}
+.n text{fill:var(--ink)}
+.n.struct rect{fill:var(--struct-bg);stroke:var(--struct)}
+.n.struct text{fill:var(--struct)}
+.n.row rect{fill:var(--row-bg);stroke:var(--row)}
+.n.row text{fill:var(--row)}
+.n.hot rect{fill:var(--hot-bg);stroke:var(--hot-line);stroke-width:2}
+.n.hot text{fill:var(--hot)}
+.n.miss rect{fill:var(--miss-bg);stroke:var(--miss);stroke-width:2}
+.n.miss text{fill:var(--miss)}
+.n.hit rect{fill:var(--row-bg);stroke:var(--row);stroke-width:2}
+.n.hit text{fill:var(--row)}
+.n.info rect{fill:var(--struct-bg);stroke:var(--struct);stroke-width:2.2}
+.n.info text{fill:var(--struct)}
+.n.dim rect{fill:var(--paper);stroke:var(--rule)}
+.n.dim text{fill:var(--ink-3)}
+.tb{font:600 14px var(--sans)} .t{font:400 13px var(--sans)} .ts{font:400 12px var(--sans)} .tm{font:500 12.5px var(--mono)}
+.lbl{fill:var(--ink-2);font:400 12.5px var(--sans)}
+.edge{stroke:var(--rule-strong);stroke-width:1.2;fill:none}
+.edge.on{stroke:var(--struct);stroke-width:2.6}
+.edge.hot{stroke:var(--hot-line);stroke-width:2.2}
+.edge.miss{stroke:var(--miss);stroke-width:2}
+.dash{stroke:var(--rule-strong);stroke-dasharray:4 4;fill:none}
+
+/* callouts */
+.note{border-left:3px solid var(--hot-line);background:var(--hot-bg);padding:12px 16px;border-radius:0 var(--r-s) var(--r-s) 0;margin:18px 0;max-width:720px;font-size:16px}
+.note strong{color:var(--hot)}
+.senior{border:1.5px solid var(--struct);border-radius:var(--r-m);padding:14px 18px;margin:22px 0;max-width:720px;background:var(--surface)}
+.senior h4{font-size:16px;margin-bottom:6px;color:var(--struct)}
+details{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-s);padding:10px 14px;margin:10px 0;max-width:720px}
+details summary{cursor:pointer;font-weight:600}
+details[open] summary{margin-bottom:8px}
+
+.mobile-toc{display:none}
+@media (max-width:900px){
+  .shell{grid-template-columns:1fr;padding:0 16px;gap:0}
+  nav.toc{display:none}
+  .mobile-toc{display:block;margin-top:20px}
+  main{padding-top:32px}
+  .frame .bd{padding:12px}
+  body{font-size:16px}
+}
+</style>
+</head>
+<body>
+<div class="shell">
+<nav class="toc" aria-label="Mục lục">
+  <p>B+tree index</p>
+  <ol>
+    <li><a href="#s1">B-tree được dùng ở đâu</a></li>
+    <li><a href="#s2">Page, fan-out, chiều cao</a></li>
+    <li><a href="#s3">Split: cây lớn lên thế nào</a></li>
+    <li><a href="#s4">Bên trong một page</a></li>
+    <li><a href="#s5">Buffer pool: index trong RAM</a></li>
+    <li><a href="#s6">Vòng đời INSERT rồi SELECT</a></li>
+    <li><a href="#s7">Trace một query thật</a></li>
+    <li><a href="#s8">Index Only Scan và SELECT *</a></li>
+    <li><a href="#s9">Heap và MVCC</a></li>
+    <li><a href="#s10">Checklist senior và bài tập</a></li>
+  </ol>
+</nav>
+
+<main>
+<div class="hero">
+  <h1>B+tree index, từ câu query tới từng page trong RAM</h1>
+  <p class="lede">Ghi chú học tập trên lộ trình lên senior backend. Mỗi khái niệm đi kèm một mô phỏng để bấm thử: cây split ra sao, page 8KB bên trong trông thế nào, và vì sao một query nhanh hay chậm.</p>
+  <details class="mobile-toc"><summary>Mục lục</summary>
+    <ol class="list"><li><a href="#s1">B-tree được dùng ở đâu</a></li><li><a href="#s2">Page, fan-out, chiều cao</a></li><li><a href="#s3">Split</a></li><li><a href="#s4">Bên trong một page</a></li><li><a href="#s5">Buffer pool</a></li><li><a href="#s6">Vòng đời INSERT rồi SELECT</a></li><li><a href="#s7">Trace một query thật</a></li><li><a href="#s8">Index Only Scan và SELECT *</a></li><li><a href="#s9">Heap và MVCC</a></li><li><a href="#s10">Checklist và bài tập</a></li></ol>
+  </details>
+</div>
+
+<div class="frame" id="playground">
+  <div class="ph"><strong>Sân chơi B+tree</strong><span class="meta" id="pg-meta"></span></div>
+  <div class="bd">
+    <div class="controls">
+      <label for="pg-key">Key</label>
+      <input id="pg-key" type="number" min="0" max="999" value="3">
+      <button class="primary" id="pg-ins">Chèn</button>
+      <button id="pg-find">Tìm</button>
+      <button id="pg-next">Chèn theo bài: <span id="pg-next-k"></span></button>
+      <button id="pg-reset">Đặt lại</button>
+    </div>
+    <svg id="pg-svg" role="img" aria-label="Cây B+tree hiện tại"></svg>
+    <div class="log" id="pg-log" aria-live="polite"></div>
+    <p class="ts" style="color:var(--ink-2);margin:8px 0 0">Mỗi node chứa tối đa 3 key để dễ thấy split. Màu vàng là page vừa bị ghi, màu xanh dương là đường đi khi tìm, màu xanh lá là leaf chứa key.</p>
+  </div>
+</div>
+
+<!-- 1 -->
+<section id="s1">
+<header><span class="num">01</span><h2>B-tree được dùng ở đâu</h2></header>
+<div class="prose">
+<p>Gần như mọi database dùng biến thể <strong>B+tree</strong>: data hoặc con trỏ tới row chỉ nằm ở leaf, và các leaf nối với nhau thành danh sách liên kết hai chiều.</p>
+</div>
+<table>
+<tr><th>Database</th><th>Index dùng B+tree</th></tr>
+<tr><td>PostgreSQL</td><td>Index mặc định, PRIMARY KEY, UNIQUE, composite, expression index, partial index</td></tr>
+<tr><td>MySQL InnoDB</td><td>Clustered index (chính là PK, leaf chứa nguyên row) và mọi secondary index (leaf chứa giá trị PK)</td></tr>
+<tr><td>Oracle, SQL Server, SQLite</td><td>Index mặc định. SQLite lưu cả table dưới dạng B-tree</td></tr>
+<tr><td>MongoDB (WiredTiger)</td><td>Index mặc định</td></tr>
+</table>
+<div class="prose">
+<p>Không dùng B-tree: Hash, GIN (full-text, JSONB), GiST/R-tree (geo), BRIN, LSM-tree (RocksDB, Cassandra).</p>
+<h3>Khi nào B-tree hiệu quả</h3>
+<ul>
+<li>Equality <code>WHERE id = 42</code> và range <code>&gt;</code>, <code>&lt;</code>, <code>BETWEEN</code></li>
+<li><code>ORDER BY</code>, <code>GROUP BY</code> trên cột đã index, không cần bước sort</li>
+<li><code>MIN</code>/<code>MAX</code>, prefix <code>LIKE 'abc%'</code></li>
+<li>Composite index theo leftmost prefix: <code>(a, b, c)</code> dùng được cho <code>a</code>, <code>a+b</code>, <code>a+b+c</code>, không dùng được cho <code>b</code> đứng một mình</li>
+</ul>
+<h3>Khi nào không hiệu quả</h3>
+<ul>
+<li><code>LIKE '%abc'</code>, hoặc bọc cột trong hàm như <code>LOWER(email)</code> mà không có expression index</li>
+<li>Cột cardinality thấp như <code>status</code></li>
+<li>Query trả về phần lớn bảng: planner sẽ chọn Seq Scan</li>
+</ul>
+</div>
+</section>
+
+<!-- 2 -->
+<section id="s2">
+<header><span class="num">02</span><h2>Page, fan-out và chiều cao</h2></header>
+<div class="prose">
+<p>Đơn vị lưu trữ là <strong>page</strong>, không phải từng row. Mỗi node của cây là một page.</p>
+</div>
+<table>
+<tr><th>Database</th><th>Page mặc định</th><th>Đổi được không</th></tr>
+<tr><td>PostgreSQL</td><td>8KB</td><td>Chỉ khi compile lại (<code>BLCKSZ</code>)</td></tr>
+<tr><td>MySQL InnoDB</td><td>16KB</td><td><code>innodb_page_size</code>, chỉ lúc khởi tạo instance</td></tr>
+<tr><td>SQL Server, Oracle</td><td>8KB</td><td>Oracle qua <code>db_block_size</code></td></tr>
+<tr><td>SQLite</td><td>4KB</td><td>Qua PRAGMA</td></tr>
+</table>
+<div class="prose">
+<ul>
+<li>Mọi page trong một DB có cùng kích thước, nên vị trí page N trên disk là <code>N × 8KB</code>, và mỗi frame trong RAM vừa khít một page.</li>
+<li>Không dùng được trọn 8KB: header 24 byte, special space 16 byte, mỗi entry tốn thêm pointer 4 byte. Một entry index tối đa khoảng 1/3 page (~2.7KB).</li>
+<li>Fan-out (số con mỗi node) lớn, vài trăm, nên cây rất thấp. Key càng nhỏ, fan-out càng lớn.</li>
+</ul>
+<p>Thử đổi kiểu key và số row để thấy chiều cao cây thay đổi thế nào:</p>
+</div>
+<div class="frame" id="calc">
+  <div class="ph"><strong>Ước lượng kích thước index</strong><span class="meta">PostgreSQL B-tree</span></div>
+  <div class="bd">
+    <div class="controls">
+      <label for="c-key">Kiểu key</label>
+      <select id="c-key">
+        <option value="4">integer (4 byte)</option>
+        <option value="8" selected>bigint (8 byte)</option>
+        <option value="16">uuid (16 byte)</option>
+        <option value="32">email ~32 byte</option>
+        <option value="100">text ~100 byte</option>
+      </select>
+      <label for="c-page">Page</label>
+      <select id="c-page"><option value="8192" selected>8KB</option><option value="16384">16KB</option></select>
+      <label for="c-rows">Số row</label>
+      <input id="c-rows" type="range" min="4" max="10" step="1" value="8" aria-describedby="c-rows-v">
+      <b id="c-rows-v"></b>
+    </div>
+    <div class="stats">
+      <div class="stat"><span>Entry / page</span><b id="c-fan"></b></div>
+      <div class="stat"><span>Chiều cao cây</span><b id="c-h"></b></div>
+      <div class="stat"><span>Page đọc để tìm 1 key</span><b id="c-io"></b></div>
+      <div class="stat"><span>Kích thước index (ước tính)</span><b id="c-size"></b></div>
+    </div>
+    <svg id="c-svg" role="img" aria-label="Số page ở mỗi tầng của cây"></svg>
+  </div>
+</div>
+<div class="prose"><p>Với bigint, mỗi entry khoảng 20 byte nên một page chứa khoảng 400 entry: 3 tầng đủ cho ~64 triệu row, 4 tầng cho ~25 tỷ row. Đó là lý do tìm một row trong hàng trăm triệu row chỉ tốn 3–4 lần đọc page.</p></div>
+</section>
+
+<!-- 3 -->
+<section id="s3">
+<header><span class="num">03</span><h2>Split: cây lớn lên thế nào</h2></header>
+<div class="prose">
+<p>Khi một page đầy, DB không ghi tràn sang page bên cạnh. Key mới phải nằm đúng vị trí theo thứ tự, nên page bị <strong>split</strong>:</p>
+<ol class="list">
+<li>Tạo page mới.</li>
+<li>Chuyển khoảng một nửa số entry sang page mới.</li>
+<li>Đẩy separator key lên parent.</li>
+<li>Nếu parent cũng tràn, parent split tiếp. Split lan tới root thì tạo root mới và cây cao thêm một tầng.</li>
+</ol>
+<p>Hai loại split khác nhau ở chỗ separator key:</p>
+<ul>
+<li><strong>Leaf split: copy lên.</strong> Key vẫn ở lại leaf vì leaf giữ data thật.</li>
+<li><strong>Internal split: move lên.</strong> Internal node chỉ là biển chỉ đường, nên key giữa rời hẳn tầng đó.</li>
+</ul>
+<p>Internal node có n key thì có n + 1 con. Mỗi key là ranh giới giữa hai con nằm cạnh nó: <code>[6 | 8 | 10]</code> có 4 con là <code>&lt;6</code>, <code>6–8</code>, <code>8–10</code>, <code>≥10</code>.</p>
+</div>
+<div class="frame" id="st-root"></div>
+<div class="note"><strong>Lỗi hay gặp:</strong> quên cập nhật parent sau khi split. Separator trong parent và nội dung leaf phải khớp nhau, nếu không lần tìm sau sẽ đi sai leaf và không thấy key. Mỗi lần split, luôn hỏi: parent thay đổi thế nào?</div>
+<div class="prose">
+<p>B-tree <strong>cao lên từ đỉnh</strong>, không mọc dài xuống đáy. Mọi leaf luôn cùng độ sâu, nên tìm bất kỳ key nào cũng tốn số bước như nhau, O(log n).</p>
+<p>Split chia đôi để <strong>mua trước chỗ trống</strong>: lần split tốn kém, nhưng các insert tiếp theo vào khoảng đó chỉ ghi 1 page.</p>
+</div>
+<div class="senior">
+<h4>Góc nhìn senior: điểm tách không phải lúc nào cũng ở giữa</h4>
+<ul>
+<li>Key tăng dần (auto-increment, UUIDv7): khi split leaf ngoài cùng bên phải, DB giữ leaf cũ gần đầy và mở leaf mới gần trống. Index gọn, gần 100% đầy.</li>
+<li>Key ngẫu nhiên (UUIDv4): split xảy ra rải rác khắp cây, leaf chỉ đầy 50–70%. Index phình to, tốn RAM, buffer pool bị churn.</li>
+<li><code>fillfactor</code> (B-tree PostgreSQL mặc định 90) chừa sẵn chỗ khi build index để giảm split.</li>
+<li>Trước khi split, PostgreSQL thử dọn chỗ: xoá entry đã chết và deduplication (từ PG13) gộp các entry cùng key.</li>
+</ul>
+</div>
+</section>
+
+<!-- 4 -->
+<section id="s4">
+<header><span class="num">04</span><h2>Bên trong một page</h2></header>
+<div class="prose">
+<p>Leaf phải giữ key theo thứ tự để binary search. Nhưng nếu xếp tuple liền nhau theo thứ tự, mỗi lần chèn vào giữa phải dời toàn bộ dữ liệu phía sau. Cách giải là <strong>slotted page</strong>, chia page làm hai vùng mọc ngược chiều nhau:</p>
+<ul>
+<li><strong>Mục lục (line pointer):</strong> ở đầu page, mỗi pointer 4 byte, <strong>luôn sắp xếp theo key</strong>.</li>
+<li><strong>Tuple (key + TID):</strong> ở cuối page, ghi nối tiếp theo thứ tự đến trước, không bao giờ phải dời khi insert.</li>
+</ul>
+<p>Như một cuốn sổ: ghi nội dung ở trang cuối theo thứ tự tuỳ ý, và giữ một mục lục đã sắp xếp ở trang đầu.</p>
+</div>
+<div class="frame" id="st-page"></div>
+<div class="prose">
+<p>Pointer "tăng dần" nghĩa là tăng theo <strong>giá trị key</strong>, còn địa chỉ chúng trỏ tới thì lộn xộn. Khi hai vùng gặp nhau, page hết chỗ và lần insert sau gây split. Header còn chứa <strong>LSN</strong>: vị trí trong WAL của lần sửa gần nhất.</p>
+<p>Layout này trong RAM và trên disk <strong>giống hệt nhau</strong>. Buffer pool copy nguyên khối 8KB, không chuyển thành object nào khác.</p>
+</div>
+</section>
+
+<!-- 5 -->
+<section id="s5">
+<header><span class="num">05</span><h2>Buffer pool: index nằm trong RAM thế nào</h2></header>
+<div class="prose">
+<p>Không có chuyện load cả index vào RAM. Page chỉ được đọc lên khi query cần đến (lazy). Con trỏ con trong index là <strong>page number</strong>, không phải địa chỉ RAM, nên mỗi bước đi xuống cây phải hỏi buffer pool: page số X đang ở đâu?</p>
+</div>
+<table>
+<tr><th>Thành phần</th><th>Vai trò</th></tr>
+<tr><td>Frames</td><td>Mảng các ô bằng đúng một page, cấp phát sẵn khi DB khởi động (<code>shared_buffers</code>, <code>innodb_buffer_pool_size</code>)</td></tr>
+<tr><td>Hash table</td><td><code>(file, page_no)</code> → frame nào</td></tr>
+<tr><td>Descriptor</td><td>Gắn với mỗi frame: pin count (đang có người dùng thì cấm evict), dirty, usage count, latch</td></tr>
+</table>
+<div class="frame" id="st-buf"></div>
+
+<h3>Clock-sweep: page nào được ở lại</h3>
+<div class="prose"><p>Chạy các query trên buffer pool chỉ có 4 frame. Cây index giống hệt cây sau bài root split. Để ý page nào sống sót lâu nhất.</p></div>
+<div class="frame" id="sim">
+  <div class="ph"><strong>Mô phỏng buffer pool 4 frame</strong><span class="meta">clock-sweep, usage tối đa 3</span></div>
+  <div class="bd">
+    <div class="controls" id="sim-q"></div>
+    <div id="sim-frames" style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:14px"></div>
+    <div class="stats">
+      <div class="stat"><span>Hit</span><b id="sim-h">0</b></div>
+      <div class="stat"><span>Miss (đọc disk)</span><b id="sim-m">0</b></div>
+      <div class="stat"><span>Hit ratio</span><b id="sim-r">–</b></div>
+    </div>
+    <div class="log" id="sim-log" aria-live="polite"></div>
+  </div>
+</div>
+<div class="prose">
+<p>Root và internal node gần như không bao giờ bị evict vì mọi query đều đi qua. Tầng trên chỉ chiếm khoảng 1% kích thước index nhưng luôn nằm trong RAM. <strong>Thứ quyết định tốc độ là leaf có nằm trong RAM hay không.</strong></p>
+</div>
+<table>
+<tr><th></th><th>Bảo vệ cái gì</th><th>Giữ bao lâu</th></tr>
+<tr><td><strong>Pin</strong></td><td>Page không bị đuổi khỏi RAM</td><td>Trong lúc dùng frame</td></tr>
+<tr><td><strong>Latch</strong></td><td>Nội dung page giữa các thread (cấu trúc trong RAM)</td><td>Vài micro giây</td></tr>
+<tr><td><strong>Lock</strong></td><td>Row dữ liệu logic, phục vụ transaction isolation</td><td>Có thể tới hết transaction</td></tr>
+</table>
+<table>
+<tr><th></th><th>PostgreSQL</th><th>MySQL InnoDB</th></tr>
+<tr><td>Kích thước cache</td><td><code>shared_buffers</code> ~25% RAM, phần còn lại dựa vào OS page cache (double buffering)</td><td>Buffer pool ~60–75% RAM, O_DIRECT bỏ qua OS cache</td></tr>
+<tr><td>Eviction</td><td>Clock-sweep, usage tối đa 5. Ring buffer nhỏ riêng cho seq scan lớn</td><td>LRU chia young/old. Page mới vào giữa danh sách, chống full scan đẩy page nóng ra</td></tr>
+<tr><td>Tăng tốc thêm</td><td>Cache vị trí root trong relcache</td><td>Adaptive hash index, change buffer</td></tr>
+</table>
+</section>
+
+<!-- 6 -->
+<section id="s6">
+<header><span class="num">06</span><h2>Vòng đời INSERT rồi SELECT</h2></header>
+<div class="prose"><p>Một INSERT ghi gì và ghi ở đâu, rồi một SELECT range đọc lại nó ra sao. Chú ý luật <strong>WAL trước, data page sau</strong>.</p></div>
+<div class="frame" id="st-life"></div>
+<div class="prose">
+<ul>
+<li>Commit chỉ cần fsync WAL. Data page vẫn dirty trong RAM, được background writer, checkpoint, hoặc eviction ghi xuống sau.</li>
+<li>Trước khi flush một page, WAL phải đã nằm trên disk tới ít nhất LSN trong header page đó. Crash thì replay WAL.</li>
+</ul>
+</div>
+</section>
+
+<!-- 7 -->
+<section id="s7">
+<header><span class="num">07</span><h2>Trace một query thật</h2></header>
+<div class="prose"><p>Bảng <code>orders</code> 50 triệu row (~6.5GB), index <code>(user_id, created_at)</code> ~1.6GB, cao 3 tầng.</p></div>
+<pre><code>CREATE INDEX idx_orders_user_created ON orders (user_id, created_at);
+
+SELECT id, total FROM orders
+WHERE user_id = 42 AND created_at &gt;= '2026-10-01'
+ORDER BY created_at
+LIMIT 20;</code></pre>
+<div class="frame" id="st-trace"></div>
+<div class="prose">
+<p>Trong 24 lần truy cập page, chỉ 5 là index. <strong>Heap fetch mới là phần đắt</strong>, vì đơn của một user nằm rải rác khắp bảng. <code>read</code> chỉ có nghĩa là không có trong <code>shared_buffers</code>, page vẫn có thể nằm trong OS page cache. Bật <code>track_io_timing</code> để thấy thời gian I/O thật.</p>
+<p>Trên InnoDB, leaf secondary index chứa PK, nên mỗi row phải duyệt thêm cây clustered index (khoảng 3 page thay vì 1). Covering index còn quan trọng hơn ở MySQL.</p>
+</div>
+</section>
+
+<!-- 8 -->
+<section id="s8">
+<header><span class="num">08</span><h2>Index Only Scan và cái giá của SELECT *</h2></header>
+<div class="prose">
+<p>Nếu <strong>mọi cột</strong> query cần đều có trong index, DB trả kết quả ngay từ leaf mà không ghé heap. Đó là <strong>Index Only Scan</strong>. Chỉ cần thêm một cột không có trong index là mất khả năng này.</p>
+</div>
+<pre><code>CREATE INDEX idx_cov ON orders (user_id, created_at) INCLUDE (total, id);</code></pre>
+<div class="frame">
+  <div class="ph"><strong>Cùng một index, hai câu SELECT</strong></div>
+  <div class="bd">
+<svg viewBox="0 0 680 320" role="img" aria-label="Index Only Scan đọc khoảng 4 page, Index Scan đọc khoảng 24 page">
+<defs><marker id="ar1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5"/></marker></defs>
+<text class="tb" x="170" y="24" text-anchor="middle" fill="currentColor" style="fill:var(--ink)">A: SELECT id, total</text>
+<text class="tb" x="510" y="24" text-anchor="middle" style="fill:var(--ink)">B: SELECT *</text>
+<line x1="340" y1="12" x2="340" y2="310" class="dash"/>
+<g class="n struct"><rect x="110" y="40" width="120" height="34" rx="5"/><text class="t" x="170" y="57" text-anchor="middle" dominant-baseline="central">Root</text></g>
+<g class="n struct"><rect x="110" y="92" width="120" height="34" rx="5"/><text class="t" x="170" y="109" text-anchor="middle" dominant-baseline="central">Internal</text></g>
+<g class="n struct"><rect x="70" y="144" width="200" height="50" rx="5"/><text class="tb" x="170" y="161" text-anchor="middle" dominant-baseline="central">Leaf (2 page)</text><text class="ts" x="170" y="180" text-anchor="middle" dominant-baseline="central">có đủ id, total ✓</text></g>
+<line x1="170" y1="74" x2="170" y2="90" class="edge" marker-end="url(#ar1)"/><line x1="170" y1="126" x2="170" y2="142" class="edge" marker-end="url(#ar1)"/><line x1="170" y1="194" x2="170" y2="232" class="edge" marker-end="url(#ar1)"/>
+<g class="n row"><rect x="90" y="234" width="160" height="36" rx="5"/><text class="tb" x="170" y="252" text-anchor="middle" dominant-baseline="central">Trả kết quả</text></g>
+<text class="tb" x="170" y="300" text-anchor="middle" style="fill:var(--row)">≈ 4 page</text>
+<g class="n struct"><rect x="450" y="40" width="120" height="34" rx="5"/><text class="t" x="510" y="57" text-anchor="middle" dominant-baseline="central">Root</text></g>
+<g class="n struct"><rect x="450" y="92" width="120" height="34" rx="5"/><text class="t" x="510" y="109" text-anchor="middle" dominant-baseline="central">Internal</text></g>
+<g class="n struct"><rect x="410" y="144" width="200" height="50" rx="5"/><text class="tb" x="510" y="161" text-anchor="middle" dominant-baseline="central">Leaf (2 page)</text><text class="ts" x="510" y="180" text-anchor="middle" dominant-baseline="central">thiếu status ✗ → lấy TID</text></g>
+<line x1="510" y1="74" x2="510" y2="90" class="edge" marker-end="url(#ar1)"/><line x1="510" y1="126" x2="510" y2="142" class="edge" marker-end="url(#ar1)"/><line x1="510" y1="194" x2="510" y2="212" class="edge" marker-end="url(#ar1)"/>
+<g class="n miss"><rect x="370" y="214" width="40" height="28" rx="4"/><rect x="416" y="214" width="40" height="28" rx="4"/><rect x="462" y="214" width="40" height="28" rx="4"/><rect x="508" y="214" width="40" height="28" rx="4"/><rect x="554" y="214" width="40" height="28" rx="4"/><rect x="600" y="214" width="40" height="28" rx="4"/></g>
+<text class="lbl" x="505" y="262" text-anchor="middle">20 heap page rải rác, mỗi row 1 page</text>
+<text class="tb" x="510" y="300" text-anchor="middle" style="fill:var(--miss)">≈ 24 page</text>
+</svg>
+  </div>
+</div>
+<pre><code>-- Query A
+Index Only Scan using idx_cov on orders
+  Heap Fetches: 0
+  Buffers: shared hit=4
+
+-- Query B
+Index Scan using idx_cov on orders
+  Buffers: shared hit=5 read=19</code></pre>
+<div class="note"><strong>Dễ nhầm:</strong> PostgreSQL leaf entry chỉ chứa key và TID, không tự có PK. Query <code>SELECT id, total</code> cần <code>INCLUDE (total, id)</code>, chỉ <code>INCLUDE (total)</code> là chưa đủ. InnoDB thì khác: secondary index tự chứa PK.</div>
+<div class="prose">
+<p>Index không chứa thông tin MVCC, nên Index Only Scan chỉ bỏ qua heap khi <strong>visibility map</strong> đánh dấu page là all-visible. Nếu <code>Heap Fetches</code> lớn, cần VACUUM chứ không phải sửa index.</p>
+<h3>Chi phí tính theo row, không theo cột</h3>
+<p>Một row nằm trọn trong một page, các cột nằm liền nhau. Đọc thêm cột thường của cùng row gần như miễn phí. Bước nhảy chi phí là từ 0 lên 1 heap fetch cho mỗi row. Ngoại lệ là cột lớn bị <strong>TOAST</strong>:</p>
+</div>
+<div class="frame">
+  <div class="ph"><strong>Cột trong một row và TOAST</strong></div>
+  <div class="bd">
+<svg viewBox="0 0 680 240" role="img" aria-label="Các cột của row nằm liền nhau trong heap page, cột lớn trỏ sang bảng TOAST">
+<defs><marker id="ar2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5"/></marker></defs>
+<text class="tb" x="40" y="28" style="fill:var(--ink)">Heap page 88123, đã nằm trong RAM</text>
+<rect x="40" y="40" width="600" height="70" rx="8" fill="none" stroke="var(--rule-strong)"/>
+<g class="n dim"><rect x="56" y="56" width="70" height="38" rx="4"/><text class="ts" x="91" y="75" text-anchor="middle" dominant-baseline="central">header</text></g>
+<g class="n row"><rect x="130" y="56" width="64" height="38" rx="4"/><text class="ts" x="162" y="75" text-anchor="middle" dominant-baseline="central">id</text></g>
+<g class="n row"><rect x="198" y="56" width="74" height="38" rx="4"/><text class="ts" x="235" y="75" text-anchor="middle" dominant-baseline="central">user_id</text></g>
+<g class="n row"><rect x="276" y="56" width="90" height="38" rx="4"/><text class="ts" x="321" y="75" text-anchor="middle" dominant-baseline="central">created_at</text></g>
+<g class="n row"><rect x="370" y="56" width="64" height="38" rx="4"/><text class="ts" x="402" y="75" text-anchor="middle" dominant-baseline="central">total</text></g>
+<g class="n row"><rect x="438" y="56" width="64" height="38" rx="4"/><text class="ts" x="470" y="75" text-anchor="middle" dominant-baseline="central">status</text></g>
+<g class="n hot"><rect x="506" y="56" width="118" height="38" rx="4"/><text class="ts" x="565" y="75" text-anchor="middle" dominant-baseline="central">note → TOAST</text></g>
+<text class="lbl" x="290" y="134" text-anchor="middle">Cột nằm liền nhau trong cùng page: đọc thêm cột tốn 0 I/O</text>
+<line x1="565" y1="94" x2="565" y2="160" class="edge hot" marker-end="url(#ar2)"/>
+<text class="tb" x="40" y="182" style="fill:var(--ink)">Bảng TOAST riêng</text>
+<g class="n hot"><rect x="420" y="164" width="70" height="34" rx="4"/><text class="ts" x="455" y="181" text-anchor="middle" dominant-baseline="central">chunk 1</text></g>
+<g class="n hot"><rect x="496" y="164" width="70" height="34" rx="4"/><text class="ts" x="531" y="181" text-anchor="middle" dominant-baseline="central">chunk 2</text></g>
+<g class="n hot"><rect x="572" y="164" width="70" height="34" rx="4"/><text class="ts" x="607" y="181" text-anchor="middle" dominant-baseline="central">chunk 3</text></g>
+<text class="lbl" x="340" y="226" text-anchor="middle">Lấy cột TOAST: duyệt index của TOAST, đọc nhiều page, giải nén</text>
+</svg>
+  </div>
+</div>
+<table>
+<tr><th>Vì sao SELECT * chậm hơn</th><th>Mức độ</th></tr>
+<tr><td>Mất Index Only Scan, luôn phải đọc heap</td><td>Lớn nếu nhiều row</td></tr>
+<tr><td>Kéo theo cột TOAST (<code>text</code>, <code>jsonb</code> lớn): thêm page và giải nén</td><td>Lớn</td></tr>
+<tr><td>Dữ liệu trả về: băng thông, RAM client, ORM map object</td><td>Trung bình</td></tr>
+<tr><td>Sort/hash trên row rộng: tốn <code>work_mem</code>, dễ tràn ra disk</td><td>Trung bình</td></tr>
+<tr><td>CPU tách cột (deform tuple)</td><td>Nhỏ</td></tr>
+</table>
+<div class="senior">
+<h4>Covering index có giá</h4>
+<p style="margin:0">Index to hơn, tốn RAM hơn, mỗi lần ghi tốn hơn. Ở PostgreSQL, đưa cột hay bị UPDATE vào index (kể cả qua <code>INCLUDE</code>) sẽ phá HOT update. Chỉ cover cho query thật sự nóng, với cột ít thay đổi.</p>
+</div>
+</section>
+
+<!-- 9 -->
+<section id="s9">
+<header><span class="num">09</span><h2>Heap và MVCC</h2></header>
+<div class="prose">
+<p>Trong PostgreSQL, <strong>heap là nơi lưu chính các row của table</strong> (không phải cấu trúc min-heap, cũng không phải heap memory). Index chỉ là cấu trúc phụ trỏ vào nó.</p>
+<ul>
+<li>Mỗi table là một file gồm các page 8KB, cũng là slotted page.</li>
+<li>"Heap" nghĩa là một đống: row không được sắp xếp theo cột nào, đặt vào page còn chỗ (Free Space Map chỉ đường).</li>
+<li>Mỗi row có địa chỉ <strong>TID = (page, slot)</strong>, chính là cột ẩn <code>ctid</code>.</li>
+<li>Header của row có <code>xmin</code> (transaction tạo row) và <code>xmax</code> (transaction xoá hoặc thay thế row).</li>
+</ul>
+<p>Điểm quan trọng nhất: <strong>UPDATE không ghi đè row cũ.</strong></p>
+</div>
+<div class="frame" id="st-heap"></div>
+<table>
+<tr><th></th><th>PostgreSQL</th><th>MySQL InnoDB</th></tr>
+<tr><td>Row nằm ở đâu</td><td>Heap, không sắp xếp</td><td>Leaf của clustered index, xếp theo PK</td></tr>
+<tr><td>Index trỏ tới</td><td>TID (địa chỉ vật lý)</td><td>Giá trị PK, rồi tra tiếp cây PK</td></tr>
+<tr><td>Phiên bản cũ khi UPDATE</td><td>Trong heap, chờ VACUUM</td><td>Undo log, row được sửa tại chỗ</td></tr>
+</table>
+<div class="senior">
+<h4>Vì sao senior phải hiểu heap</h4>
+<ul style="margin:0">
+<li><strong>Bloat:</strong> UPDATE/DELETE liên tục mà autovacuum không theo kịp thì dead tuple chất đống, bảng phình và scan chậm dần.</li>
+<li><strong>Transaction mở lâu</strong> chặn VACUUM dọn mọi phiên bản mà nó có thể còn cần.</li>
+<li>Bảng update nhiều: hạn chế index trên cột hay bị update để giữ HOT, đặt <code>fillfactor</code> 80–90 để chừa chỗ.</li>
+<li>Heap không xếp theo <code>user_id</code>, nên range scan qua index đọc rải rác nhiều page.</li>
+</ul>
+</div>
+<pre><code>SELECT ctid, id, total FROM orders WHERE id = 9001;   -- (0,2)
+UPDATE orders SET total = 400000 WHERE id = 9001;
+SELECT ctid, id, total FROM orders WHERE id = 9001;   -- (0,3): phiên bản mới
+
+SELECT n_live_tup, n_dead_tup, n_tup_upd, n_tup_hot_upd, last_autovacuum
+FROM pg_stat_user_tables WHERE relname = 'orders';</code></pre>
+</section>
+
+<!-- 10 -->
+<section id="s10">
+<header><span class="num">10</span><h2>Checklist senior và bài tập</h2></header>
+<div class="prose">
+<p>Mid-level biết "đánh index cho cột hay query". Senior lập luận được về <strong>cái giá</strong> và <strong>đo được</strong>, không đoán:</p>
+<ul>
+<li><strong>Write amplification:</strong> mỗi index thêm một lần duyệt cây, có thể thêm split, thêm WAL cho mỗi INSERT/UPDATE.</li>
+<li><strong>Key nhỏ, tăng dần</strong> cho index gọn. UUIDv4 làm index phình, nên dùng UUIDv7/ULID.</li>
+<li><strong>Đọc được <code>EXPLAIN (ANALYZE, BUFFERS)</code>:</strong> <code>shared hit</code> là cache hit, <code>read</code> là miss.</li>
+<li><strong>Working set có vừa RAM không:</strong> OLTP mà hit ratio dưới ~99% là dấu hiệu cần điều tra.</li>
+</ul>
+</div>
+<pre><code>-- Cache hit ratio theo từng index
+SELECT indexrelname, idx_blks_hit, idx_blks_read,
+       round(idx_blks_hit * 100.0 / nullif(idx_blks_hit + idx_blks_read, 0), 2) AS hit_pct
+FROM pg_statio_user_indexes
+ORDER BY idx_blks_read DESC;
+
+SELECT pg_size_pretty(pg_relation_size('your_index'));</code></pre>
+
+<h3>Bài tập thực hành</h3>
+<details><summary>Seq Scan, Index Scan, Index Only Scan</summary>
+<p>Tạo bảng 10 triệu row. So sánh <code>EXPLAIN (ANALYZE, BUFFERS)</code> của cùng một query với ba loại scan.</p></details>
+<details><summary>bigserial và UUIDv4</summary>
+<p>Insert 1 triệu row với PK <code>bigserial</code> và với <code>uuid</code> v4. So sánh <code>pg_relation_size</code> của index và thời gian insert, giải thích bằng cơ chế split.</p></details>
+<details><summary>Cache lạnh và cache nóng</summary>
+<p>Restart PostgreSQL, chạy một query hai lần liên tiếp với <code>BUFFERS</code>. So sánh <code>shared read</code> và <code>shared hit</code>. Lần đầu có thật sự đọc disk không, hay OS page cache đã đỡ?</p></details>
+<details><summary>Covering index</summary>
+<p>Tạo bảng 5 triệu row theo schema <code>orders</code>. Chạy query ở phần 07 với index thường, rồi với covering index sau khi <code>VACUUM</code>. Giải thích chênh lệch bằng 12 bước trace.</p></details>
+
+<h3>Câu hỏi kiểm tra</h3>
+<details><summary>Leftmost prefix</summary><p>Với index <code>(user_id, created_at)</code>, query <code>WHERE created_at &gt; now() - interval '1 day'</code> có dùng được index không? Vì sao?</p></details>
+<details><summary>COUNT(*) và visibility map</summary><p><code>SELECT COUNT(*) FROM orders WHERE user_id = 42</code> với index <code>(user_id, created_at)</code> có cần đọc heap không? Trả lời cho trường hợp vừa VACUUM và vừa có nhiều UPDATE.</p></details>
+<details><summary>Full scan làm bẩn cache</summary><p><code>SELECT * FROM orders</code> trên bảng 50GB, buffer pool 8GB. Với clock-sweep thuần, page index nóng của query khác sẽ ra sao? PostgreSQL và InnoDB chống lại thế nào?</p></details>
+<details><summary>TOAST</summary><p>Bảng <code>products</code> có <code>description text</code> trung bình 5KB. <code>SELECT id, name</code> và <code>SELECT *</code>, cùng trả 500 row, không covering index: khác nhau bao nhiêu page và ở bước nào?</p></details>
+<details><summary>Bảng sessions update liên tục</summary><p>Bảng <code>sessions</code> UPDATE <code>last_seen_at</code> 5.000 lần/giây, có index trên <code>(user_id)</code> và <code>(last_seen_at)</code>. Chuyện gì xảy ra với heap và index? Đề xuất thay đổi gì?</p></details>
+</section>
+</main>
+</div>
+
+<script>
+/* ---------- helpers ---------- */
+const DEFS=`<defs><marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>`;
+function B(x,y,w,h,cls,t,sub,start){
+  const tx=start?x+10:x+w/2, an=start?'start':'middle';
+  return `<g class="n ${cls||''}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="5"/>`+
+  `<text class="tb" x="${tx}" y="${y+(sub?h/2-8:h/2)}" text-anchor="${an}" dominant-baseline="central">${t}</text>`+
+  (sub?`<text class="ts" x="${tx}" y="${y+h/2+10}" text-anchor="${an}" dominant-baseline="central">${sub}</text>`:'')+`</g>`;
+}
+const L=(x1,y1,x2,y2,cls)=>`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" class="edge ${cls||''}"/>`;
+const A=(d,cls)=>`<path d="${d}" class="edge ${cls||''}" marker-end="url(#arw)"/>`;
+const T=(x,y,t,anchor,cls)=>`<text class="${cls||'lbl'}" x="${x}" y="${y}" text-anchor="${anchor||'start'}">${t}</text>`;
+const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+
+function stepper(id,{title,vb,steps,draw,after,extra}){
+  const el=document.getElementById(id);
+  el.innerHTML=`<div class="ph"><strong>${title}</strong><span class="meta"></span></div><div class="bd">
+  <h4 class="st-t" style="font-size:16px;margin-bottom:8px"></h4>${extra||''}
+  <svg viewBox="${vb}" role="img"></svg>
+  <div class="desc" aria-live="polite"><div class="st-d"></div><pre hidden></pre></div>
+  <div class="nav"><button data-d="-1">Trước</button><button data-d="1" class="primary">Tiếp</button></div></div>`;
+  const svg=el.querySelector('svg'),t=el.querySelector('.st-t'),d=el.querySelector('.st-d'),pre=el.querySelector('pre'),meta=el.querySelector('.meta');
+  const [pv,nx]=el.querySelectorAll('.nav button');let i=0;
+  function render(){const s=steps[i];svg.innerHTML=DEFS+draw(s,i);svg.setAttribute('aria-label',s.t);t.textContent=s.t;d.textContent=s.d;
+    pre.hidden=!s.c;pre.textContent=s.c||'';meta.textContent=`bước ${i+1} / ${steps.length}`;pv.disabled=i===0;nx.disabled=i===steps.length-1;after&&after(s,el);}
+  function go(k){i=Math.max(0,Math.min(steps.length-1,i+k));render();}
+  pv.onclick=()=>go(-1);nx.onclick=()=>go(1);
+  el.tabIndex=0;el.addEventListener('keydown',e=>{if(e.key==='ArrowRight')go(1);if(e.key==='ArrowLeft')go(-1);});
+  render();
+}
+
+/* ---------- playground: B+tree, max 3 keys ---------- */
+(function(){
+  const MAX=3,SEQ=[3,5,7,8,4,12,13,2,15,16];let uid=0,root,touched,path,found,seqI,writes,logs=[];
+  const N=(leaf,keys,children)=>({id:++uid,leaf,keys,children:children||[]});
+  function reset(){uid=0;root=N(false,[10],[N(true,[1,6,9]),N(true,[10,11,19])]);touched=new Set();path=new Set();found=null;seqI=0;writes=0;
+    logs=['Cây ban đầu giống ví dụ trong bài: parent [10], leaf [1, 6, 9] và [10, 11, 19].'];draw();}
+  const childIdx=(n,k)=>{let i=0;while(i<n.keys.length&&k>=n.keys[i])i++;return i;};
+  function ins(n,k,msgs){path.add(n.id);
+    if(n.leaf){n.keys.push(k);n.keys.sort((a,b)=>a-b);touched.add(n.id);
+      if(n.keys.length>MAX){const m=n.keys.length/2,right=N(true,n.keys.slice(m));n.keys=n.keys.slice(0,m);touched.add(right.id);
+        msgs.push(`Leaf tràn → tách [${n.keys.join(', ')}] | [${right.keys.join(', ')}], copy ${right.keys[0]} lên parent`);return{sep:right.keys[0],right};}
+      msgs.push(`Chèn vào leaf → [${n.keys.join(', ')}], không split`);return null;}
+    const i=childIdx(n,k),r=ins(n.children[i],k,msgs);if(!r)return null;
+    n.keys.splice(i,0,r.sep);n.children.splice(i+1,0,r.right);touched.add(n.id);
+    if(n.keys.length>MAX){const m=Math.floor((n.keys.length-1)/2),sep=n.keys[m],right=N(false,n.keys.slice(m+1),n.children.slice(m+1));
+      n.keys=n.keys.slice(0,m);n.children=n.children.slice(0,m+1);touched.add(right.id);
+      msgs.push(`Internal tràn → tách [${n.keys.join(' | ')}] | [${right.keys.join(' | ')}], move ${sep} lên trên`);return{sep,right};}
+    msgs.push(`Parent nhận separator ${r.sep} → [${n.keys.join(' | ')}]`);return null;}
+  function findLeaf(k,msgs){let n=root;path=new Set([n.id]);
+    while(!n.leaf){const i=childIdx(n,k);msgs&&msgs.push(`[${n.keys.join(' | ')}]: ${k} đi vào con thứ ${i+1}`);n=n.children[i];path.add(n.id);}return n;}
+  function insert(k){touched=new Set();path=new Set();found=null;
+    const leaf=findLeaf(k);if(leaf.keys.includes(k)){found=leaf.id;logs.unshift(`Insert ${k}: key đã tồn tại`);draw();return;}
+    path=new Set();const msgs=[],r=ins(root,k,msgs);
+    if(r){root=N(false,[r.sep],[root,r.right]);touched.add(root.id);msgs.push(`Root tràn → tạo root mới [${r.sep}], cây cao thêm 1 tầng`);}
+    writes=touched.size;logs.unshift(`Insert ${k}: ${msgs.join(' · ')} · ghi ${writes} page`);draw();}
+  function find(k){touched=new Set();const msgs=[];const leaf=findLeaf(k,msgs);
+    found=leaf.keys.includes(k)?leaf.id:null;
+    logs.unshift(`Tìm ${k}: ${msgs.join(' → ')} → leaf [${leaf.keys.join(', ')}] ${found?'thấy':'không có'} · đọc ${path.size} page`);draw();}
+  function depth(n){return n.leaf?1:1+depth(n.children[0]);}
+  function draw(){
+    const leaves=[];(function c(n){n.leaf?leaves.push(n):n.children.forEach(c);})(root);
+    const W=n=>Math.max(54,22+n.keys.length*(n.leaf?28:34)),GAP=16;
+    const total=leaves.reduce((s,l)=>s+W(l),0)+GAP*(leaves.length-1);
+    const D=depth(root),vbW=Math.max(680,total+40),H=36,LG=78,ox=(vbW-total)/2,pos=new Map();
+    let x=ox;leaves.forEach(l=>{pos.set(l.id,{x,y:20+(D-1)*LG,w:W(l)});x+=W(l)+GAP;});
+    (function p(n,lv){if(n.leaf)return;n.children.forEach(c=>p(c,lv+1));const f=pos.get(n.children[0].id),l=pos.get(n.children[n.children.length-1].id);
+      const w=W(n);pos.set(n.id,{x:(f.x+l.x+l.w)/2-w/2,y:20+lv*LG,w});})(root,0);
+    let o='';
+    (function e(n){if(n.leaf)return;const P=pos.get(n.id);n.children.forEach((c,j)=>{const C=pos.get(c.id);
+      const ax=P.x+P.w*(j+0.5)/n.children.length;const on=path.has(n.id)&&path.has(c.id)&&!touched.size;
+      o+=L(ax,P.y+H,C.x+C.w/2,C.y,on?'on':(touched.has(c.id)&&touched.has(n.id)?'hot':''));e(c);});})(root);
+    for(let i=0;i<leaves.length-1;i++){const a=pos.get(leaves[i].id),b=pos.get(leaves[i+1].id);o+=L(a.x+a.w,a.y+H/2,b.x,b.y+H/2);}
+    pos.forEach((P,id)=>{});
+    (function r(n){const P=pos.get(n.id);let cls=n.leaf?'row':'struct';
+      if(touched.has(n.id))cls='hot';else if(found===n.id)cls='hit';else if(path.has(n.id))cls='info';
+      o+=B(P.x,P.y,P.w,H,cls,n.leaf?n.keys.join(', '):'[ '+n.keys.join(' | ')+' ]');if(!n.leaf)n.children.forEach(r);})(root);
+    const svg=document.getElementById('pg-svg');svg.setAttribute('viewBox',`0 0 ${vbW} ${20+D*LG-20}`);svg.innerHTML=o;
+    document.getElementById('pg-log').innerHTML=logs.slice(0,6).map(esc).map(s=>`<div>${s}</div>`).join('');
+    document.getElementById('pg-meta').textContent=`cao ${D} tầng · ${leaves.length} leaf`;
+    const nk=SEQ[seqI];document.getElementById('pg-next-k').textContent=nk===undefined?'hết':nk;document.getElementById('pg-next').disabled=nk===undefined;}
+  const val=()=>{const v=parseInt(document.getElementById('pg-key').value,10);if(isNaN(v)||v<0||v>999){logs.unshift('Nhập một số nguyên từ 0 đến 999');draw();return null;}return v;};
+  document.getElementById('pg-ins').onclick=()=>{const v=val();if(v!==null)insert(v);};
+  document.getElementById('pg-find').onclick=()=>{const v=val();if(v!==null)find(v);};
+  document.getElementById('pg-key').addEventListener('keydown',e=>{if(e.key==='Enter'){const v=val();if(v!==null)insert(v);}});
+  document.getElementById('pg-next').onclick=()=>{if(SEQ[seqI]!==undefined){document.getElementById('pg-key').value=SEQ[seqI];insert(SEQ[seqI++]);}};
+  document.getElementById('pg-reset').onclick=reset;reset();
+})();
+
+/* ---------- fan-out calculator ---------- */
+(function(){
+  const k=document.getElementById('c-key'),p=document.getElementById('c-page'),r=document.getElementById('c-rows');
+  const fmt=n=>n>=1e9?(n/1e9).toLocaleString('vi',{maximumFractionDigits:1})+' tỷ':n>=1e6?(n/1e6).toLocaleString('vi',{maximumFractionDigits:1})+' triệu':n.toLocaleString('vi');
+  const bytes=b=>b>=2**30?(b/2**30).toFixed(1)+' GB':b>=2**20?(b/2**20).toFixed(0)+' MB':(b/1024).toFixed(0)+' KB';
+  function upd(){const key=+k.value,page=+p.value,rows=10**(+r.value);
+    const entry=Math.ceil((8+key)/8)*8+4,per=Math.floor((page-40)/entry),fill=Math.floor(per*0.9);
+    const lv=[];let c=Math.ceil(rows/fill);lv.push(c);while(c>1){c=Math.ceil(c/per);lv.push(c);}lv.reverse();
+    document.getElementById('c-rows-v').textContent=fmt(rows)+' row';
+    document.getElementById('c-fan').textContent=per;document.getElementById('c-h').textContent=lv.length+' tầng';
+    document.getElementById('c-io').textContent=lv.length;
+    document.getElementById('c-size').textContent=bytes(lv.reduce((s,x)=>s+x,0)*page);
+    const max=Math.log10(lv[lv.length-1]+1)||1;let o='';
+    lv.forEach((n,i)=>{const y=14+i*40,w=60+Math.log10(n+1)/max*480,leaf=i===lv.length-1;
+      o+=T(20,y+20,i===0?'Root':leaf?'Leaf':'Internal','start','lbl');
+      o+=B(110,y,w,30,leaf?'row':'struct',n.toLocaleString('vi')+' page','',true);});
+    const svg=document.getElementById('c-svg');svg.setAttribute('viewBox',`0 0 680 ${lv.length*40+20}`);svg.innerHTML=o;}
+  [k,p,r].forEach(e=>e.addEventListener('input',upd));upd();
+})();
+
+/* ---------- root split stepper ---------- */
+(function(){
+  const LX=[40,165,290,415,540],LC=LX.map(x=>x+52);
+  const leaves=(lbl,k)=>lbl.map((t,i)=>t?B(LX[i],210,105,40,k[i]||'row',t):'').join('');
+  const S=[
+  {t:'Trước khi insert 4',d:'Parent [6 | 8 | 10] có 3 key nên có 4 con. Đọc như biển chỉ đường: < 6 → L1, 6–8 → L3, 8–10 → L4, ≥ 10 → L2. Với capacity 3, parent đầy nhưng vẫn hợp lệ.',
+   s:()=>B(220,90,240,52,'struct','[ 6 | 8 | 10 ]','3 key, 4 con')+[0,2,3,4].map(i=>L(340,142,LC[i],210)).join('')+leaves(['1, 3, 5','','6, 7','8, 9','10, 11, 19'],[])},
+  {t:'Leaf split đẩy key 4 lên, parent tràn',d:'Insert 4 vào L1 làm L1 tràn, tách thành [1, 3] và [4, 5]. Leaf mới cần một con trỏ trong parent nên key 4 được chèn vào: [4 | 6 | 8 | 10] có 4 key, 5 con, vượt capacity. Parent phải split.',
+   s:()=>B(200,90,280,52,'miss','[ 4 | 6 | 8 | 10 ]','4 key, 5 con: tràn')+LC.map(c=>L(340,142,c,210)).join('')+leaves(['1, 3','4, 5','6, 7','8, 9','10, 11, 19'],['hot','hot'])},
+  {t:'Chia đôi parent tại key giữa',d:'Key giữa là 6. Nửa trái giữ [4] với 2 con (L1, L5). Nửa phải nhận [8 | 10] với 3 con (L3, L4, L2). Key 6 bị tách ra, không ở lại nửa nào.',
+   s:()=>B(100,90,140,52,'struct','[ 4 ]','trái')+B(305,94,70,40,'hot','6')+B(430,90,170,52,'struct','[ 8 | 10 ]','phải')+L(170,142,LC[0],210)+L(170,142,LC[1],210)+[2,3,4].map(i=>L(515,142,LC[i],210)).join('')+leaves(['1, 3','4, 5','6, 7','8, 9','10, 11, 19'],[])},
+  {t:'Key giữa đi lên, tạo root mới',d:'Bình thường key 6 sẽ được chèn vào node cha. Nhưng node vừa split là root, không có cha. DB tạo root mới chỉ chứa [6] với 2 con. Cây cao thêm 1 tầng, và đây là cách duy nhất để B-tree tăng chiều cao.',
+   s:()=>B(285,10,110,52,'hot','[ 6 ]','root mới')+L(340,62,170,100)+L(340,62,515,100)+B(100,100,140,40,'struct','[ 4 ]')+B(430,100,170,40,'struct','[ 8 | 10 ]')+L(170,140,LC[0],210)+L(170,140,LC[1],210)+[2,3,4].map(i=>L(515,140,LC[i],210)).join('')+leaves(['1, 3','4, 5','6, 7','8, 9','10, 11, 19'],[])},
+  {t:'Kiểm chứng: tìm key 7',d:'Root [6]: 7 ≥ 6 → đi phải. Internal [8 | 10]: 7 < 8 → con đầu. Leaf [6, 7] → thấy 7. Mọi leaf cách root đúng 3 bước, cây vẫn cân bằng.',
+   s:()=>B(285,10,110,52,'info','[ 6 ]','7 ≥ 6 → phải')+L(340,62,170,100)+L(340,62,515,100,'on')+B(100,100,140,40,'struct','[ 4 ]')+B(430,100,170,40,'info','[ 8 | 10 ]')+L(170,140,LC[0],210)+L(170,140,LC[1],210)+L(515,140,LC[2],210,'on')+L(515,140,LC[3],210)+L(515,140,LC[4],210)+leaves(['1, 3','4, 5','6, 7','8, 9','10, 11, 19'],['','','hit'])}];
+  stepper('st-root',{title:'Root split từng bước',vb:'0 0 680 260',steps:S,draw:s=>s.s()});
+})();
+
+/* ---------- slotted page stepper ---------- */
+(function(){
+  const ins=[33,20,40,25];
+  const S=[
+  {k:0,t:'Page mới, còn trống',d:'Bên trái là header (thông tin quản lý page, có LSN), bên phải là special (link sang leaf trước và sau). Ở giữa là chỗ trống.'},
+  {k:1,t:'Insert 33',d:'Tuple 33 được ghi sát cuối page (bên phải). Pointer #1 được thêm vào đầu page (bên trái), trỏ tới tuple 33.',nw:[0],np:[0]},
+  {k:2,t:'Insert 20',d:'Tuple 20 ghi tiếp, ngay bên trái 33: phần tuple không cần đúng thứ tự. Nhưng 20 < 33 nên pointer mới phải đứng trước, pointer của 33 dịch sang phải 1 ô. Chỉ dịch 4 byte.',nw:[1],np:[0],sh:[1]},
+  {k:3,t:'Insert 40',d:'40 lớn nhất nên pointer mới thêm vào cuối mục lục, không pointer nào phải dịch.',nw:[2],np:[2]},
+  {k:4,t:'Insert 25',d:'25 nằm giữa 20 và 33: chèn pointer vào vị trí #2, dịch pointer của 33 và 40. Mục lục: 20, 25, 33, 40, luôn đúng thứ tự. Tuple: 33, 20, 40, 25, lộn xộn cũng không sao.',nw:[3],np:[1],sh:[2,3]},
+  {k:4,t:'Tìm key 40: binary search trên mục lục',d:'Xem pointer giữa (#2) → 25 < 40, sang nửa phải. Xem #3 → 33 < 40, sang phải. Xem #4 → 40, tìm thấy. Mục lục đã sắp xếp nên mỗi bước loại được một nửa.',sr:[1,2,3]},
+  {k:4,full:1,t:'Khi nào page đầy?',d:'Mục lục mọc từ trái sang, tuple mọc từ phải sang. Khi hai vùng gặp nhau là page hết chỗ, lần insert tiếp gây page split.'}];
+  function draw(s){const Y=60,H=64;let o=`<rect x="40" y="${Y}" width="600" height="${H}" rx="6" fill="none" stroke="var(--rule-strong)"/>`;
+    o+=B(40,Y,60,H,'dim','Header')+B(580,Y,60,H,'dim','Special');
+    const tu=ins.slice(0,s.k),srt=[...tu].sort((a,b)=>a-b),TX=j=>576-(j+1)*56,PX=i=>104+i*56,pe=104+srt.length*56,ts=s.k?TX(s.k-1):580;
+    if(s.full)o+=B(pe,Y+6,ts-pe-4,H-12,'miss','');
+    else if(ts-pe>70)o+=`<rect x="${pe}" y="${Y+6}" width="${ts-pe-4}" height="${H-12}" class="dash"/>`+T((pe+ts)/2,Y+H/2+4,'free space','middle');
+    if(s.full)o+=T((pe+ts)/2,Y-12,'→ ← sắp gặp nhau','middle');
+    tu.forEach((v,j)=>{o+=B(TX(j)+4,Y+6,48,H-12,s.nw&&s.nw.includes(j)?'hot':'row',String(v));});
+    srt.forEach((v,i)=>{const nw=s.np&&s.np.includes(i),sh=s.sh&&s.sh.includes(i),sr=s.sr&&s.sr.includes(i);
+      o+=B(PX(i),Y+6,48,H-12,nw?'hot':sr?'info':sh?'hot':'struct','#'+(i+1),'→'+v);
+      const j=tu.indexOf(v),x1=PX(i)+24,x2=TX(j)+28,cy=Y+H+24+Math.abs(x2-x1)*0.12;
+      o+=`<path d="M${x1} ${Y+H-6} Q${(x1+x2)/2} ${cy} ${x2} ${Y+H-6}" class="edge ${sr?'on':''}"/>`;});
+    o+=T(104,Y-12,'Mục lục (pointer, luôn sắp xếp) →')+T(576,Y-12,'← Tuple (theo thứ tự ghi)','end');return o;}
+  stepper('st-page',{title:'Slotted page: insert 33, 20, 40, 25',vb:'0 0 680 220',steps:S,draw});
+})();
+
+/* ---------- buffer lookup stepper ---------- */
+(function(){
+  const base=()=>({F:[{p:1,pin:0,u:2,d:0},{p:5,pin:0,u:0,d:1},{p:3,pin:0,u:1,d:0},{p:6,pin:0,u:3,d:0}],H:[[1,0],[3,2],[5,1],[6,3]],hand:0});
+  const S=[
+  {t:'Executor cần đọc page 3',d:'Đang duyệt index, parent cho biết con tiếp theo nằm ở page số 3. Executor chỉ biết số page, không biết page đó đang ở đâu trong RAM.',need:3,m:s=>s},
+  {t:'Tra hash table: HIT',d:'Tra (file index, page 3) → nằm ở Frame 2. Không đụng tới disk. Đây là trường hợp phổ biến nhất, chỉ tốn vài trăm nanosecond.',need:3,hh:3,hf:2,k:'info',m:s=>s},
+  {t:'Pin frame',d:'pin = 1 nghĩa là có người đang dùng, cấm evict. Usage tăng lên vì page vừa được dùng, nên sẽ sống lâu hơn trong RAM.',need:3,hf:2,k:'hit',m:s=>{s.F[2].pin=1;s.F[2].u=2;return s}},
+  {t:'Lấy latch và đọc page',d:'Lấy latch (khoá ngắn hạn mức page) để không thread nào sửa page khi đang đọc. Binary search trên mảng pointer để tìm page con tiếp theo hoặc TID của row.',need:3,hf:2,k:'hit',latch:1,m:s=>{s.F[2].pin=1;s.F[2].u=2;return s}},
+  {t:'Thả latch, unpin',d:'Đọc xong thì thả latch và giảm pin về 0. Page vẫn nằm trong RAM, chỉ là từ giờ được phép evict nếu cần chỗ.',need:3,hf:2,m:s=>{s.F[2].u=2;return s}},
+  {t:'Cần page 9: MISS',d:'Hash table không có page 9, nên phải đọc từ disk. Cả 4 frame đều đã có page, nên phải đuổi một page ra.',need:9,miss:1,m:s=>{s.F[2].u=2;return s}},
+  {t:'Chọn nạn nhân bằng clock-sweep',d:'Kim đồng hồ quét lần lượt. Frame 0 có usage 2 > 0 → giảm còn 1, bỏ qua. Frame 1 có usage 0 → chọn làm nạn nhân. Page hay dùng có usage cao nên được tha. Frame đang pin luôn bị bỏ qua.',need:9,miss:1,hf:1,k:'miss',m:s=>{s.F[2].u=2;s.F[0].u=1;s.hand=1;return s}},
+  {t:'Nạn nhân dirty: flush trước',d:'Page 5 đã bị sửa (dirty) nên phải ghi xuống disk trước khi bỏ, và WAL của thay đổi đó phải đã nằm trên disk. Vì vậy một câu SELECT đôi khi lại gây ra một lần ghi.',need:9,miss:1,hf:1,k:'hot',io:'flush page 5 ↓',m:s=>{s.F[2].u=2;s.F[0].u=1;s.hand=1;s.F[1].d=0;return s}},
+  {t:'Đọc page 9 vào Frame 1',d:'Đọc 8KB page 9 vào Frame 1, cập nhật hash: xoá "5 → F1", thêm "9 → F1". Pin rồi đọc như bước 4. Đây là bước chậm nhất, cỡ 0.1 ms với SSD, chậm hơn hit hàng trăm lần.',need:9,hh:9,hf:1,k:'hit',io:'read page 9 ↑',m:s=>{s.F[2].u=2;s.F[0].u=1;s.hand=2;s.F[1]={p:9,pin:1,u:1,d:0};s.H=[[1,0],[3,2],[9,1],[6,3]];return s}}];
+  function draw(st){const s=st.m(base());let o=T(20,30,'Executor')+T(190,30,'Hash table')+T(400,30,'Frames + descriptor');
+    o+=B(20,40,140,50,st.miss?'miss':'info','cần page '+st.need);
+    const HY=i=>40+i*34,FY=i=>40+i*46;
+    s.H.forEach(([p,f],i)=>{o+=B(190,HY(i),150,28,st.hh===p?(st.k||'info'):'',`page ${p} → F${f}`);});
+    if(st.miss&&!st.hh)o+=B(190,HY(4),150,28,'miss','page 9 → không có');
+    s.F.forEach((f,i)=>{const hl=st.hf===i;o+=B(400,FY(i),260,36,hl?st.k||'info':(f.d?'hot':''),`F${i}  page ${f.p}  pin ${f.pin}  usage ${f.u}${f.d?'  dirty':''}${hl&&st.latch?'  🔒':''}`,'',true);});
+    if(st.hf!==undefined&&(st.k==='miss'||st.io))o+=T(386,FY(s.hand)+22,'▶','middle','tb');
+    if(st.hh!==undefined){const hi=s.H.findIndex(h=>h[0]===st.hh);o+=A(`M160 65 L188 ${HY(hi)+14}`,'on')+A(`M340 ${HY(hi)+14} L398 ${FY(st.hf)+18}`,'on');}
+    else if(st.miss&&st.hf===undefined)o+=A(`M160 65 L188 ${HY(4)+14}`,'miss');
+    o+=T(190,232,'Disk (file của index)')+`<rect x="190" y="240" width="480" height="50" rx="6" fill="none" stroke="var(--rule-strong)"/>`;
+    for(let p=1;p<=9;p++){const hl=st.io&&((st.io.includes('5')&&p===5)||(st.io.includes('9')&&p===9));o+=B(198+(p-1)*51,248,45,34,hl?(st.k||'hot'):'dim','P'+p);}
+    if(st.io){const y=FY(st.hf)+18;o+=st.io.startsWith('flush')?A(`M660 ${y} H674 V238`,'hot'):A(`M674 238 V${y} H662`,'on');o+=T(560,222,st.io,'middle','tb');}
+    return o;}
+  stepper('st-buf',{title:'Đọc một page: hit và miss',vb:'0 0 680 300',steps:S,draw});
+})();
+
+/* ---------- clock sweep simulator ---------- */
+(function(){
+  const P={R:'Root [6]',A:'Int [4]',B:'Int [8|10]',L1:'Leaf 1,3',L5:'Leaf 4,5',L3:'Leaf 6,7',L4:'Leaf 8,9',L2:'Leaf 10,11,19'};
+  const Q=[['SELECT id=1',['R','A','L1']],['SELECT id=5',['R','A','L5']],['SELECT id=7',['R','B','L3']],['SELECT id=9',['R','B','L4']],['SELECT id=11',['R','B','L2']],['UPDATE id=7',['R','B','L3'],1]];
+  const N=4,MAXU=3;let F,hand,hits,miss,log,busy=false;const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function reset(){F=Array.from({length:N},()=>({p:null,u:0,d:false}));hand=0;hits=0;miss=0;log=['Buffer pool trống: mọi page đều phải đọc từ disk.'];render(-1,'');}
+  function victim(){for(;;){const f=F[hand],i=hand;if(!f.p){hand=(hand+1)%N;return i;}if(f.u>0){f.u--;hand=(hand+1)%N;}else{hand=(hand+1)%N;return i;}}}
+  function access(p,dirty){let i=F.findIndex(f=>f.p===p);
+    if(i>=0){hits++;F[i].u=Math.min(F[i].u+1,MAXU);if(dirty){F[i].d=true;log.unshift(`${P[p]}: HIT, sửa trong RAM, đánh dấu dirty`);}else log.unshift(`${P[p]}: HIT (usage ${F[i].u})`);return[i,'hit'];}
+    miss++;i=victim();const o=F[i];let s=`${P[p]}: MISS → `;
+    if(o.p){s+=`evict ${P[o.p]}`;if(o.d)s+=` (dirty, flush xuống disk trước)`;s+=' → ';}else s+='frame trống → ';
+    s+='đọc từ disk';F[i]={p,u:1,d:!!dirty};if(dirty)s+=', sửa → dirty';log.unshift(s);return[i,'miss'];}
+  function render(fi,cls){
+    document.getElementById('sim-frames').innerHTML=F.map((f,i)=>{const c=i===fi?cls:(f.d?'hot':'');
+      return `<div><svg viewBox="0 0 150 92" role="img" aria-label="Frame ${i}: ${f.p?P[f.p]:'trống'}">${B(1,1,148,90,c,f.p?P[f.p]:'trống',`usage ${'●'.repeat(f.u)}${'○'.repeat(MAXU-f.u)}${f.d?'  dirty':''}`)}${T(10,18,'Frame '+i,'start','ts')}</svg>
+      <div class="ts" style="text-align:center;color:var(--struct);height:18px;font-size:12px">${i===hand?'▲ clock hand':''}</div></div>`;}).join('');
+    document.getElementById('sim-h').textContent=hits;document.getElementById('sim-m').textContent=miss;
+    document.getElementById('sim-r').textContent=hits+miss?Math.round(hits*100/(hits+miss))+'%':'–';
+    document.getElementById('sim-log').innerHTML=log.slice(0,7).map(l=>`<div>${esc(l)}</div>`).join('');}
+  function run(q){if(busy)return;busy=true;log.unshift('— '+q[0]+' —');let k=0;
+    (function step(){if(k>=q[1].length){busy=false;render(-1,'');return;}const[i,c]=access(q[1][k],q[2]&&k===q[1].length-1);k++;render(i,c);setTimeout(step,reduce?0:650);})();}
+  const qs=document.getElementById('sim-q');
+  Q.forEach(q=>{const b=document.createElement('button');b.textContent=q[0];b.onclick=()=>run(q);qs.appendChild(b);});
+  const rb=document.createElement('button');rb.textContent='Đặt lại';rb.onclick=()=>{if(!busy)reset();};qs.appendChild(rb);reset();
+})();
+
+/* ---------- insert → select lifecycle ---------- */
+(function(){
+  const S=[
+  {p:'I',t:'Parse, plan, mở transaction',d:'Parser → planner → executor. Transaction có snapshot (MVCC) và lock ở mức row.',h:[]},
+  {p:'I',t:'Ghi WAL trước',d:'Log record của thay đổi được ghi vào WAL buffer trong RAM. Log luôn đi trước data page: đó là điều đảm bảo durability.',h:['W']},
+  {p:'I',t:'Ghi row vào table page',d:'PostgreSQL: append row vào một heap page còn chỗ, nhận về TID (block, offset). InnoDB: row nằm luôn trong leaf của clustered index (PK).',h:['H']},
+  {p:'I',t:'Duyệt index: root → leaf',d:'Binary search trong root: 20 ≤ 25 < 40 → xuống leaf thứ hai. Page nào chưa có trong buffer pool thì đọc từ disk lên.',h:['R','L2','e2']},
+  {p:'I',t:'Leaf đầy → page split',d:'Chèn 25 làm leaf tràn. Page tách thành [20, 25] và [33], separator 33 được đẩy lên parent. Split tốn I/O và WAL cho mỗi page bị ghi.',h:['R','L2','L2b','e2','e2b'],sp:1},
+  {p:'I',t:'COMMIT',d:'Chỉ cần fsync WAL xuống disk là commit xong. Data page vẫn là dirty page trong RAM, checkpoint hoặc background writer flush sau. Crash thì replay WAL.',h:['W','D'],sp:1},
+  {p:'S',t:'Planner chọn plan',d:'Dựa vào statistics để ước lượng selectivity. Ít row → Index Scan. Nhiều row → Bitmap scan hoặc Seq scan, vì random I/O đắt hơn đọc tuần tự.',h:[],sp:1},
+  {p:'S',t:'Tìm điểm bắt đầu: root → leaf',d:'Tìm key 25: root [20 | 33 | 40] → leaf [20, 25]. Khoảng 3–4 page reads, root và internal gần như luôn hit RAM.',h:['R','L2','e2'],sp:1},
+  {p:'S',t:'Range scan theo sibling link',d:'Đọc 25 → sang leaf kế tiếp (33) → leaf [40, 51]. Gặp 51 > 45 thì dừng. Không cần quay lại root.',h:['L2','L2b','L3'],sp:1},
+  {p:'S',t:'Fetch row thật',d:'PostgreSQL: theo TID đọc heap page và kiểm tra visibility. Index-only scan bỏ được bước này. InnoDB secondary index: lấy PK rồi tra tiếp clustered index.',h:['H'],sp:1},
+  {p:'S',t:'Trả kết quả',d:'Rows trả về theo thứ tự key nên không cần sort. Số page đọc từ disk (cache miss) quyết định query nhanh hay chậm.',h:[],sp:1}];
+  function draw(s){const h=id=>s.h.includes(id),sp=!!s.sp;
+    let o=T(20,22,s.p==='I'?'INSERT id = 25':'SELECT id BETWEEN 25 AND 45','start','tb');
+    o+=L(340,82,105,130,h('e1')?'on':'')+L(340,82,265,130,h('e2')?(s.p==='I'?'hot':'on'):'')+(sp?L(340,82,425,130,h('e2b')?'hot':''):'')+L(340,82,585,130);
+    const c=id=>h(id)?(s.p==='I'?'hot':'info'):'';
+    o+=B(250,42,180,40,c('R')||'struct',sp?'Root [20 | 33 | 40]':'Root [20 | 40]');
+    o+=B(40,130,130,40,'row','Leaf 5, 12')+B(200,130,130,40,c('L2')||'row',sp?'Leaf 20, 25':'Leaf 20, 33');
+    if(sp)o+=B(360,130,130,40,c('L2b')||'row','Leaf 33');
+    o+=B(520,130,130,40,c('L3')||'row','Leaf 40, 51');
+    o+=B(40,220,180,40,c('W')||'dim','WAL / redo log')+B(250,220,180,40,c('H')||'dim','Table page (row)')+B(460,220,180,40,c('D')||'dim','Disk (fsync / flush)');
+    return o;}
+  stepper('st-life',{title:'INSERT 25 rồi SELECT range',vb:'0 0 680 275',steps:S,draw});
+})();
+
+/* ---------- query trace ---------- */
+(function(){
+  const BAND=['Client (app)','Parser, Analyzer','Planner','Executor','B-tree access method','Buffer manager, RAM','Storage: OS cache / SSD'];
+  const S=[
+  {t:'App gửi SQL',hl:[0],b:{0:'gửi SQL qua TCP tới 1 backend process'},h:0,r:0,w:0,d:'Driver gửi text SQL tới PostgreSQL. Mỗi connection được phục vụ bởi một backend process riêng, process này làm mọi bước bên dưới.',c:"SELECT id, total FROM orders\nWHERE user_id = 42 AND created_at >= '2026-10-01'\nORDER BY created_at LIMIT 20;"},
+  {t:'Parser và Analyzer',hl:[1],b:{1:'orders → OID 16402, kiểm quyền'},h:0,r:0,w:0,d:'Parser kiểm cú pháp, tạo parse tree. Analyzer đổi tên thành ID nội bộ, kiểm quyền SELECT, lấy danh sách index của bảng.',c:'orders                    → relation OID 16402\nidx_orders_user_created   → relation OID 16410\nuser_id, created_at       → attnum 2, 3'},
+  {t:'Planner chọn plan',hl:[2],b:{2:'Seq 1.08M vs Index 31.6 → Index Scan'},h:0,r:0,w:0,d:'pg_stats cho biết user_id có ~1 triệu giá trị khác nhau, mỗi user ~50 đơn. Thứ tự (user_id, created_at) trùng ORDER BY nên không cần Sort. Có LIMIT 20 nên dừng sớm.',c:"Seq Scan on orders            cost=0..1,083,334\nIndex Scan using idx_orders_user_created\n                              cost=0.56..31.60   ← chọn\n\nLimit\n  -> Index Scan using idx_orders_user_created\n       Index Cond: user_id = 42 AND created_at >= '2026-10-01'"},
+  {t:'Executor khởi tạo',hl:[3],b:{3:'Limit → Index Scan'},h:0,r:0,w:0,d:'Plan là cây các node, chạy kiểu pull: Limit hỏi Index Scan "cho tôi 1 row", lặp 20 lần. Index Scan tạo scan key gửi cho B-tree.',c:"scan key: (user_id = 42, created_at >= '2026-10-01 00:00:00+07')"},
+  {t:'Root page: HIT',hl:[4,5],b:{4:'root = block 290 (cache ở relcache)',5:'hash(16410, blk 290) → frame 1532: HIT'},h:1,r:0,w:0,d:'Vị trí root (trong metapage block 0) đã cache sẵn ở relcache. Page có trong RAM → pin, latch, binary search ~300 pointer (~9 lần so sánh). Key (42, …) thuộc nhánh block 1187.',c:'root blk 290: [... | (38,…) | (45,…) | ...]\n                      └─ 42 nằm giữa → child blk 1187'},
+  {t:'Internal page: HIT',hl:[4,5],b:{4:'internal 1187 → leaf 52344',5:'blk 1187 → frame 77: HIT'},h:2,r:0,w:0,d:'Tầng internal hầu như luôn nằm trong RAM. Binary search tìm leaf chứa entry đầu tiên ≥ (42, 2026-10-01).',c:'internal blk 1187 → leaf blk 52344'},
+  {t:'Leaf page: MISS',hl:[4,5,6],b:{4:'binary search → slot 117',5:'MISS → clock-sweep, evict frame 3091',6:'pread 8KB tại offset 52344×8192'},h:2,r:1,w:0,d:'Leaf của user 42 không có trong RAM. Clock-sweep chọn frame, PostgreSQL gọi pread() đọc 8KB: vài µs nếu OS cache có, ~100 µs nếu từ SSD. Entry đầu tiên ở slot 117.',c:"leaf blk 52344, slot 117:\n  key (42, '2026-10-01 08:12') → TID (88123, 7)"},
+  {t:'Heap fetch row đầu tiên',hl:[3,5,6],b:{3:'fetch TID (88123, 7)',5:'orders blk 88123: MISS',6:'đọc heap page 8KB'},h:2,r:2,w:1,d:'Index chỉ chứa key và TID, cần cột total nên phải đọc heap page. Kiểm tra MVCC: xmin đã commit, xmax = 0, row hiển thị được. Limit: 1/20.',c:'heap (88123, 7): xmin=7710231 committed, xmax=0\n  → row { id: 9001, total: 350000 }'},
+  {t:'Lặp slot 118 … 128',hl:[3,4,5,6],b:{3:'Limit đếm 12/20',4:'đi tiếp slot kế bên trong leaf',5:'heap: 9 miss, 2 hit',6:'đọc rải rác các heap page'},h:4,r:11,w:12,d:'Entry tiếp theo nằm ngay cạnh trong cùng leaf, không duyệt lại từ root. Nhưng đơn của user 42 tạo rải rác theo thời gian nên nằm ở các heap page khác nhau: gần như mỗi row 1 lần đọc page.',c:'slot 118 → TID (90551, 3)   heap MISS\nslot 119 → TID (90551, 9)   heap HIT  (cùng page)\nslot 120 → TID (95002, 1)   heap MISS\n...'},
+  {t:'Hết leaf, đi theo right-link',hl:[4,5,6],b:{4:'right-link → leaf 52345',5:'blk 52345: MISS',6:'đọc leaf kế tiếp'},h:4,r:12,w:12,d:'Hết entry của leaf 52344 mới có 12 row. Đi theo con trỏ next trong special space sang leaf 52345, không quay lại root: lợi ích của leaf linked list cho range scan.',c:'leaf 52344.special.next → blk 52345'},
+  {t:'Đủ 20 row, dừng',hl:[3,4,5],b:{3:'Limit 20/20 → dừng',4:'unpin leaf, kết thúc scan',5:'heap: 7 miss, 1 hit'},h:5,r:19,w:20,d:'Đọc thêm 8 row. Limit đủ 20 nên ngừng gọi Index Scan. Phần còn lại của index không bị đụng tới nhờ LIMIT cùng thứ tự sẵn có của index.'},
+  {t:'Trả kết quả và đọc EXPLAIN',hl:[0,3],b:{0:'nhận 20 row',3:'tổng: 24 lần truy cập page'},h:5,r:19,w:20,d:'Output của EXPLAIN (ANALYZE, BUFFERS). 19 trên 24 lần truy cập page là heap fetch, chỉ 5 là index.',c:"Limit (actual time=0.41..2.87 rows=20)\n  Buffers: shared hit=5 read=19\n  -> Index Scan using idx_orders_user_created on orders\n       Index Cond: ((user_id = 42) AND (created_at >= '2026-10-01'))\n       Buffers: shared hit=5 read=19\nExecution Time: 2.95 ms"}];
+  const extra=`<div class="stats" style="margin:0 0 10px"><div class="stat"><span>Buffer hit (RAM)</span><b class="tr-h" style="color:var(--row)">0</b></div><div class="stat"><span>Buffer read (miss)</span><b class="tr-r" style="color:var(--miss)">0</b></div><div class="stat"><span>Rows / LIMIT</span><b class="tr-w">0 / 20</b></div></div>`;
+  function draw(s){let o='';BAND.forEach((n,i)=>{const y=6+i*54,on=s.hl.includes(i);
+    o+=`<g class="n ${on?'info':'dim'}"><rect x="10" y="${y}" width="660" height="44" rx="6"/><text class="tb" x="26" y="${y+22}" dominant-baseline="central">${n}</text>`+
+      (on&&s.b[i]?`<text class="t" x="654" y="${y+22}" text-anchor="end" dominant-baseline="central" style="fill:var(--ink)">${s.b[i]}</text>`:'')+`</g>`;
+    if(i<6)o+=L(110,y+44,110,y+54);});return o;}
+  stepper('st-trace',{title:'Trace query qua từng tầng',vb:'0 0 680 380',steps:S,draw,extra,
+    after:(s,el)=>{el.querySelector('.tr-h').textContent=s.h;el.querySelector('.tr-r').textContent=s.r;el.querySelector('.tr-w').textContent=s.w+' / 20';}});
+})();
+
+/* ---------- heap MVCC ---------- */
+(function(){
+  const P0=[['(0,1)','id 9000, total 120k','xmin 88, xmax –','row'],['(0,2)','id 9001, total 350k','xmin 90, xmax –','row']];
+  const P1=[['(1,1)','id 9100, total 75k','xmin 95, xmax –','row'],['(1,2)','id 9101, total 210k','xmin 97, xmax –','row']];
+  const N3=['(1,3)','id 9102, total 99k','xmin 104, xmax –','row'];
+  const OLD=['(0,2)','id 9001, total 350k','xmin 90, xmax 105 → (0,3)','miss'];
+  const S=[
+  {t:'Heap là các page chứa row, không sắp xếp',d:'Bảng orders gồm nhiều page 8KB (vẽ 2 page). Mỗi row có địa chỉ TID = (page, slot). Index trên user_id không chứa row, chỉ chứa địa chỉ: user 42 → (0,2).',idx:'idx_user_id:  user 42 → (0,2)',p0:P0,p1:P1},
+  {t:'INSERT: đặt vào page còn chỗ',d:'Free Space Map cho biết page 1 còn trống nên row mới vào (1,3) với xmin = 104. Heap không quan tâm thứ tự. Index thêm entry user 77 → (1,3).',idx:'idx_user_id:  user 42 → (0,2)   user 77 → (1,3)',p0:P0,p1:[...P1,[...N3.slice(0,3),'hot']]},
+  {t:'UPDATE: tạo phiên bản mới, không ghi đè',d:'UPDATE total = 400k cho đơn 9001 (txid 105). Row cũ (0,2) không bị sửa giá trị, chỉ được đánh dấu xmax = 105. Phiên bản mới ghi vào (0,3). Transaction bắt đầu trước 105 vẫn thấy 350k: đó là MVCC.',idx:'idx_user_id:  user 42 → (0,2)   user 77 → (1,3)',p0:[P0[0],OLD,['(0,3)','id 9001, total 400k','xmin 105, xmax –','hot']],p1:[...P1,N3]},
+  {t:'HOT update: index không cần sửa',d:'user_id không đổi và phiên bản mới cùng page, nên đây là HOT update. Index vẫn trỏ (0,2), khi đọc DB đi theo chuỗi (0,2) → (0,3). Nếu UPDATE đổi cột có index, hoặc page hết chỗ, mọi index phải thêm entry mới: đắt hơn nhiều.',idx:'idx_user_id:  user 42 → (0,2) ⟶ đi theo chuỗi tới (0,3)',ih:1,p0:[P0[0],OLD,['(0,3)','id 9001, total 400k','xmin 105, xmax –','info']],p1:[...P1,N3]},
+  {t:'VACUUM dọn phiên bản chết',d:'Khi không transaction nào còn cần bản 350k, nó thành dead tuple. VACUUM (hoặc prune khi đọc page) xoá dữ liệu, chỉ để lại line pointer redirect sang (0,3) cho index đi đúng. Chỗ trống trả về Free Space Map, page được đánh dấu all-visible.',idx:'idx_user_id:  user 42 → (0,2)   user 77 → (1,3)',p0:[P0[0],['(0,2)','redirect → (0,3)','đã dọn dữ liệu','dim'],['(0,3)','id 9001, total 400k','xmin 105, all-visible','row']],p1:[...P1,N3]}];
+  function page(x,title,rows){let o=`<rect x="${x}" y="80" width="310" height="215" rx="8" fill="none" stroke="var(--rule-strong)"/>`+T(x+14,102,title,'start','tb');
+    rows.forEach((r,k)=>{o+=B(x+10,114+k*48,290,42,r[3],r[0]+'  '+r[1],r[2],true);});
+    const fy=114+rows.length*48;if(fy<280)o+=`<rect x="${x+10}" y="${fy}" width="290" height="${285-fy}" rx="5" class="dash"/>`+T(x+155,(fy+289)/2,'free space','middle');return o;}
+  function draw(s){return B(20,16,640,44,s.ih?'info':'',s.idx,'',true)+page(20,'Heap page 0',s.p0)+page(350,'Heap page 1',s.p1);}
+  stepper('st-heap',{title:'Heap: insert, update, vacuum',vb:'0 0 680 305',steps:S,draw});
+})();
+
+/* ---------- toc highlight ---------- */
+(function(){const links=[...document.querySelectorAll('nav.toc a')];
+  const io=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){links.forEach(a=>a.classList.toggle('on',a.getAttribute('href')==='#'+e.target.id));}});},{rootMargin:'-30% 0px -60% 0px'});
+  document.querySelectorAll('section').forEach(s=>io.observe(s));})();
+</script>
+</body>
+</html>
