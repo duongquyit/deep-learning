@@ -8,10 +8,20 @@ This repository is intended to hold learning documentation and reference materia
 
 ## Structure
 
-Each topic is a self-contained folder: `topics/<topic-slug>/index.html`. There is no build step — open the file directly in a browser. Each page inlines its own `<style>` and `<script>` rather than pulling from a shared stylesheet/script, since the design (palette, type, motion) is meant to be reconsidered per topic rather than templated. There are no build, lint, or test commands.
+Each topic is a self-contained folder: `topics/<topic-slug>/index.html`. There is no build step — open the file directly in a browser. Each page inlines its own `<style>` and `<script>` rather than pulling from a shared stylesheet/script, since the design (palette, type, motion) is meant to be reconsidered per topic rather than templated. There are no build or lint commands.
 
-Example: `topics/rest-api-fundamentals/index.html`.
+Reference implementation: `topics/btree-index-internals/index.html`.
+
+## Building a page
+
+Use the `topic-page` skill (`.claude/skills/topic-page/SKILL.md`) whenever creating, extending, or reviewing a topic page. It defines the workflow (lesson → learning-order outline → one widget per mechanism → verify), the content conventions (Vietnamese copy, callouts, exercises), and the widget patterns (stepper, simulator, playground, calculator, static figure) with copy-ready helper code.
+
+Before committing a page, run its check and review the screenshots:
+
+```bash
+python3 .claude/skills/topic-page/scripts/check_page.py topics/<slug>/index.html --out <scratch-dir>
+```
 
 ## Design
 
-Use the `frontend-design` skill (`.claude/skills/frontend-design/SKILL.md`) for every topic page. It governs visual design decisions — palette, typography, layout, and motion — so pages read as a deliberately designed, cohesive system rather than templated defaults. Load it before writing or restyling any page.
+Use the `frontend-design` skill (`.claude/skills/frontend-design/SKILL.md`) for every topic page. It governs visual design decisions — palette, typography, layout, and motion — so pages read as a deliberately designed, cohesive system rather than templated defaults. Load it before writing or restyling any page. The `topic-page` skill fixes structure and interaction, not the visual identity.
