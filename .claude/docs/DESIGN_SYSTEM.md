@@ -2,7 +2,7 @@
 
 > Extracted from `roadmap.html` as built on 2026-10-14, which follows the reference screenshot `.claude/docs/theme.jpeg` (a dark violet/pink/blue SaaS analytics dashboard). This is the house style for **dashboard/overview-style screens** in this repo — pages that summarize state across many items (a program, a log, a dataset). `roadmap.html` and the topic directory `index.html` both already build on these tokens; a new dashboard screen joins them rather than starting its own identity.
 >
-> It does **not** apply to `topics/<slug>/index.html` lesson pages. Those keep their own per-topic visual identity by design — see `CLAUDE.md` and the `frontend-design` skill, which deliberately reconsider palette/type/motion per topic rather than templating them. Use this file only when the new screen is dashboard-shaped: it surveys or tracks something, rather than teaching one concept end to end.
+> It does **not** apply to `topics/<slug>/index.html` lesson pages. Those share a separate house style of their own, defined in `.claude/skills/topic-page/references/style.md`. Use this file only when the new screen is dashboard-shaped: it surveys or tracks something, rather than teaching one concept end to end.
 
 ## 1. Summary of the current design
 
@@ -97,6 +97,6 @@ Icon-badge gradients cycle through exactly four combinations — `grad-a` (rose)
 
 ---
 
-**How this gets loaded.** The `frontend-design` skill (`.claude/skills/frontend-design/SKILL.md`) opens with a routing gate that sends dashboard-shaped screens here and keeps `topics/<slug>/index.html` lesson pages on their own per-topic identity, and `CLAUDE.md` points at that skill for both kinds of screen. So a session that loads the skill picks this file up without being told.
+**How this gets loaded.** The `frontend-design` skill (`.claude/skills/frontend-design/SKILL.md`) opens with a routing gate that sends dashboard-shaped screens here and sends `topics/<slug>/index.html` lesson pages to the topic-page house style, and `CLAUDE.md` points at that skill for both kinds of screen. So a session that loads the skill picks this file up without being told.
 
 Keep that loop closed when this file changes: §4's component inventory is meant to describe what has actually shipped, so a new dashboard component gets added here in the same session it's built, and a token that stops being used gets removed. The skill defers to this file for tokens, components, and content rules — if they drift, the skill starts enforcing a system that no longer exists.

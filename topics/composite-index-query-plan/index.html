@@ -6,130 +6,161 @@
 <title>Composite index và query plan trên MySQL</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-/* Ý tưởng: index nhiều cột là một sổ cái đã sort. Trang xoay quanh một "sổ" entry thật mà người đọc
-   seek vào, đọc dọc theo, rồi dừng. Một họ chữ (Archivo) dùng hai độ rộng: rộng cho tiêu đề, thường cho chữ đọc. */
 :root{
-  --bg:#E9EDE4; --surface:#FAFBF7; --ink:#1A211C; --ink-2:#4E5A51; --ink-3:#86907F;
-  --rule:#CDD4C7; --rule-strong:#8F9A8A;
-  --struct:#0E6A63; --struct-bg:#D9EEEA;   /* cấu trúc index, cột của index */
-  --seek:#2B3FB8;   --seek-bg:#DEE2FA;     /* entry nằm trong khoảng seek, đang đọc */
-  --icp:#946000;    --icp-bg:#F8E9C6;      /* entry bị loại ngay trong index (ICP) */
-  --row:#7D2E83;    --row-bg:#F2E0F2;      /* row được lấy qua PRIMARY và trả về */
-  --drop:#B33224;   --drop-bg:#F9DEDA;     /* row đã lấy qua PRIMARY rồi mới bị loại */
-  --display:"Archivo",system-ui,sans-serif;
-  --body:"Archivo",system-ui,-apple-system,"Segoe UI",sans-serif;
-  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  --paper:#F2F4F6; --surface:#FFFFFF; --ink:#18203A; --ink-2:#56607A; --ink-3:#8A93A8;
+  --rule:#CCD3DD; --rule-strong:#8C96AB;
+  --struct:#3446B8; --struct-bg:#E6E9FA;            /* cấu trúc index, chrome của trang */
+  --row:#16795F;    --row-bg:#DDF2EA;               /* dữ liệu row thật */
+  --hot:#9A5F00;    --hot-bg:#FCEFD2; --hot-line:#E3A21A;  /* bị ghi, bị chạm, bị lọc */
+  --miss:#B5302B;   --miss-bg:#FBE1DF;              /* đọc từ disk, việc thừa, lỗi */
+  --path:#0B7A8A;   --path-bg:#D8F1F3;              /* đường đi hoặc khoảng đang đọc */
+  --key:#A8327A;    --key-bg:#F8E0EE;               /* con trỏ: PK, TID */
+  --ram:#5B4BB0;    --ram-bg:#E7E3FA;               /* hit trong buffer pool */
+  --grid:rgba(52,70,184,.06);
+  --r-s:4px; --r-m:8px;
+  --sans:"Instrument Sans",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
 }
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
-  --bg:#121713; --surface:#1A211C; --ink:#E4EAE1; --ink-2:#A6B2A6; --ink-3:#6E7A6F;
-  --rule:#2C362E; --rule-strong:#55625A;
-  --struct:#6FD0C4; --struct-bg:#163A36; --seek:#9AA8FF; --seek-bg:#202A5A;
-  --icp:#F0C060; --icp-bg:#3B2D0C; --row:#E59BEA; --row-bg:#3A1C3D; --drop:#FF8C80; --drop-bg:#401B17;
-  color-scheme:dark}}
-:root[data-theme="dark"]{
-  --bg:#121713; --surface:#1A211C; --ink:#E4EAE1; --ink-2:#A6B2A6; --ink-3:#6E7A6F;
-  --rule:#2C362E; --rule-strong:#55625A;
-  --struct:#6FD0C4; --struct-bg:#163A36; --seek:#9AA8FF; --seek-bg:#202A5A;
-  --icp:#F0C060; --icp-bg:#3B2D0C; --row:#E59BEA; --row-bg:#3A1C3D; --drop:#FF8C80; --drop-bg:#401B17;
-  color-scheme:dark}
+@media (prefers-color-scheme:dark){:root{
+  --paper:#0F1320; --surface:#171C2B; --ink:#E6E9F2; --ink-2:#A3ABC0; --ink-3:#6E7790;
+  --rule:#2C3448; --rule-strong:#55607A;
+  --struct:#97A3FF; --struct-bg:#232A55;
+  --row:#5FD0AE;    --row-bg:#123A31;
+  --hot:#F2BE5C;    --hot-bg:#3B2C0E; --hot-line:#E3A21A;
+  --miss:#FF8A84;   --miss-bg:#3E1A1A;
+  --path:#5ED3E0;   --path-bg:#113A40;
+  --key:#F28DC4;    --key-bg:#3E1A2E;
+  --ram:#B7A8FF;    --ram-bg:#2A2350;
+  --grid:rgba(151,163,255,.05);
+}}
+
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 html{scroll-behavior:smooth}
 @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important;animation:none!important}}
-body{margin:0;background:var(--bg);color:var(--ink);font:400 16.5px/1.62 var(--body);font-variation-settings:"wdth" 100;
-  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
-.shell{display:grid;grid-template-columns:220px minmax(0,1fr);gap:48px;max-width:1220px;margin:0 auto}
-main{min-width:0;max-width:960px;padding-block:52px 96px}
-nav.toc{position:sticky;top:0;align-self:start;max-height:100vh;padding-block:52px;overflow:auto}
-nav.toc p{font:800 15px var(--display);font-variation-settings:"wdth" 115;margin:0 0 12px}
+body{margin:0;color:var(--ink);font:400 17px/1.65 var(--sans);
+  background-color:var(--paper);
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:24px 24px}
+a{color:var(--struct)}
+:focus-visible{outline:2px solid var(--struct);outline-offset:2px}
+
+/* layout */
+.shell{display:grid;grid-template-columns:230px minmax(0,1fr);gap:56px;max-width:1180px;margin:0 auto;padding:0 32px}
+nav.toc{position:sticky;top:0;align-self:start;height:100vh;padding:48px 0;overflow:auto}
+nav.toc p{font-weight:600;margin:0 0 12px;font-size:15px}
 nav.toc ol,.mobile-toc ol{list-style:none;margin:0;padding:0;counter-reset:s}
 nav.toc li,.mobile-toc li{counter-increment:s;margin:0}
 nav.toc a,.mobile-toc a{display:grid;grid-template-columns:28px 1fr;padding:5px 0;color:var(--ink-2);text-decoration:none;font-size:14.5px;line-height:1.4}
 nav.toc a::before,.mobile-toc a::before{content:counter(s,decimal-leading-zero);font:500 12px/1.9 var(--mono);color:var(--ink-3)}
 nav.toc a:hover,nav.toc a.on{color:var(--struct)}
-nav.toc a.on{font-weight:600}
-.mobile-toc{display:none}
-@media (max-width:900px){.shell{grid-template-columns:1fr;gap:0}nav.toc{display:none}.mobile-toc{display:block;margin:0 0 20px}}
-a{color:var(--seek)}
-:focus-visible{outline:2px solid var(--seek);outline-offset:2px}
-h1,h2,h3{font-family:var(--display);line-height:1.05;margin:0;text-wrap:balance}
-h1{font-size:clamp(2.3rem,6vw,4rem);font-weight:800;font-variation-settings:"wdth" 122;letter-spacing:-.025em;max-width:15ch;margin-bottom:18px}
-h2{font-size:clamp(1.5rem,3.2vw,2.1rem);font-weight:800;font-variation-settings:"wdth" 118;letter-spacing:-.015em}
-h3{font-size:1.12rem;font-weight:700;font-variation-settings:"wdth" 110;margin:30px 0 8px}
+main{min-width:0;padding:56px 0 120px}
+.prose{max-width:720px}
+section{padding-top:72px}
+section>header{display:grid;grid-template-columns:auto 1fr;gap:0 18px;align-items:baseline;max-width:720px;margin-bottom:12px}
+section>header .num{font:500 15px var(--mono);color:var(--struct);border:1.5px solid var(--struct);border-radius:var(--r-s);padding:2px 7px;transform:translateY(-4px)}
+h1,h2,h3,h4{line-height:1.2;letter-spacing:-.015em;margin:0}
+h1{font-size:clamp(2.3rem,5.4vw,3.9rem);font-weight:700;letter-spacing:-.03em;line-height:1.02;max-width:14ch;margin-bottom:20px}
+.lede{font-size:19px;color:var(--ink-2);max-width:56ch;margin-bottom:28px}
+h2{font-size:clamp(1.6rem,3vw,2.1rem);font-weight:650}
+h3{font-size:1.2rem;font-weight:600;margin:36px 0 8px}
 p{margin:0 0 14px}
-.prose{max-width:68ch}
-.lede{font-size:18.5px;color:var(--ink-2);max-width:60ch;margin-bottom:24px}
-ul,ol.plain{margin:0 0 16px;padding-left:22px}li{margin:4px 0}
-code{font:.85em var(--mono);background:var(--struct-bg);padding:1px 5px;border-radius:3px}
-pre{font:12.8px/1.6 var(--mono);background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:4px;padding:12px 14px;overflow-x:auto;margin:0 0 16px}
+ul,ol.list{margin:0 0 16px;padding-left:22px}
+li{margin:4px 0}
+code{font:0.88em var(--mono);background:var(--struct-bg);color:var(--ink);padding:1px 5px;border-radius:3px}
+pre{font:13.5px/1.6 var(--mono);background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:var(--r-s);padding:14px 16px;overflow-x:auto;margin:0 0 18px;max-width:720px}
 pre code{background:none;padding:0}
-section{padding-top:68px}
-section>header{display:flex;gap:14px;align-items:baseline;margin-bottom:14px}
-section>header .num{font:600 14px var(--mono);color:var(--struct);border:1.5px solid var(--struct);border-radius:999px;padding:1px 9px;transform:translateY(-4px)}
-.tablewrap{overflow-x:auto;margin:0 0 20px}
-table{border-collapse:collapse;width:100%;font-size:14.5px;background:var(--surface);min-width:560px}
-th,td{text-align:left;padding:8px 11px;border:1px solid var(--rule);vertical-align:top}
-th{background:var(--struct-bg);font-weight:600}
-td code{white-space:nowrap}
+.tablewrap{overflow-x:auto;max-width:720px;margin:0 0 20px}
+table{border-collapse:collapse;width:100%;max-width:720px;margin:0 0 20px;font-size:15px;background:var(--surface)}
+.tablewrap table{margin:0;min-width:560px}
+th,td{text-align:left;padding:9px 12px;border:1px solid var(--rule);vertical-align:top}
+th{font-weight:600;background:var(--struct-bg)}
 
-.frame{background:var(--surface);border:1px solid var(--rule);border-radius:8px;margin:20px 0 26px;overflow:hidden}
+/* widget frame: styled like a page, header strip = page header */
+.frame{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);margin:22px 0 28px;max-width:920px;overflow:hidden}
 .frame>.ph{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:9px 16px;border-bottom:1px solid var(--rule);background:var(--struct-bg);font-size:14px}
 .frame>.ph strong{font-weight:600}
 .frame>.ph .meta{margin-left:auto;font:500 12.5px var(--mono);color:var(--ink-2)}
-.bd{padding:16px;min-width:0}
-.svgwrap{overflow-x:auto}
-.frame svg{display:block;width:100%;height:auto;min-width:520px}
-.st-t{font:600 16px var(--body);margin:0 0 8px}
-.desc{background:var(--bg);border-radius:4px;padding:12px 14px;margin-top:12px;min-height:84px;font-size:15px;color:var(--ink-2)}
-.desc pre{margin:10px 0 0;font-size:12.3px;border-left-color:var(--rule-strong)}
-.nav,.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px}
-.controls{margin:0 0 12px}
-label{font-size:14px;color:var(--ink-2)}
-button,select{font:500 14px var(--body);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:4px;padding:6px 12px;cursor:pointer}
-select{padding:5px 8px;max-width:100%}
-button:hover:not(:disabled){border-color:var(--seek);color:var(--seek)}
+.frame .bd{padding:16px;min-width:0}
+.frame svg{display:block;width:100%;height:auto}
+.st-t{font:600 16px var(--sans);margin:0 0 8px}
+.desc{background:var(--paper);border-radius:var(--r-s);padding:12px 14px;margin-top:12px;min-height:84px;font-size:15.5px;color:var(--ink-2)}
+.desc pre{margin:10px 0 0;font-size:12.5px;border-left-color:var(--rule-strong)}
+.nav{display:flex;gap:8px;margin-top:12px;align-items:center}
+button{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 14px;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--struct);color:var(--struct)}
 button:disabled{opacity:.4;cursor:default}
 button.primary,button[aria-pressed="true"]{background:var(--struct);border-color:var(--struct);color:var(--surface)}
 button.primary:hover:not(:disabled),button[aria-pressed="true"]:hover{color:var(--surface);filter:brightness(1.1)}
-input[type=range]{accent-color:var(--struct);width:min(320px,100%)}
-input[type=checkbox]{accent-color:var(--struct);width:16px;height:16px;vertical-align:-3px}
+input,select{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 10px}
+input[type=number]{width:84px}
+input[type=range],input[type=checkbox]{accent-color:var(--struct)}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-top:12px}
-.stat{background:var(--bg);border-radius:4px;padding:8px 12px}
+.stat{background:var(--paper);border-radius:var(--r-s);padding:8px 12px}
 .stat span{display:block;font-size:13px;color:var(--ink-2)}
-.stat b{font:650 19px var(--body);font-variant-numeric:tabular-nums}
+.stat b{font:600 20px var(--sans);font-variant-numeric:tabular-nums}
 .legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;color:var(--ink-2);margin-top:12px}
 .legend span{display:inline-flex;align-items:center;gap:6px}
 .legend i{width:14px;height:14px;border-radius:3px;border:2px solid;display:inline-block}
-.note{font-size:13.5px;color:var(--ink-2);margin:10px 0 0}
 
-/* builder */
+/* svg text */
+.tb{font:600 14px var(--sans)} .t{font:400 13px var(--sans)} .ts{font:400 12px var(--sans)} .tm{font:500 12.5px var(--mono)}
+.lbl{fill:var(--ink-2);font:400 12.5px var(--sans)}
+
+/* callouts */
+.note{border-left:3px solid var(--hot-line);background:var(--hot-bg);padding:12px 16px;border-radius:0 var(--r-s) var(--r-s) 0;margin:18px 0;max-width:720px;font-size:16px}
+.note strong{color:var(--hot)}
+.senior{border:1.5px solid var(--struct);border-radius:var(--r-m);padding:14px 18px;margin:22px 0;max-width:720px;background:var(--surface)}
+.senior h4{font-size:16px;margin-bottom:6px;color:var(--struct)}
+.senior p:last-child,.senior ul:last-child{margin-bottom:0}
+details{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-s);padding:10px 14px;margin:10px 0;max-width:720px}
+details summary{cursor:pointer;font-weight:600}
+details[open] summary{margin-bottom:8px}
+
+.mobile-toc{display:none}
+@media (max-width:900px){
+  .shell{grid-template-columns:1fr;padding:0 16px;gap:0}
+  nav.toc{display:none}
+  .mobile-toc{display:block;margin-top:20px}
+  main{padding-top:32px}
+  .frame .bd{padding:12px}
+  body{font-size:16px}
+}
+
+/* ---------- widgets ---------- */
+.fine{font-size:13.5px;color:var(--ink-2);margin:10px 0 0}
+td code{white-space:nowrap}
+.svgwrap{overflow-x:auto}
+.frame svg{display:block;width:100%;height:auto;min-width:520px}
+.controls{margin:0 0 12px}
+select{padding:5px 8px;max-width:100%}
 .builder{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px 14px;margin-bottom:12px}
 .builder label{display:flex;flex-direction:column;gap:4px;font-size:13px}
 .builder .chk{flex-direction:row;align-items:center;gap:8px;align-self:end;padding-bottom:6px;font-size:14px;color:var(--ink)}
 .presets{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 14px}
 .presets button{font-size:13px;padding:4px 10px}
-.sqlline{font:13px/1.55 var(--mono);background:var(--bg);border-radius:4px;padding:10px 12px;margin:0 0 12px;overflow-x:auto;white-space:pre}
+.sqlline{font:13px/1.55 var(--mono);background:var(--paper);border-radius:4px;padding:10px 12px;margin:0 0 12px;overflow-x:auto;white-space:pre}
 .sqlline .k{color:var(--struct);font-weight:500}
 .split{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:16px}
 @media (max-width:760px){.split{grid-template-columns:1fr}}
 .ledger{font:13px/1 var(--mono);border:1px solid var(--rule);border-radius:6px;overflow:hidden}
 .ledger .hd,.ledger .en{display:grid;grid-template-columns:var(--cols);align-items:center}
-.ledger .hd{background:var(--struct-bg);color:var(--struct);font:600 12.5px var(--body);padding:7px 10px;gap:8px}
+.ledger .hd{background:var(--struct-bg);color:var(--struct);font:600 12.5px var(--sans);padding:7px 10px;gap:8px}
 .ledger .en{padding:4px 10px;gap:8px;border-top:1px solid var(--rule);color:var(--ink-3);position:relative;min-height:25px}
 .ledger .en.grp{border-top:2px solid var(--rule-strong)}
 .ledger .en span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ledger .en .pk{color:inherit;opacity:.85}
-.ledger .en.seek{background:var(--seek-bg);color:var(--seek)}
-.ledger .en.icp{background:var(--icp-bg);color:var(--icp)}
+.ledger .en.seek{background:var(--path-bg);color:var(--path)}
+.ledger .en.icp{background:var(--hot-bg);color:var(--hot)}
 .ledger .en.row{background:var(--row-bg);color:var(--row);font-weight:500}
-.ledger .en.ok{background:var(--seek-bg);color:var(--seek);font-weight:500}
-.ledger .en.drop{background:var(--drop-bg);color:var(--drop)}
-.ledger .en .tag{font:500 11.5px var(--body);justify-self:end}
-.ledger .mk{font:500 12px var(--body);padding:4px 10px;border-top:1px dashed var(--seek);color:var(--seek);background:var(--surface)}
+.ledger .en.ok{background:var(--path-bg);color:var(--path);font-weight:500}
+.ledger .en.drop{background:var(--miss-bg);color:var(--miss)}
+.ledger .en .tag{font:500 11.5px var(--sans);justify-self:end}
+.ledger .mk{font:500 12px var(--sans);padding:4px 10px;border-top:1px dashed var(--path);color:var(--path);background:var(--surface)}
 .ledger .mk.stop{border-top:1px dashed var(--rule-strong);color:var(--ink-2)}
-.explain{font:12.3px/1.5 var(--mono);overflow-x:auto;background:var(--bg);border-radius:4px;padding:10px 12px;margin:0 0 10px}
+.explain{font:12.3px/1.5 var(--mono);overflow-x:auto;background:var(--paper);border-radius:4px;padding:10px 12px;margin:0 0 10px}
 .explain table{min-width:0;width:auto;background:none;font:inherit}
 .explain th,.explain td{border:none;padding:1px 14px 1px 0;background:none;white-space:normal}
 .explain th{color:var(--ink-2);font-weight:500}
@@ -138,44 +169,36 @@ input[type=checkbox]{accent-color:var(--struct);width:16px;height:16px;vertical-
 .why b{color:var(--ink)}
 .result{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
 .result span{font:12px var(--mono);border:1px solid var(--row);color:var(--row);background:var(--row-bg);border-radius:3px;padding:2px 6px}
-.result span.ok{border-color:var(--seek);color:var(--seek);background:var(--seek-bg)}
-
-/* callouts */
-.callout{border-radius:6px;padding:12px 16px;margin:18px 0;max-width:72ch;font-size:15.5px}
-.callout>strong:first-child{display:block;font-family:var(--display);font-variation-settings:"wdth" 110;margin-bottom:4px}
-.callout p:last-child{margin:0}
-.warn{background:var(--icp-bg);border-left:4px solid var(--icp)}
-.senior{border:1.5px solid var(--struct);background:var(--surface)}
-
-/* svg vocabulary */
+.result span.ok{border-color:var(--path);color:var(--path);background:var(--path-bg)}
 .n rect{fill:var(--surface);stroke:var(--rule-strong);stroke-width:1}
 .n text{fill:var(--ink)}
-.n.struct rect{fill:var(--struct-bg);stroke:var(--struct)}.n.struct text{fill:var(--struct)}
-.n.seek rect{fill:var(--seek-bg);stroke:var(--seek);stroke-width:2.2}.n.seek text{fill:var(--seek)}
-.n.icp rect{fill:var(--icp-bg);stroke:var(--icp);stroke-width:1.6}.n.icp text{fill:var(--icp)}
-.n.row rect{fill:var(--row-bg);stroke:var(--row);stroke-width:1.6}.n.row text{fill:var(--row)}
-.n.drop rect{fill:var(--drop-bg);stroke:var(--drop);stroke-width:1.6}.n.drop text{fill:var(--drop)}
-.n.dim rect{fill:var(--bg);stroke:var(--rule)}.n.dim text{fill:var(--ink-3)}
+.n.struct rect{fill:var(--struct-bg);stroke:var(--struct)}
+.n.struct text{fill:var(--struct)}
+.n.seek rect{fill:var(--path-bg);stroke:var(--path);stroke-width:2.2}
+.n.seek text{fill:var(--path)}
+.n.icp rect{fill:var(--hot-bg);stroke:var(--hot);stroke-width:1.6}
+.n.icp text{fill:var(--hot)}
+.n.row rect{fill:var(--row-bg);stroke:var(--row);stroke-width:1.6}
+.n.row text{fill:var(--row)}
+.n.drop rect{fill:var(--miss-bg);stroke:var(--miss);stroke-width:1.6}
+.n.drop text{fill:var(--miss)}
+.n.dim rect{fill:var(--paper);stroke:var(--rule)}
+.n.dim text{fill:var(--ink-3)}
 .n.cur rect{stroke-width:3.2}
-.tb{font:600 13px var(--body)}.ts{font:400 12px var(--body)}.tm{font:500 12px var(--mono)}
-.lbl{fill:var(--ink-2);font:400 12.5px var(--body)}
-.lblb{fill:var(--ink);font:600 13px var(--body)}
+.lblb{fill:var(--ink);font:600 13px var(--sans)}
 .edge{stroke:var(--rule-strong);stroke-width:1.2;fill:none}
-.edge.on{stroke:var(--seek);stroke-width:2.6}
+.edge.on{stroke:var(--path);stroke-width:2.6}
 .edge.row{stroke:var(--row);stroke-width:1.8}
-.edge.icp{stroke:var(--icp);stroke-width:1.8}
-.edge.drop{stroke:var(--drop);stroke-width:1.8}
-.bar.est{fill:var(--rule-strong)}.bar.act{fill:var(--seek)}.bar.sel{stroke:var(--ink);stroke-width:2}
+.edge.icp{stroke:var(--hot);stroke-width:1.8}
+.edge.drop{stroke:var(--miss);stroke-width:1.8}
+.bar.est{fill:var(--rule-strong)}
+.bar.act{fill:var(--path)}
+.bar.sel{stroke:var(--ink);stroke-width:2}
 .axis{stroke:var(--rule-strong);stroke-width:1}
-.thr{stroke:var(--drop);stroke-width:1.5;stroke-dasharray:5 4}
+.thr{stroke:var(--miss);stroke-width:1.5;stroke-dasharray:5 4}
 .zone{fill:var(--struct-bg);opacity:.55}
-
-/* annotated explain */
 .ann{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
 .ann button{font:500 12.5px var(--mono);padding:4px 9px}
-details{background:var(--surface);border:1px solid var(--rule);border-radius:6px;padding:10px 14px;margin:0 0 8px;max-width:76ch}
-details summary{cursor:pointer;font-weight:600}
-details[open] summary{margin-bottom:8px}
 </style>
 </head>
 <body>
@@ -195,6 +218,7 @@ details[open] summary{margin-bottom:8px}
 </nav>
 
 <main>
+<div class="hero">
 <h1>Composite index và query plan trên MySQL</h1>
 <p class="lede">Index <code>(user_id, status, created_at)</code> là một danh sách entry đã sort theo ba cột. Mỗi điều kiện trong <code>WHERE</code> hoặc giúp InnoDB nhảy thẳng tới đúng đoạn, hoặc chỉ giúp lọc bớt khi đã đọc. Ghép một câu query dưới đây và xem entry nào được đọc, entry nào bị loại ngay trong index, row nào phải lấy qua PRIMARY.</p>
 <details class="mobile-toc"><summary>Mục lục</summary><ol><li><a href="#s1">Leftmost prefix</a></li><li><a href="#s2">Range ở cột giữa</a></li><li><a href="#s3">Thứ tự cột và ORDER BY</a></li><li><a href="#s4">Index Condition Pushdown</a></li><li><a href="#s5">Cardinality và histogram</a></li><li><a href="#s6">Đọc EXPLAIN</a></li><li><a href="#s7">Bài tập và câu hỏi</a></li></ol></details>
@@ -230,13 +254,14 @@ details[open] summary{margin-bottom:8px}
     </div>
     <div class="legend" aria-label="Chú thích màu">
       <span><i style="background:var(--struct-bg);border-color:var(--struct)"></i>cột của index</span>
-      <span><i style="background:var(--seek-bg);border-color:var(--seek)"></i>đọc trong khoảng seek</span>
-      <span><i style="background:var(--icp-bg);border-color:var(--icp)"></i>loại ngay trong index</span>
+      <span><i style="background:var(--path-bg);border-color:var(--path)"></i>đọc trong khoảng seek</span>
+      <span><i style="background:var(--hot-bg);border-color:var(--hot)"></i>loại ngay trong index</span>
       <span><i style="background:var(--row-bg);border-color:var(--row)"></i>lấy qua PRIMARY, trả về</span>
-      <span><i style="background:var(--drop-bg);border-color:var(--drop)"></i>lấy qua PRIMARY rồi mới bị loại</span>
+      <span><i style="background:var(--miss-bg);border-color:var(--miss)"></i>lấy qua PRIMARY rồi mới bị loại</span>
     </div>
-    <p class="note">27 entry là toàn bộ đơn của user 41, 42 và 43, lấy từ bảng <code>orders</code> 1 triệu row sinh bằng generator của lab (<code>users = 100000</code>). Mô phỏng giả định optimizer dùng đúng index đang chọn, như khi có <code>FORCE INDEX</code>. Cột <code>rows</code> ở đây là số entry thật sự được đọc, còn <code>rows</code> trong EXPLAIN thật là ước tính.</p>
+    <p class="fine">27 entry là toàn bộ đơn của user 41, 42 và 43, lấy từ bảng <code>orders</code> 1 triệu row sinh bằng generator của lab (<code>users = 100000</code>). Mô phỏng giả định optimizer dùng đúng index đang chọn, như khi có <code>FORCE INDEX</code>. Cột <code>rows</code> ở đây là số entry thật sự được đọc, còn <code>rows</code> trong EXPLAIN thật là ước tính.</p>
   </div>
+</div>
 </div>
 
 
@@ -258,7 +283,8 @@ details[open] summary{margin-bottom:8px}
 <tr><td><code>status = 'paid' AND created_at &gt;= …</code></td><td>không có</td><td>–</td><td>trừ khi skip scan, xem bên dưới</td></tr>
 </tbody></table></div>
 <p class="prose"><code>key_len</code> là tổng số byte của các cột index nằm trong key dùng để seek. Với bảng <code>orders</code> của lab: <code>INT UNSIGNED NOT NULL</code> 4 byte, <code>ENUM</code> dưới 256 giá trị 1 byte, <code>DATETIME</code> 5 byte. Cột cho phép <code>NULL</code> cộng thêm 1 byte. <code>VARCHAR(n)</code> trong utf8mb4 tính <code>4n + 2</code>. Nhìn <code>key_len</code> là đoán được index đã dùng bao nhiêu cột, nhưng có một cái bẫy ở phần 02.</p>
-<div class="callout senior"><strong>Góc nhìn senior</strong>
+<div class="senior">
+<h4>Góc nhìn senior</h4>
 <p>Index <code>(user_id)</code> là tiền tố của <code>(user_id, status, created_at)</code>, nên gần như thừa: mọi query nó phục vụ thì index ba cột cũng phục vụ được, chỉ lớn hơn một chút. Bảng <code>orders</code> của lab đang có cả hai. Trong sandbox, optimizer chọn <code>idx_user_id</code> cho <code>user_id = 42 AND created_at &gt;= …</code>, rồi lọc <code>created_at</code> sau khi đã lookup cả 7 row (<code>Using where</code>), thay vì lọc ngay trong index ba cột. Mỗi index thừa còn làm chậm mọi lệnh ghi. Trước khi xoá, cho nó <code>INVISIBLE</code> một thời gian để chắc không có query nào cần.</p></div>
 <p class="prose"><strong>Skip scan</strong> (MySQL 8.0.13 trở lên) là ngoại lệ duy nhất cho luật tiền tố trái: optimizer coi cột đầu thiếu điều kiện như một <code>IN</code> qua mọi giá trị của nó, rồi seek từng đoạn. Nó chỉ dùng được khi query chỉ đọc cột của index (covering), chỉ một bảng, và cột đầu có ít giá trị khác nhau. Trên bảng lab, <code>user_id</code> có khoảng 100 nghìn giá trị, nên optimizer không chọn skip scan cho <code>status = 'paid' AND created_at &gt;= …</code> mà quét cả index (<code>type = index</code>).</p>
 </section>
@@ -271,8 +297,7 @@ details[open] summary{margin-bottom:8px}
 <p>Với <code>user_id BETWEEN 41 AND 43 AND status = 'paid'</code>, các entry <code>paid</code> nằm thành ba cụm rời nhau, xen giữa là <code>shipped</code> và <code>cancelled</code> của từng user. Không có một khoảng liền nào chỉ chứa entry <code>paid</code>. InnoDB đọc từ cụm đầu tới cụm cuối, và <code>status</code> chỉ còn dùng để lọc từng entry.</p>
 </div>
 <div class="frame" id="rangetrace"></div>
-<div class="callout warn"><strong>Lỗi hay gặp</strong>
-<p>Đọc <code>key_len = 5</code> rồi kết luận <code>status</code> đã được dùng để seek. MySQL đưa <code>status</code> vào hai đầu khoảng, <code>(41, 'paid')</code> tới <code>(43, 'paid')</code>, nên <code>key_len</code> tính cả nó. Nhưng nó chỉ cắt được vài entry ở hai mép. <code>EXPLAIN FORMAT=JSON</code> ghi rõ <code>"used_key_parts": ["user_id"]</code>. Muốn biết cột nào thực sự thu hẹp khoảng đọc, xem <code>used_key_parts</code>, hoặc đếm <code>Handler_read_next</code>.</p></div>
+<div class="note"><strong>Lỗi hay gặp:</strong> Đọc <code>key_len = 5</code> rồi kết luận <code>status</code> đã được dùng để seek. MySQL đưa <code>status</code> vào hai đầu khoảng, <code>(41, 'paid')</code> tới <code>(43, 'paid')</code>, nên <code>key_len</code> tính cả nó. Nhưng nó chỉ cắt được vài entry ở hai mép. <code>EXPLAIN FORMAT=JSON</code> ghi rõ <code>"used_key_parts": ["user_id"]</code>. Muốn biết cột nào thực sự thu hẹp khoảng đọc, xem <code>used_key_parts</code>, hoặc đếm <code>Handler_read_next</code>.</div>
 <p class="prose">Đổi <code>BETWEEN 41 AND 43</code> thành <code>IN (41, 42, 43)</code> là đổi một khoảng thành ba điểm. Mỗi giá trị trong <code>IN</code> là một lần seek riêng, nên <code>status</code> lại thu hẹp được khoảng đọc. Cách này chỉ dùng được khi tập giá trị nhỏ và rời rạc. Với range thời gian thì không đổi được, và đó là lý do cột range phải đứng cuối.</p>
 </section>
 
@@ -300,10 +325,11 @@ details[open] summary{margin-bottom:8px}
     <div class="controls" role="group" aria-label="Chọn query" id="ord-q"></div>
     <div class="sqlline" id="ord-sql"></div>
     <div class="tablewrap" style="margin:0"><table id="ord-tbl"></table></div>
-    <p class="note">Bấm vào một dòng để mở thứ tự cột đó trong khung ở đầu trang.</p>
+    <p class="fine">Bấm vào một dòng để mở thứ tự cột đó trong khung ở đầu trang.</p>
   </div>
 </div>
-<div class="callout senior"><strong>Góc nhìn senior</strong>
+<div class="senior">
+<h4>Góc nhìn senior</h4>
 <p>Không có thứ tự cột tốt nhất, chỉ có thứ tự tốt nhất cho một tập query. Một <code>ORDER BY … LIMIT 20</code> trên trang danh sách thường đáng giá hơn vài entry bị lọc thêm, vì filesort phải đọc hết mọi row khớp điều kiện rồi mới trả 20 row đầu. Khi hai query cần hai thứ tự khác nhau, cân giữa thêm một index (tốn ghi, tốn RAM của buffer pool) và chấp nhận một plan kém hơn cho query ít chạy hơn.</p></div>
 </section>
 
@@ -344,8 +370,7 @@ WHERE user_id BETWEEN 41 AND 43 AND status = 'paid' AND total &gt; 1000000;</div
 <tr><td><code>Backward index scan</code></td><td>InnoDB</td><td>đọc index từ phải sang trái để phục vụ <code>DESC</code></td></tr>
 <tr><td><code>Using index for skip scan</code></td><td>InnoDB</td><td>skip scan, xem phần 01</td></tr>
 </tbody></table></div>
-<div class="callout warn"><strong>Lỗi hay gặp</strong>
-<p>Coi <code>Using index condition</code> là "query dùng index tốt". Nó chỉ nói có một phần điều kiện được lọc trên entry thay vì trên row. Số entry InnoDB phải đọc không giảm chút nào. Ở InnoDB, ICP chỉ áp dụng cho secondary index: với PRIMARY thì row đã nằm sẵn trong leaf, không có lookup nào để tiết kiệm. Nó cũng không xuất hiện khi index đã covering, vì khi đó không có lookup.</p></div>
+<div class="note"><strong>Lỗi hay gặp:</strong> Coi <code>Using index condition</code> là "query dùng index tốt". Nó chỉ nói có một phần điều kiện được lọc trên entry thay vì trên row. Số entry InnoDB phải đọc không giảm chút nào. Ở InnoDB, ICP chỉ áp dụng cho secondary index: với PRIMARY thì row đã nằm sẵn trong leaf, không có lookup nào để tiết kiệm. Nó cũng không xuất hiện khi index đã covering, vì khi đó không có lookup.</div>
 </section>
 
 <!-- 5 -->
@@ -379,7 +404,7 @@ WHERE user_id BETWEEN 41 AND 43 AND status = 'paid' AND total &gt; 1000000;</div
       <div class="stat"><span>Optimizer ước tính</span><b id="cross-b"></b></div>
       <div class="stat"><span>Thực tế khớp</span><b id="cross-c"></b></div>
     </div>
-    <p class="note">Đo trong sandbox của Claude, MySQL 8.0.46, 995 605 row, buffer pool 128 MB, không phải trên lab 8.4 của bạn. Ngưỡng phụ thuộc cost model, độ rộng row và kích thước bảng. Bài tập E12 đo lại trên lab. Với plan <code>ALL</code>, số ước tính là <code>rows × filtered</code>.</p>
+    <p class="fine">Đo trong sandbox của Claude, MySQL 8.0.46, 995 605 row, buffer pool 128 MB, không phải trên lab 8.4 của bạn. Ngưỡng phụ thuộc cost model, độ rộng row và kích thước bảng. Bài tập E12 đo lại trên lab. Với plan <code>ALL</code>, số ước tính là <code>rows × filtered</code>.</p>
   </div>
 </div>
 <p class="prose">Histogram sửa được ước tính cho cột không có index. Đo trên một bản sao của <code>orders</code> chỉ có index <code>user_id</code>, cột <code>filtered</code> trong <code>EXPLAIN</code>:</p>
@@ -403,7 +428,8 @@ WHERE user_id BETWEEN 41 AND 43 AND status = 'paid' AND total &gt; 1000000;</div
 <tr><td><code>ORDER BY … LIMIT</code></td><td>optimizer chọn index của cột sort để khỏi filesort, rồi phải đọc rất xa mới đủ 20 row</td><td>index theo ESR, hoặc so sánh hai plan bằng <code>EXPLAIN ANALYZE</code></td></tr>
 <tr><td>Collation hoặc charset khác nhau trong join</td><td>join cột utf8mb4_0900_ai_ci với utf8mb4_general_ci</td><td>thống nhất collation của hai cột</td></tr>
 </tbody></table></div>
-<div class="callout senior"><strong>Góc nhìn senior</strong>
+<div class="senior">
+<h4>Góc nhìn senior</h4>
 <p>Khi optimizer chọn sai, đừng vội thêm <code>FORCE INDEX</code>. Hint đúng hôm nay sẽ sai khi phân bố dữ liệu đổi, và không ai nhớ nó ở đó. Trước tiên tìm vì sao ước tính lệch: so <code>rows</code> ước tính với <code>rows</code> thực tế trong <code>EXPLAIN ANALYZE</code>, xem <code>optimizer_trace</code> để thấy chi phí từng phương án. Sửa thống kê, sửa query, hoặc sửa index. Hint là lựa chọn cuối, kèm comment ghi lý do.</p></div>
 </section>
 
@@ -451,8 +477,7 @@ WHERE user_id BETWEEN 41 AND 43 AND status = 'paid' AND total &gt; 1000000;</div
 <li>Ở node Filter, optimizer đoán còn 3.83 row nhưng thực tế còn 10. Con số 3.83 là 23 × 16.67% từ cột <code>filtered</code>: một đoán mặc định cho cả <code>status</code> lẫn <code>total</code>, vì không cột nào có histogram. Ước tính và thực tế lệch nhiều lần là chỗ đầu tiên cần nhìn khi một plan chậm.</li>
 </ul>
 </div>
-<div class="callout warn"><strong>Lỗi hay gặp</strong>
-<p>Đọc <code>rows</code> trong <code>EXPLAIN</code> như số row được trả về. Đó là số row optimizer ước tính sẽ <em>đọc</em> từ bảng đó bằng cách truy cập đã chọn, trước khi áp phần điều kiện còn lại. Số trả về là <code>rows × filtered / 100</code>, và cũng chỉ là ước tính. Con số thật nằm trong <code>EXPLAIN ANALYZE</code>.</p></div>
+<div class="note"><strong>Lỗi hay gặp:</strong> Đọc <code>rows</code> trong <code>EXPLAIN</code> như số row được trả về. Đó là số row optimizer ước tính sẽ <em>đọc</em> từ bảng đó bằng cách truy cập đã chọn, trước khi áp phần điều kiện còn lại. Số trả về là <code>rows × filtered / 100</code>, và cũng chỉ là ước tính. Con số thật nằm trong <code>EXPLAIN ANALYZE</code>.</div>
 </section>
 
 <!-- 7 -->

@@ -6,148 +6,175 @@
 <title>Clustered index và secondary index: InnoDB so với PostgreSQL</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600..800&family=Be+Vietnam+Pro:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-/* Layout: một cột đọc, widget rộng hơn prose; mỗi widget là một "page" có header strip. Hai engine luôn đặt cạnh nhau: InnoDB trước, PostgreSQL sau. */
 :root{
-  --bg:#EDF1F3; --surface:#FFFFFF; --ink:#132029; --ink-2:#4F5E6B; --ink-3:#86939E;
-  --rule:#CBD4DA; --rule-strong:#8A99A5;
-  --struct:#2F558F; --struct-bg:#E3EBF7;   /* cấu trúc index */
-  --row:#1C7650;    --row-bg:#DCF1E6;      /* dữ liệu row thật */
-  --key:#9A5B00;    --key-bg:#FBEBCC;      /* con trỏ: giá trị PK hoặc TID */
-  --path:#1F5FE0;   --path-bg:#DCE7FD;     /* đường đi hiện tại */
-  --hot:#B03A73;    --hot-bg:#F8E0EB;      /* bị ghi */
-  --miss:#B8322A;   --miss-bg:#FADFDC;     /* đọc từ disk */
-  --ram:#5B4BB0;    --ram-bg:#E7E3FA;      /* hit trong buffer pool */
-  --display:"Bricolage Grotesque","Be Vietnam Pro",system-ui,sans-serif;
-  --body:"Be Vietnam Pro",system-ui,-apple-system,"Segoe UI",sans-serif;
-  --mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+  --paper:#F2F4F6; --surface:#FFFFFF; --ink:#18203A; --ink-2:#56607A; --ink-3:#8A93A8;
+  --rule:#CCD3DD; --rule-strong:#8C96AB;
+  --struct:#3446B8; --struct-bg:#E6E9FA;            /* cấu trúc index, chrome của trang */
+  --row:#16795F;    --row-bg:#DDF2EA;               /* dữ liệu row thật */
+  --hot:#9A5F00;    --hot-bg:#FCEFD2; --hot-line:#E3A21A;  /* bị ghi, bị chạm, bị lọc */
+  --miss:#B5302B;   --miss-bg:#FBE1DF;              /* đọc từ disk, việc thừa, lỗi */
+  --path:#0B7A8A;   --path-bg:#D8F1F3;              /* đường đi hoặc khoảng đang đọc */
+  --key:#A8327A;    --key-bg:#F8E0EE;               /* con trỏ: PK, TID */
+  --ram:#5B4BB0;    --ram-bg:#E7E3FA;               /* hit trong buffer pool */
+  --grid:rgba(52,70,184,.06);
+  --r-s:4px; --r-m:8px;
+  --sans:"Instrument Sans",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
 }
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
-  --bg:#0E151B; --surface:#16212A; --ink:#E3EAEF; --ink-2:#A3B1BC; --ink-3:#6C7C88;
-  --rule:#283844; --rule-strong:#4F6170;
-  --struct:#8FB2EE; --struct-bg:#1C2E4A; --row:#6FD3A3; --row-bg:#133A2A;
-  --key:#F0BE62; --key-bg:#3A2B0C; --path:#7FA8FF; --path-bg:#1A2B52;
-  --hot:#F28DBA; --hot-bg:#3E1A2C; --miss:#FF8F86; --miss-bg:#3F1B18; --ram:#B7A8FF; --ram-bg:#2A2350;
-  color-scheme:dark}}
-:root[data-theme="dark"]{
-  --bg:#0E151B; --surface:#16212A; --ink:#E3EAEF; --ink-2:#A3B1BC; --ink-3:#6C7C88;
-  --rule:#283844; --rule-strong:#4F6170;
-  --struct:#8FB2EE; --struct-bg:#1C2E4A; --row:#6FD3A3; --row-bg:#133A2A;
-  --key:#F0BE62; --key-bg:#3A2B0C; --path:#7FA8FF; --path-bg:#1A2B52;
-  --hot:#F28DBA; --hot-bg:#3E1A2C; --miss:#FF8F86; --miss-bg:#3F1B18; --ram:#B7A8FF; --ram-bg:#2A2350;
-  color-scheme:dark}
+@media (prefers-color-scheme:dark){:root{
+  --paper:#0F1320; --surface:#171C2B; --ink:#E6E9F2; --ink-2:#A3ABC0; --ink-3:#6E7790;
+  --rule:#2C3448; --rule-strong:#55607A;
+  --struct:#97A3FF; --struct-bg:#232A55;
+  --row:#5FD0AE;    --row-bg:#123A31;
+  --hot:#F2BE5C;    --hot-bg:#3B2C0E; --hot-line:#E3A21A;
+  --miss:#FF8A84;   --miss-bg:#3E1A1A;
+  --path:#5ED3E0;   --path-bg:#113A40;
+  --key:#F28DC4;    --key-bg:#3E1A2E;
+  --ram:#B7A8FF;    --ram-bg:#2A2350;
+  --grid:rgba(151,163,255,.05);
+}}
+
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 html{scroll-behavior:smooth}
 @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important;animation:none!important}}
-body{margin:0;background:var(--bg);color:var(--ink);font:400 16.5px/1.65 var(--body);
-  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
-.shell{display:grid;grid-template-columns:220px minmax(0,1fr);gap:48px;max-width:1220px;margin:0 auto}
-main{min-width:0;max-width:960px;padding-block:48px 96px}
-nav.toc{position:sticky;top:0;align-self:start;max-height:100vh;padding-block:48px;overflow:auto}
-nav.toc p{font:700 15px var(--display);margin:0 0 12px}
+body{margin:0;color:var(--ink);font:400 17px/1.65 var(--sans);
+  background-color:var(--paper);
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:24px 24px}
+a{color:var(--struct)}
+:focus-visible{outline:2px solid var(--struct);outline-offset:2px}
+
+/* layout */
+.shell{display:grid;grid-template-columns:230px minmax(0,1fr);gap:56px;max-width:1180px;margin:0 auto;padding:0 32px}
+nav.toc{position:sticky;top:0;align-self:start;height:100vh;padding:48px 0;overflow:auto}
+nav.toc p{font-weight:600;margin:0 0 12px;font-size:15px}
 nav.toc ol,.mobile-toc ol{list-style:none;margin:0;padding:0;counter-reset:s}
 nav.toc li,.mobile-toc li{counter-increment:s;margin:0}
 nav.toc a,.mobile-toc a{display:grid;grid-template-columns:28px 1fr;padding:5px 0;color:var(--ink-2);text-decoration:none;font-size:14.5px;line-height:1.4}
 nav.toc a::before,.mobile-toc a::before{content:counter(s,decimal-leading-zero);font:500 12px/1.9 var(--mono);color:var(--ink-3)}
 nav.toc a:hover,nav.toc a.on{color:var(--struct)}
-nav.toc a.on{font-weight:600}
-.mobile-toc{display:none;max-width:none}
-@media (max-width:900px){.shell{grid-template-columns:1fr;gap:0}nav.toc{display:none}.mobile-toc{display:block;margin:0 0 20px}}
-a{color:var(--path)}
-:focus-visible{outline:2px solid var(--path);outline-offset:2px}
-h1,h2,h3{font-family:var(--display);letter-spacing:-.02em;line-height:1.1;margin:0;text-wrap:balance}
-h1{font-size:clamp(2.2rem,5.5vw,3.6rem);font-weight:800;max-width:16ch;margin-bottom:16px}
-h2{font-size:clamp(1.5rem,3vw,2rem);font-weight:700}
-h3{font-size:1.15rem;font-weight:700;margin:28px 0 8px}
+main{min-width:0;padding:56px 0 120px}
+.prose{max-width:720px}
+section{padding-top:72px}
+section>header{display:grid;grid-template-columns:auto 1fr;gap:0 18px;align-items:baseline;max-width:720px;margin-bottom:12px}
+section>header .num{font:500 15px var(--mono);color:var(--struct);border:1.5px solid var(--struct);border-radius:var(--r-s);padding:2px 7px;transform:translateY(-4px)}
+h1,h2,h3,h4{line-height:1.2;letter-spacing:-.015em;margin:0}
+h1{font-size:clamp(2.3rem,5.4vw,3.9rem);font-weight:700;letter-spacing:-.03em;line-height:1.02;max-width:14ch;margin-bottom:20px}
+.lede{font-size:19px;color:var(--ink-2);max-width:56ch;margin-bottom:28px}
+h2{font-size:clamp(1.6rem,3vw,2.1rem);font-weight:650}
+h3{font-size:1.2rem;font-weight:600;margin:36px 0 8px}
 p{margin:0 0 14px}
-.prose{max-width:68ch}
-.lede{font-size:18.5px;color:var(--ink-2);max-width:60ch;margin-bottom:24px}
-ul{margin:0 0 16px;padding-left:22px}li{margin:4px 0}
-code{font:.86em var(--mono);background:var(--struct-bg);padding:1px 5px;border-radius:3px}
-pre{font:13px/1.6 var(--mono);background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:4px;padding:12px 14px;overflow-x:auto;margin:0 0 16px}
+ul,ol.list{margin:0 0 16px;padding-left:22px}
+li{margin:4px 0}
+code{font:0.88em var(--mono);background:var(--struct-bg);color:var(--ink);padding:1px 5px;border-radius:3px}
+pre{font:13.5px/1.6 var(--mono);background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:var(--r-s);padding:14px 16px;overflow-x:auto;margin:0 0 18px;max-width:720px}
 pre code{background:none;padding:0}
-section{padding-top:64px}
-section>header{display:flex;gap:14px;align-items:baseline;margin-bottom:14px}
-section>header .num{font:600 14px var(--mono);color:var(--struct);border:1.5px solid var(--struct);border-radius:4px;padding:1px 7px;transform:translateY(-3px)}
-.tablewrap{overflow-x:auto;margin:0 0 20px}
-table{border-collapse:collapse;width:100%;font-size:14.5px;background:var(--surface);min-width:560px}
-th,td{text-align:left;padding:8px 11px;border:1px solid var(--rule);vertical-align:top}
-th{background:var(--struct-bg);font-weight:600}
+.tablewrap{overflow-x:auto;max-width:720px;margin:0 0 20px}
+table{border-collapse:collapse;width:100%;max-width:720px;margin:0 0 20px;font-size:15px;background:var(--surface)}
+.tablewrap table{margin:0;min-width:560px}
+th,td{text-align:left;padding:9px 12px;border:1px solid var(--rule);vertical-align:top}
+th{font-weight:600;background:var(--struct-bg)}
 
-.frame{background:var(--surface);border:1px solid var(--rule);border-radius:8px;margin:20px 0 26px;overflow:hidden}
+/* widget frame: styled like a page, header strip = page header */
+.frame{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);margin:22px 0 28px;max-width:920px;overflow:hidden}
 .frame>.ph{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:9px 16px;border-bottom:1px solid var(--rule);background:var(--struct-bg);font-size:14px}
 .frame>.ph strong{font-weight:600}
 .frame>.ph .meta{margin-left:auto;font:500 12.5px var(--mono);color:var(--ink-2)}
-.bd{padding:16px;min-width:0}
-.svgwrap{overflow-x:auto}
-.frame svg{display:block;width:100%;height:auto;min-width:520px}
-.st-t{font:600 16px var(--body);margin:0 0 8px}
-.desc{background:var(--bg);border-radius:4px;padding:12px 14px;margin-top:12px;min-height:84px;font-size:15px;color:var(--ink-2)}
+.frame .bd{padding:16px;min-width:0}
+.frame svg{display:block;width:100%;height:auto}
+.st-t{font:600 16px var(--sans);margin:0 0 8px}
+.desc{background:var(--paper);border-radius:var(--r-s);padding:12px 14px;margin-top:12px;min-height:84px;font-size:15.5px;color:var(--ink-2)}
 .desc pre{margin:10px 0 0;font-size:12.5px;border-left-color:var(--rule-strong)}
-.nav,.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px}
-.controls{margin:0 0 12px}
-.controls .sep{width:1px;height:24px;background:var(--rule);margin:0 4px}
-label{font-size:14px;color:var(--ink-2)}
-button,select{font:500 14px var(--body);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:4px;padding:6px 13px;cursor:pointer}
-button:hover:not(:disabled){border-color:var(--path);color:var(--path)}
+.nav{display:flex;gap:8px;margin-top:12px;align-items:center}
+button{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 14px;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--struct);color:var(--struct)}
 button:disabled{opacity:.4;cursor:default}
 button.primary,button[aria-pressed="true"]{background:var(--struct);border-color:var(--struct);color:var(--surface)}
 button.primary:hover:not(:disabled),button[aria-pressed="true"]:hover{color:var(--surface);filter:brightness(1.1)}
-input[type=range]{accent-color:var(--struct)}
-.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:12px}
-.stat{background:var(--bg);border-radius:4px;padding:8px 12px}
+input,select{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 10px}
+input[type=number]{width:84px}
+input[type=range],input[type=checkbox]{accent-color:var(--struct)}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-top:12px}
+.stat{background:var(--paper);border-radius:var(--r-s);padding:8px 12px}
 .stat span{display:block;font-size:13px;color:var(--ink-2)}
-.stat b{font:600 19px var(--body);font-variant-numeric:tabular-nums}
-.log{font:13px/1.7 var(--body);color:var(--ink-2);margin-top:12px}
-.log p{margin:0 0 6px}.log b{color:var(--ink)}
+.stat b{font:600 20px var(--sans);font-variant-numeric:tabular-nums}
 .legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;color:var(--ink-2);margin-top:12px}
 .legend span{display:inline-flex;align-items:center;gap:6px}
 .legend i{width:14px;height:14px;border-radius:3px;border:2px solid;display:inline-block}
 
-/* svg vocabulary: mỗi class một trạng thái */
+/* svg text */
+.tb{font:600 14px var(--sans)} .t{font:400 13px var(--sans)} .ts{font:400 12px var(--sans)} .tm{font:500 12.5px var(--mono)}
+.lbl{fill:var(--ink-2);font:400 12.5px var(--sans)}
+
+/* callouts */
+.note{border-left:3px solid var(--hot-line);background:var(--hot-bg);padding:12px 16px;border-radius:0 var(--r-s) var(--r-s) 0;margin:18px 0;max-width:720px;font-size:16px}
+.note strong{color:var(--hot)}
+.senior{border:1.5px solid var(--struct);border-radius:var(--r-m);padding:14px 18px;margin:22px 0;max-width:720px;background:var(--surface)}
+.senior h4{font-size:16px;margin-bottom:6px;color:var(--struct)}
+.senior p:last-child,.senior ul:last-child{margin-bottom:0}
+details{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-s);padding:10px 14px;margin:10px 0;max-width:720px}
+details summary{cursor:pointer;font-weight:600}
+details[open] summary{margin-bottom:8px}
+
+.mobile-toc{display:none}
+@media (max-width:900px){
+  .shell{grid-template-columns:1fr;padding:0 16px;gap:0}
+  nav.toc{display:none}
+  .mobile-toc{display:block;margin-top:20px}
+  main{padding-top:32px}
+  .frame .bd{padding:12px}
+  body{font-size:16px}
+}
+
+/* ---------- widgets ---------- */
+ul{margin:0 0 16px;padding-left:22px}
+.svgwrap{overflow-x:auto}
+.frame svg{display:block;width:100%;height:auto;min-width:520px}
+.controls{margin:0 0 12px}
+.controls .sep{width:1px;height:24px;background:var(--rule);margin:0 4px}
+.log{font:13px/1.7 var(--sans);color:var(--ink-2);margin-top:12px}
+.log p{margin:0 0 6px}
+.log b{color:var(--ink)}
 .n rect{fill:var(--surface);stroke:var(--rule-strong);stroke-width:1}
 .n text{fill:var(--ink)}
-.n.struct rect{fill:var(--struct-bg);stroke:var(--struct)}.n.struct text{fill:var(--struct)}
-.n.row rect{fill:var(--row-bg);stroke:var(--row)}.n.row text{fill:var(--row)}
-.n.key rect{fill:var(--key-bg);stroke:var(--key)}.n.key text{fill:var(--key)}
-.n.path rect{fill:var(--path-bg);stroke:var(--path);stroke-width:2.4}.n.path text{fill:var(--path)}
-.n.hot rect{fill:var(--hot-bg);stroke:var(--hot);stroke-width:2}.n.hot text{fill:var(--hot)}
-.n.miss rect{fill:var(--miss-bg);stroke:var(--miss);stroke-width:2}.n.miss text{fill:var(--miss)}
-.n.ram rect{fill:var(--ram-bg);stroke:var(--ram);stroke-width:1.5}.n.ram text{fill:var(--ram)}
-.n.dim rect{fill:var(--bg);stroke:var(--rule)}.n.dim text{fill:var(--ink-3)}
+.n.struct rect{fill:var(--struct-bg);stroke:var(--struct)}
+.n.struct text{fill:var(--struct)}
+.n.row rect{fill:var(--row-bg);stroke:var(--row)}
+.n.row text{fill:var(--row)}
+.n.key rect{fill:var(--key-bg);stroke:var(--key)}
+.n.key text{fill:var(--key)}
+.n.path rect{fill:var(--path-bg);stroke:var(--path);stroke-width:2.4}
+.n.path text{fill:var(--path)}
+.n.hot rect{fill:var(--hot-bg);stroke:var(--hot);stroke-width:2}
+.n.hot text{fill:var(--hot)}
+.n.miss rect{fill:var(--miss-bg);stroke:var(--miss);stroke-width:2}
+.n.miss text{fill:var(--miss)}
+.n.ram rect{fill:var(--ram-bg);stroke:var(--ram);stroke-width:1.5}
+.n.ram text{fill:var(--ram)}
+.n.dim rect{fill:var(--paper);stroke:var(--rule)}
+.n.dim text{fill:var(--ink-3)}
 .n.cur rect{stroke-width:3.2}
 .box{fill:none;stroke:var(--rule-strong);stroke-width:1}
 .box.idx{fill:var(--struct-bg);fill-opacity:.35;stroke:var(--struct)}
 .box.data{fill:var(--row-bg);fill-opacity:.35;stroke:var(--row)}
-.tb{font:600 13.5px var(--body)}.t{font:400 13px var(--body)}.ts{font:400 12px var(--body)}.tm{font:500 12px var(--mono)}
-.lbl{fill:var(--ink-2);font:400 12.5px var(--body)}
-.lblb{fill:var(--ink);font:600 13px var(--body)}
+.lblb{fill:var(--ink);font:600 13px var(--sans)}
 .edge{stroke:var(--rule-strong);stroke-width:1.2;fill:none}
 .edge.on{stroke:var(--path);stroke-width:2.6}
 .edge.hot{stroke:var(--hot);stroke-width:2.2}
 .edge.miss{stroke:var(--miss);stroke-width:2;stroke-dasharray:5 4}
 .edge.ptr{stroke:var(--key);stroke-dasharray:4 4}
 .dash{stroke:var(--rule-strong);stroke-dasharray:4 4;fill:none}
-
-/* update matrix */
 .mx{display:grid;grid-template-columns:minmax(110px,.8fr) 1fr 1fr;gap:6px;font-size:14px}
 .mx>div{padding:8px 10px;border-radius:4px;border:1px solid var(--rule);background:var(--surface);min-width:0}
 .mx .h{background:none;border:none;font-weight:600;padding-bottom:0}
-.mx .tree{background:var(--bg);font-family:var(--mono);font-size:12.5px;border:none}
+.mx .tree{background:var(--paper);font-family:var(--mono);font-size:12.5px;border:none}
 .mx .w{background:var(--hot-bg);border:2px solid var(--hot);color:var(--hot)}
 .mx .q{color:var(--ink-3)}
 .mx .tot{background:none;border:none;font-weight:600}
 @media (max-width:560px){.mx{grid-template-columns:1fr 1fr}.mx .tree{grid-column:1/-1}.mx .h:first-child,.mx .tot:first-of-type{display:none}}
-
-.note{border-left:3px solid var(--hot);background:var(--hot-bg);padding:12px 16px;border-radius:0 4px 4px 0;margin:18px 0;max-width:68ch}
-.note strong{color:var(--hot)}
-.senior{border:1.5px solid var(--struct);border-radius:8px;padding:14px 18px;margin:20px 0;max-width:68ch;background:var(--surface)}
-.senior h3{margin:0 0 6px;color:var(--struct);font-size:1.05rem}
-details{background:var(--surface);border:1px solid var(--rule);border-radius:4px;padding:10px 14px;margin:8px 0;max-width:68ch}
-details summary{cursor:pointer;font-weight:600}
-details[open] summary{margin-bottom:8px}
 </style>
 </head>
 <body>
@@ -166,6 +193,7 @@ details[open] summary{margin-bottom:8px}
 </nav>
 
 <main>
+<div class="hero">
 <h1>Clustered index và secondary index</h1>
 <p class="lede">Cùng một bảng <code>orders</code>, cùng một index trên <code>user_id</code>, nhưng InnoDB và PostgreSQL cất row ở hai nơi khác hẳn nhau. Bấm vào từng entry để thấy DB phải đi qua những page nào để lấy được row.</p>
 <details class="mobile-toc"><summary>Mục lục</summary><ol><li><a href="#s1">Leaf chứa gì</a></li><li><a href="#s2">Đọc row qua secondary index</a></li><li><a href="#s3">UPDATE chạm vào cây nào</a></li><li><a href="#s4">Split và con trỏ bằng PK</a></li><li><a href="#s5">Tổng kết và các engine khác</a></li><li><a href="#s6">Bài tập và câu hỏi kiểm tra</a></li></ol></details>
@@ -201,6 +229,7 @@ details[open] summary{margin-bottom:8px}
   </div>
 </div>
 <p class="prose ts" style="color:var(--ink-2)">Cây vẽ 2 tầng cho gọn. Index thật thường cao 3 đến 4 tầng, nên mỗi lần duyệt cây tốn 3 đến 4 page thay vì 2.</p>
+</div>
 
 
 <!-- 1 -->
@@ -321,7 +350,7 @@ details[open] summary{margin-bottom:8px}
 </table></div>
 <div class="note"><strong>Lỗi hay gặp:</strong> đồng nhất clustered index với primary key. Điều này chỉ đúng với InnoDB và mặc định của SQL Server. Trong PostgreSQL, PK là một B-tree như mọi index khác và không làm row được sắp xếp. Định nghĩa đúng: clustered index là index mà leaf chứa nguyên row. InnoDB chọn PK cho vai trò đó.</div>
 <div class="senior">
-<h3>Góc nhìn senior</h3>
+<h4>Góc nhìn senior</h4>
 <ul style="margin:0">
 <li>InnoDB: PK ngắn và tăng dần (<code>BIGINT AUTO_INCREMENT</code>, UUIDv7, hoặc <code>UUID_TO_BIN(uuid, 1)</code>). PK ngẫu nhiên làm split rải rác ngay trong dữ liệu bảng, không chỉ trong index.</li>
 <li>InnoDB: index <code>(user_id)</code> đã là <code>(user_id, id)</code>. Khai báo <code>(user_id, id)</code> là thừa, và <code>ORDER BY id</code> sau <code>WHERE user_id = ?</code> không cần sort.</li>
