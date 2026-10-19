@@ -1,0 +1,29 @@
+# Lab configuration. Every setting here exists to make a measurement mean
+# what the experiment says it means; the reason is next to each one.
+[mysqld]
+# Fixed size, so cold and warm runs compare across sessions and machines.
+# 5M rows of `orders` with 4 secondary indexes is roughly 1 GB on disk, so
+# the warm runs of E6 fit; E5's UUID table does not, on purpose.
+innodb_buffer_pool_size = 1G
+
+# A restart must give a truly cold buffer pool. By default InnoDB dumps the
+# list of cached pages at shutdown and reloads them at startup.
+innodb_buffer_pool_dump_at_shutdown = OFF
+innodb_buffer_pool_load_at_startup  = OFF
+
+# Bypass the OS page cache, so a page missing from the buffer pool is a real
+# read from the volume, not a copy the kernel kept in RAM.
+innodb_flush_method = O_DIRECT
+
+# The adaptive hash index can answer a lookup without walking the B+tree,
+# which hides exactly what E6 counts. Off by default in 8.4; set explicitly.
+innodb_adaptive_hash_index = OFF
+
+# Page split / merge counters in INFORMATION_SCHEMA.INNODB_METRICS (E8).
+innodb_monitor_enable = module_index
+
+# No binary log: the lab measures InnoDB writes, not replication.
+skip-log-bin
+
+performance_schema = ON
+skip-name-resolve

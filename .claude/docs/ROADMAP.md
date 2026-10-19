@@ -77,7 +77,7 @@ Weekly plan — each week carries its planned dates; edit them when the week sli
 - `[ ]` **Week 4** `2026-11-09 → 2026-11-15` — **Transactions**: MVCC and read views, isolation levels with REPEATABLE READ as default, consistent vs locking reads, record/gap/next-key locks, reproducing a lost update and a deadlock by hand. Monthly checkpoint.
 
 Deliverables:
-- `[ ]` Reproducible SQL experiments (scripts committed, with predictions written before running).
+- `[~]` Reproducible SQL experiments (scripts committed, with predictions written before running).
 - `[ ]` Query-plan comparisons.
 - `[ ]` An index-design case study based on a real slow query from my job (anonymized).
 - `[ ]` A technical note explaining the observed behavior and production implications.

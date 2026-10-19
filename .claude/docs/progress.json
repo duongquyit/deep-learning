@@ -46,7 +46,7 @@
       ],
       "deliverables": [
         {
-          "status": " ",
+          "status": "~",
           "text": "Reproducible SQL experiments (scripts committed, with predictions written before running)."
         },
         {
@@ -243,6 +243,13 @@
     "total": 27
   },
   "sessions": [
+    {
+      "date": "2026-10-19",
+      "title": "MySQL lab setup",
+      "artifact": "../lab/mysql/README.md",
+      "planned": true,
+      "feeds": ""
+    },
     {
       "date": "2026-10-19",
       "title": "Clustered vs secondary index",

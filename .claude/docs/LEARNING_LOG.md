@@ -63,12 +63,38 @@ These are written in the page as exercises; none have been run yet.
 - **E2** — Insert 1M rows with a sequential PK vs UUIDv4; compare index size and insert time; explain the gap through split behaviour. *(Directly matches ROADMAP.md Month 1 Week 3.)*
 - **E3** — Restart the server, run one query twice with `BUFFERS`; separate real disk reads from OS page cache.
 - **E4** — 5M-row `orders` table; run the §07 query with a plain index, then a covering index; explain the difference using the 12-step trace.
-- **E5** — Two 5M-row InnoDB tables, PK `BIGINT` vs `CHAR(36)` UUIDv4, 4 secondary indexes each; compare `mysql.innodb_index_stats` sizes with the page's calculator.
-- **E6** — Re-measure the clustered-vs-secondary §02 trace: `Innodb_buffer_pool_read_requests` / `Innodb_buffer_pool_reads` for `SELECT *` vs `SELECT id`; PostgreSQL `BUFFERS` before and after `INCLUDE (id)` + `VACUUM`.
+- **E5** — *Script ready: `lab/mysql/lab.sh e5`.* Two 5M-row InnoDB tables, PK `BIGINT` vs `CHAR(36)` UUIDv4, 4 secondary indexes each; compare `mysql.innodb_index_stats` sizes with the page's calculator.
+- **E6** — *Script ready: `lab/mysql/lab.sh e6` (MySQL part).* Re-measure the clustered-vs-secondary §02 trace: `Innodb_buffer_pool_read_requests` / `Innodb_buffer_pool_reads` for `SELECT *` vs `SELECT id`; PostgreSQL `BUFFERS` before and after `INCLUDE (id)` + `VACUUM`.
 - **E7** — HOT vs non-HOT: 1M updates on an unindexed vs an indexed column, `fillfactor` 100 vs 90; `n_tup_hot_upd` and index sizes. Same updates on InnoDB.
-- **E8** — 1M inserts with sequential vs UUIDv4 PK on InnoDB; `index_page_splits` from `INNODB_METRICS`, insert time, PRIMARY size. *(Overlaps E2; run them together in Month 1 Week 3.)*
+- **E8** — *Script ready: `lab/mysql/lab.sh e8`, also covers a time-ordered UUID.* 1M inserts with sequential vs UUIDv4 PK on InnoDB; `index_page_splits` from `INNODB_METRICS`, insert time, PRIMARY size. *(Overlaps E2; run them together in Month 1 Week 3.)*
 - **Q6–Q10** — The five check questions at the end of the clustered-vs-secondary page.
 - **Q1–Q5** — The five check questions at the end of the page (leftmost prefix, `COUNT(*)` and the visibility map, full scan polluting the cache, TOAST, a `sessions` table updated 5,000×/sec). Answer in writing before looking anything up, then verify.
+
+---
+
+## 2026-10-19 — MySQL lab setup
+
+**Topic and objective.** Build the Month 1 Week 1 lab: MySQL 8.4 in Docker with a fixed configuration, a data generator for 5–10M rows, and a repeatable way to measure page reads, query latency and insert throughput, so E5, E6 and E8 can run as real experiments instead of models.
+
+**Output.** [lab/mysql](../lab/mysql/README.md): `compose.yaml` (MySQL 8.4, port 3307), `conf/lab.cnf`, `sql/schema.sql` (tables `orders`, `orders_uuid`, `e8_*`, a deterministic generator procedure and a `uuid_v4()` function), and `lab.sh` with `up`, `load`, `sizes`, `cold`, `pages`, `reads`, `latency`, `e5`, `e6`, `e8`. Each experiment has a `prediction.md` with the questions; `lab.sh` refuses to run it while the file still says `TODO`, so the prediction is written before any result exists (TECHNICAL_GROWTH.md Principle 2 and the rules for AI use during learning).
+
+**What it covers.**
+
+- Configuration chosen so each measurement means what it claims: buffer pool fixed at 1 GB, no buffer-pool dump or load across restarts (so a restart is truly cold), `O_DIRECT` (no OS page cache behind the buffer pool), adaptive hash index off, binary log off, `module_index` metrics on for page-split counts.
+- Measurement method. `Innodb_buffer_pool_read_requests` and `Innodb_buffer_pool_reads` are server-wide, so `reads` waits for the server to go quiet and reports a `DO 0` window next to each run as a noise check. `Handler_read_*` are per session, so the cost of the measuring statements is subtracted. `INFORMATION_SCHEMA.INNODB_BUFFER_PAGE` lists which pages of the table entered the buffer pool, per index and page type. Latency comes from `events_statements_summary_by_digest` (avg, histogram-based p95/p99).
+- Two measurement traps found while testing the scripts, both fixed in `lab.sh`: right after a restart, background threads and the first read of each performance_schema table (its definition comes from the InnoDB data dictionary) add page accesses to the same global counters; and the first query on a table after a restart also pays for loading the table definition, which a `SELECT … LIMIT 0` absorbs without reading any of the table's pages.
+
+**Initial understanding.** TODO — what did I expect the lab to need, and what did I not know how to measure before?
+
+**Mistakes and misconceptions corrected.** TODO — only I know which.
+
+**Experiments and results.** None that count as evidence. The scripts were smoke-tested by Claude in its own sandbox on MySQL 8.0.46 from Ubuntu's packages, because Docker Hub is not reachable there. That run proved the scripts work end to end (5M-row load, `reads`, `latency`, E5 and E8 at small sizes). It was the wrong version on the wrong machine, its results were deliberately not committed so they cannot leak into the predictions, and no prediction had been written. The Docker path itself (`./lab.sh up` with MySQL 8.4) is untested until I run it.
+
+**Competency level.** Unchanged. Building measurement scripts is not evidence for the Track A topics; running the experiments is.
+
+**Remaining questions.** Open question 1 is now practically answered by the lab being MySQL-first; confirm it as a decision.
+
+**Next step.** On my machine: `cd lab/mysql && ./lab.sh up && ./lab.sh load orders 5000000`. Then write `experiments/e6/prediction.md` and run `./lab.sh e6`. Also still due this week: the baseline assessment (TECHNICAL_GROWTH.md Section 11).
 
 ---
 
