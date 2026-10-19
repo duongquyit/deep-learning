@@ -199,19 +199,19 @@ details.answer summary{font-weight:500;color:var(--struct)}
 <main>
 <div class="hero">
 <h1>MVCC và read view trong InnoDB</h1>
-<p class="lede">Hai session cùng đọc một row, một session đang sửa nó, và không ai phải đợi ai. InnoDB làm được vì mỗi câu đọc thông thường không đọc row hiện tại mà đọc phiên bản đúng với "ảnh chụp" của nó, dựng lại từ undo log. Bài này về ảnh chụp đó: khi nào nó được tạo, nó quyết định thấy phiên bản nào ra sao, và vì sao <code>SELECT</code> và <code>UPDATE</code> trong cùng một transaction có thể nhìn thấy hai thế giới khác nhau.</p>
+<p class="lede">Một session đang sửa một row, session khác đọc đúng row đó, vậy mà không ai phải chờ ai. Lý do: câu <code>SELECT</code> thông thường không đọc row hiện tại. Nó đọc phiên bản khớp với một "ảnh chụp" dữ liệu, và InnoDB dựng lại phiên bản đó từ undo log. Bài này nói về ảnh chụp ấy: nó được chụp lúc nào, nó chọn phiên bản nào, và vì sao trong cùng một transaction, <code>SELECT</code> và <code>UPDATE</code> có thể thấy dữ liệu khác nhau.</p>
 <div class="brief">
   <div><h4>Mục tiêu</h4><ul>
-    <li>Áp được luật visibility của read view để biết một phiên bản row có được thấy hay không.</li>
-    <li>Dự đoán được kết quả của từng câu trong hai session song song, dưới <code>REPEATABLE READ</code> và <code>READ COMMITTED</code>.</li>
-    <li>Phân biệt được consistent read với locking read và <code>UPDATE</code>, và giải thích vì sao chúng có thể trả về giá trị khác nhau.</li>
-    <li>Nói được từng isolation level của InnoDB ngăn và không ngăn hiện tượng nào.</li>
+    <li>Cho một chuỗi phiên bản của row, xác định được câu đọc sẽ thấy phiên bản nào.</li>
+    <li>Dự đoán được từng câu trong hai session chạy song song trả về gì, dưới <code>REPEATABLE READ</code> và dưới <code>READ COMMITTED</code>.</li>
+    <li>Giải thích được vì sao <code>SELECT</code> thường, <code>SELECT … FOR UPDATE</code> và <code>UPDATE</code> có thể thấy giá trị khác nhau trong cùng một transaction.</li>
+    <li>Nói được mỗi isolation level của InnoDB ngăn được lỗi nào và không ngăn được lỗi nào.</li>
   </ul></div>
   <div><h4>Cần biết trước</h4><ul>
-    <li><a href="../innodb-buffer-pool-redo-undo/index.html">Buffer pool, redo và undo</a>: undo record, <code>DB_TRX_ID</code>, <code>DB_ROLL_PTR</code>, purge.</li>
-    <li><a href="../index-write-cost/index.html">Cái giá khi ghi của index</a>: secondary index delete-mark rồi chèn.</li>
+    <li><a href="../innodb-buffer-pool-redo-undo/index.html">Buffer pool, redo và undo</a>: undo log giữ bản cũ của row; hai cột ẩn <code>DB_TRX_ID</code>, <code>DB_ROLL_PTR</code>; purge.</li>
+    <li><a href="../index-write-cost/index.html">Cái giá khi ghi của index</a>: khi giá trị đổi, secondary index đánh dấu xoá entry cũ rồi chèn entry mới.</li>
   </ul></div>
-  <div><h4>Trạng thái</h4><p>Level 2 (prov.). Viết từ manual MySQL 8.4 và mã nguồn read view của nhánh 8.4. Kết quả trong timeline hai session là dự đoán theo manual, chưa chạy trên lab.</p></div>
+  <div><h4>Trạng thái</h4><p>Level 2 (prov.). Nội dung lấy từ manual MySQL 8.4 và mã nguồn read view của nhánh 8.4. Kết quả trong ví dụ hai session là suy ra từ manual; bạn chưa chạy thử trên lab.</p></div>
 </div>
 <details class="mobile-toc"><summary>Mục lục</summary><ol><li><a href="#s1">Bản chất vấn đề</a></li><li><a href="#s2">Cơ chế hoạt động</a></li><li><a href="#s3">Vì sao thiết kế như vậy</a></li><li><a href="#s4">Ví dụ</a></li><li><a href="#s5">Thí nghiệm</a></li><li><a href="#s6">Ảnh hưởng khi chạy production</a></li><li><a href="#s7">Hiểu lầm thường gặp</a></li><li><a href="#s8">Câu hỏi ôn tập</a></li><li><a href="#s9">Câu hỏi còn mở</a></li><li><a href="#s10">Tài liệu tham khảo</a></li></ol></details>
 </div>
@@ -220,10 +220,10 @@ details.answer summary{font-weight:500;color:var(--struct)}
 <section id="s1">
 <header><span class="num">01</span><h2>Bản chất vấn đề</h2></header>
 <div class="prose">
-<p>Bảng <code>accounts</code>, row <code>id = 7</code> có <code>balance = 1000</code> (đơn vị nhỏ nhất, không phải float). Session A mở transaction và đọc 1000. Session B trừ 100 rồi commit. A đọc lại. A thấy 1000 hay 900? Câu trả lời phụ thuộc vào isolation level. Và nếu ngay sau đó A chạy <code>UPDATE … SET balance = balance - 50</code>, kết quả là 950 hay 850?</p>
-<p>Nếu mọi câu đọc đều phải khoá row, A và B sẽ liên tục đợi nhau. InnoDB chọn cách khác: row trong page luôn là phiên bản mới nhất, còn các phiên bản cũ được giữ trong undo log. Một câu đọc thông thường (consistent read) mang theo một <strong>read view</strong>, mô tả transaction nào đã commit "từ góc nhìn của nó". Nó đi ngược chuỗi phiên bản cho tới phiên bản đầu tiên mà read view cho phép thấy.</p>
-<p>Giống ảnh chụp toàn cảnh một văn phòng: ai đang làm dở giấy tờ lúc chụp thì trong ảnh coi như chưa làm, dù năm phút sau họ xong. Muốn thấy giấy tờ mới thì phải chụp ảnh mới. <code>REPEATABLE READ</code> dùng một ảnh cho cả transaction; <code>READ COMMITTED</code> chụp lại ở mỗi câu.</p>
-<p>Đi qua hai session dưới đây, rồi đổi isolation level và đi lại.</p>
+<p>Bảng <code>accounts</code> có row <code>id = 7</code>, <code>balance = 1000</code> (lưu bằng số nguyên, đơn vị nhỏ nhất). Session A mở transaction và đọc được 1000. Session B trừ 100 rồi commit. A đọc lại: thấy 1000 hay 900? Câu trả lời tuỳ vào isolation level. Rồi nếu A chạy tiếp <code>UPDATE … SET balance = balance - 50</code>, kết quả cuối là 950 hay 850?</p>
+<p>Nếu câu đọc nào cũng phải khoá row, A và B sẽ phải chờ nhau liên tục. InnoDB làm khác: row trong page luôn là phiên bản mới nhất, còn các phiên bản cũ được cất trong undo log. Mỗi câu <code>SELECT</code> thông thường mang theo một <strong>read view</strong>, có thể hiểu là một ảnh chụp ghi lại transaction nào đã commit vào lúc chụp. Câu đọc đi ngược từ phiên bản mới nhất về các bản cũ, và dừng ở phiên bản đầu tiên mà ảnh chụp cho phép thấy.</p>
+<p>Hãy hình dung một tấm ảnh chụp cả văn phòng. Ai đang làm dở giấy tờ lúc bấm máy thì trong ảnh coi như chưa làm, dù năm phút sau họ đã xong. Muốn thấy giấy tờ mới thì phải chụp tấm khác. <code>REPEATABLE READ</code> dùng một tấm ảnh cho cả transaction; <code>READ COMMITTED</code> chụp lại trước mỗi câu.</p>
+<p>Bấm qua từng bước của hai session dưới đây, rồi đổi isolation level và bấm lại từ đầu để so.</p>
 </div>
 
 <div class="frame sessions" id="sessions"></div>
@@ -232,98 +232,111 @@ details.answer summary{font-weight:500;color:var(--struct)}
   <span><i class="lg-row"></i>giá trị câu đó trả về</span>
   <span><i class="lg-hot"></i>giá trị khác nhau giữa RR và RC</span>
 </div>
-<p class="fine">Kết quả suy ra từ manual 8.4 (Consistent Nonlocking Reads, Locking Reads). Chưa chạy trên lab; E19 chạy đúng kịch bản này.</p>
+<p class="fine">Kết quả suy ra từ manual 8.4, chưa chạy trên lab. Thí nghiệm E19 chạy đúng kịch bản này.</p>
 </section>
 
 <!-- 2 -->
 <section id="s2">
 <header><span class="num">02</span><h2>Cơ chế hoạt động</h2></header>
 <div class="prose">
-<h3>Chuỗi phiên bản</h3>
-<p>Mỗi row trong PRIMARY có hai cột ẩn: <code>DB_TRX_ID</code> (6 byte, transaction sửa row lần cuối) và <code>DB_ROLL_PTR</code> (7 byte, trỏ tới undo record chứa bản trước đó). Undo record đó lại có <code>DB_TRX_ID</code> và roll pointer của bản trước nữa. Từ row hiện tại, đi theo roll pointer là đi ngược thời gian, từng phiên bản một.</p>
-<p>Transaction ID được cấp khi transaction lần đầu ghi, không phải khi bắt đầu. Transaction chỉ đọc không có ID.</p>
+<h3>Chuỗi phiên bản của một row</h3>
+<p>Ý chính: từ row hiện tại, InnoDB lần ngược được về mọi phiên bản cũ còn giữ trong undo log.</p>
+<p>Mỗi row có hai cột ẩn. <code>DB_TRX_ID</code> (6 byte) ghi transaction nào sửa row lần cuối. <code>DB_ROLL_PTR</code> (7 byte) trỏ tới bản ngay trước đó trong undo log. Bản đó lại có hai giá trị tương tự, trỏ tới bản trước nữa. Đi theo các con trỏ này là đi ngược thời gian, từng phiên bản một.</p>
+<p>Mỗi transaction chỉ được cấp số ID khi nó ghi lần đầu, không phải lúc bắt đầu. Transaction chỉ đọc thì không có ID.</p>
 
-<h3>Read view và luật visibility</h3>
-<p>Read view ghi lại trạng thái hệ thống tại lúc nó được tạo, bằng bốn giá trị:</p>
+<h3>Read view chọn phiên bản như thế nào</h3>
+<p>Ý chính: một phiên bản được thấy nếu transaction tạo ra nó đã commit trước lúc chụp ảnh, hoặc chính là transaction đang đọc.</p>
+<p>Read view ghi lại bốn giá trị tại lúc chụp:</p>
 <ul>
-<li><code>creator</code>: ID của transaction tạo read view (nếu nó đã có ID).</li>
-<li><code>low_limit_id</code>: ID sẽ được cấp cho transaction tiếp theo. Mọi ID ≥ giá trị này chưa tồn tại lúc tạo view.</li>
-<li><code>m_ids</code>: danh sách transaction đang active (chưa commit) lúc tạo view.</li>
-<li><code>up_limit_id</code>: ID nhỏ nhất trong <code>m_ids</code> (hoặc <code>low_limit_id</code> nếu danh sách rỗng). Mọi ID nhỏ hơn đã commit trước khi view được tạo.</li>
+<li><code>creator</code>: ID của transaction đang đọc (nếu nó đã có ID).</li>
+<li><code>low_limit_id</code>: ID sẽ cấp cho transaction kế tiếp. Transaction nào có ID từ số này trở lên thì lúc chụp chưa tồn tại.</li>
+<li><code>m_ids</code>: danh sách transaction đang chạy dở (chưa commit) lúc chụp.</li>
+<li><code>up_limit_id</code>: ID nhỏ nhất trong <code>m_ids</code> (nếu danh sách rỗng thì bằng <code>low_limit_id</code>). Mọi transaction có ID nhỏ hơn số này đều đã commit trước lúc chụp.</li>
 </ul>
-<p>Một phiên bản có <code>DB_TRX_ID = t</code> được thấy khi: <code>t = creator</code>; hoặc <code>t &lt; up_limit_id</code>; hoặc <code>t &lt; low_limit_id</code> và <code>t</code> không nằm trong <code>m_ids</code>. Ngược lại thì đi tiếp về phiên bản cũ hơn. Nếu không còn phiên bản nào (row được chèn sau view), row coi như không tồn tại với view đó.</p>
+<p>Với một phiên bản do transaction <code>t</code> tạo ra, InnoDB hỏi lần lượt:</p>
+<ol class="list">
+<li><code>t</code> là chính transaction đang đọc? Thấy.</li>
+<li><code>t</code> nhỏ hơn <code>up_limit_id</code>? Đã commit trước lúc chụp: thấy.</li>
+<li><code>t</code> từ <code>low_limit_id</code> trở lên? Lúc chụp chưa tồn tại: không thấy.</li>
+<li><code>t</code> nằm trong <code>m_ids</code>? Lúc chụp đang chạy dở: không thấy. Còn lại: thấy.</li>
+</ol>
+<p>Không thấy thì đi tiếp về bản cũ hơn. Nếu hết bản để xét (row được chèn sau lúc chụp), câu đọc coi như row đó không tồn tại.</p>
 </div>
 
 <div class="frame" id="vis">
   <div class="ph"><strong>Read view chọn phiên bản nào</strong><span class="meta" id="visMeta"></span></div>
   <div class="bd">
     <div class="calc">
-      <label>low_limit_id (ID kế tiếp lúc tạo view)<select id="vLow"><option value="306">306</option><option value="310" selected>310</option><option value="313">313</option></select></label>
-      <label>Read view của transaction<select id="vCreator"><option value="0" selected>chỉ đọc, chưa có ID</option><option value="309">309 (chính nó đã sửa row)</option></select></label>
+      <label>low_limit_id (ID sẽ cấp tiếp, lúc chụp)<select id="vLow"><option value="306">306</option><option value="310" selected>310</option><option value="313">313</option></select></label>
+      <label>Transaction đang đọc<select id="vCreator"><option value="0" selected>chỉ đọc, chưa có ID</option><option value="309">309 (chính nó đã sửa row)</option></select></label>
     </div>
     <div class="chk" id="vActive"></div>
     <div class="rv" id="vRv"></div>
-    <svg id="vSvg" viewBox="0 0 680 150" role="img" aria-label="Chuỗi phiên bản của row id 7 và phiên bản được chọn"></svg>
+    <svg id="vSvg" viewBox="0 0 680 152" role="img" aria-label="Chuỗi phiên bản của row id 7 và phiên bản được chọn"></svg>
     <div class="desc" aria-live="polite" id="vDesc"></div>
     <div class="legend">
       <span><i class="lg-row"></i>phiên bản được thấy</span>
-      <span><i class="lg-miss"></i>bị bỏ qua theo luật</span>
+      <span><i class="lg-miss"></i>không được thấy, đi tiếp</span>
       <span><i class="lg-dim"></i>không cần xét</span>
-      <span><i class="lg-key"></i>roll pointer</span>
+      <span><i class="lg-key"></i>con trỏ về bản cũ hơn</span>
     </div>
-    <p class="fine">Chuỗi cố định: 290 đặt 1000 (commit từ lâu), 305 đặt 900, 309 đặt 800, 312 đặt 700 (312 chưa commit). Chọn trạng thái lúc tạo view; transaction có ID ≥ low_limit_id coi như chưa tồn tại nên không chọn được là active.</p>
+    <p class="fine">Chuỗi phiên bản cố định: transaction 290 đặt 1000 (commit từ lâu), 305 đặt 900, 309 đặt 800, 312 đặt 700 (312 chưa commit). Bạn chọn tình trạng lúc chụp. Transaction có ID từ <code>low_limit_id</code> trở lên lúc đó chưa tồn tại, nên không chọn được là "đang chạy".</p>
   </div>
 </div>
-<div class="note"><strong>Lỗi hay gặp:</strong> nghĩ rằng read view so thời điểm commit. Nó so ID và danh sách active. Transaction 305 commit <em>sau</em> khi view được tạo vẫn bị coi là chưa commit, vì 305 nằm trong <code>m_ids</code>. Đó chính là điều làm ảnh chụp đứng yên.</div>
+<div class="note"><strong>Lỗi hay gặp:</strong> nghĩ rằng read view so thời điểm commit. Nó chỉ so ID với danh sách đã ghi lúc chụp. Nếu 305 đang chạy dở lúc chụp, thì dù 305 commit ngay sau đó, ảnh chụp vẫn coi 305 là chưa commit. Chính điều này giữ cho ảnh chụp đứng yên.</div>
 
 <div class="prose">
-<h3>Khi nào read view được tạo</h3>
+<h3>Ảnh chụp được tạo lúc nào</h3>
+<p>Ý chính: dưới <code>REPEATABLE READ</code>, ảnh được chụp ở câu <code>SELECT</code> đầu tiên và dùng tới cuối transaction; dưới <code>READ COMMITTED</code>, mỗi câu chụp ảnh mới.</p>
 <ul>
-<li><strong>REPEATABLE READ</strong> (mặc định): ở consistent read <em>đầu tiên</em> của transaction, không phải ở <code>START TRANSACTION</code>. Muốn tạo ngay thì dùng <code>START TRANSACTION WITH CONSISTENT SNAPSHOT</code>. View dùng tới khi commit.</li>
-<li><strong>READ COMMITTED</strong>: một view mới cho mỗi câu lệnh consistent read.</li>
-<li><strong>READ UNCOMMITTED</strong>: không có view; đọc row hiện tại, kể cả thay đổi chưa commit (dirty read).</li>
-<li><strong>SERIALIZABLE</strong>: khi autocommit tắt, <code>SELECT</code> thường được đổi thành <code>SELECT … FOR SHARE</code>, tức là locking read.</li>
+<li><strong>REPEATABLE READ</strong> (mặc định): chụp ở câu <code>SELECT</code> thường <em>đầu tiên</em> của transaction, không phải ở <code>START TRANSACTION</code>. Muốn chụp ngay khi bắt đầu thì dùng <code>START TRANSACTION WITH CONSISTENT SNAPSHOT</code>. Ảnh dùng tới khi commit.</li>
+<li><strong>READ COMMITTED</strong>: mỗi câu <code>SELECT</code> chụp một ảnh mới.</li>
+<li><strong>READ UNCOMMITTED</strong>: không chụp ảnh; đọc thẳng row hiện tại, kể cả thay đổi chưa commit (dirty read).</li>
+<li><strong>SERIALIZABLE</strong>: khi autocommit tắt, mọi <code>SELECT</code> thường được đổi thành <code>SELECT … FOR SHARE</code>, tức là đọc có khoá.</li>
 </ul>
 
-<h3>Consistent read, locking read và câu ghi</h3>
-<p>Read view chỉ áp dụng cho <code>SELECT</code> thông thường. Ba loại câu khác đọc <strong>phiên bản mới nhất đã commit</strong> và khoá nó:</p>
+<h3>Câu nào dùng ảnh chụp, câu nào không</h3>
+<p>Ý chính: chỉ <code>SELECT</code> thường dùng ảnh chụp. Câu ghi và câu đọc có khoá luôn làm việc trên bản mới nhất.</p>
+<p>Các câu sau bỏ qua ảnh chụp, đọc <strong>bản mới nhất đã commit</strong> và khoá nó:</p>
 <ul>
-<li><code>SELECT … FOR UPDATE</code> và <code>SELECT … FOR SHARE</code> (locking read).</li>
-<li><code>UPDATE</code> và <code>DELETE</code>: luôn tìm và sửa phiên bản mới nhất, nếu đang có transaction khác giữ khoá thì đợi.</li>
-<li>Phần <code>SELECT</code> trong <code>INSERT … SELECT</code>, <code>UPDATE … (SELECT)</code>, <code>CREATE TABLE … SELECT</code>: theo manual, mặc định hành xử như <code>READ COMMITTED</code> với khoá.</li>
+<li><code>SELECT … FOR UPDATE</code> và <code>SELECT … FOR SHARE</code> (đọc có khoá).</li>
+<li><code>UPDATE</code> và <code>DELETE</code>: luôn tìm và sửa bản mới nhất. Nếu transaction khác đang giữ khoá row đó thì chờ.</li>
+<li>Phần <code>SELECT</code> nằm trong <code>INSERT … SELECT</code>, <code>UPDATE … (SELECT)</code>, <code>CREATE TABLE … SELECT</code>: theo manual, mặc định đọc bản mới nhất và có khoá.</li>
 </ul>
-<p>Manual 8.4 nêu thẳng hệ quả: trong <code>REPEATABLE READ</code>, <code>SELECT COUNT(*) … WHERE c2 = 'abc'</code> có thể trả 0, rồi <code>UPDATE … WHERE c2 = 'abc'</code> sửa 10 row do transaction khác vừa commit, và sau đó <code>SELECT</code> thấy 10 row đó vì chính transaction này vừa sửa chúng. Transaction có thể thấy một trạng thái bảng chưa từng tồn tại.</p>
+<p>Manual 8.4 đưa ra một ví dụ cho thấy hệ quả. Dưới <code>REPEATABLE READ</code>, <code>SELECT COUNT(*) … WHERE c2 = 'abc'</code> trả 0. Ngay sau đó, <code>UPDATE … WHERE c2 = 'abc'</code> lại sửa được 10 row, do một transaction khác vừa commit. Rồi <code>SELECT</code> thấy đủ 10 row, vì giờ chúng do chính transaction này sửa. Nghĩa là transaction có thể thấy bảng ở một trạng thái chưa từng tồn tại thật.</p>
 </div>
-<div class="note"><strong>Lỗi hay gặp:</strong> đọc bằng <code>SELECT</code> thường, tính giá trị mới ở ứng dụng, rồi ghi bằng <code>UPDATE … SET balance = 950</code>. Dưới <code>REPEATABLE READ</code>, <code>SELECT</code> có thể trả về phiên bản cũ trong khi row thật đã đổi, và <code>UPDATE</code> ghi đè thay đổi của người khác (lost update). Quy tắc: đọc để ghi thì dùng <code>FOR UPDATE</code>, hoặc ghi bằng biểu thức tương đối <code>balance = balance - 50</code>, hoặc kiểm tra version. Trang <a href="../innodb-locking-deadlock/index.html">locking và deadlock</a> so sánh các cách.</div>
+<div class="note"><strong>Lỗi hay gặp:</strong> đọc bằng <code>SELECT</code> thường, tự tính giá trị mới trong code, rồi ghi <code>UPDATE … SET balance = 950</code>. Dưới <code>REPEATABLE READ</code>, câu <code>SELECT</code> có thể trả về bản cũ trong khi row thật đã đổi, và câu <code>UPDATE</code> sẽ ghi đè mất thay đổi của người khác (lost update). Quy tắc: đọc để ghi thì dùng <code>FOR UPDATE</code>, hoặc để database tự tính (<code>balance = balance - 50</code>), hoặc kiểm tra cột version. Trang <a href="../innodb-locking-deadlock/index.html">locking và deadlock</a> so sánh các cách này.</div>
 
 <div class="prose">
-<h3>Secondary index không có cột ẩn</h3>
-<p>Entry của secondary index không có <code>DB_TRX_ID</code>, và không bao giờ sửa tại chỗ. Để biết một entry có thuộc phiên bản mà view được thấy không, InnoDB dựa vào hai dấu hiệu: entry bị delete-mark, hoặc page chứa nó được sửa bởi một transaction mới hơn view (mỗi page secondary index lưu transaction ID lớn nhất đã sửa nó). Khi một trong hai đúng, InnoDB không tin entry mà tra row trong PRIMARY rồi đi chuỗi undo.</p>
-<p>Hệ quả: một query covering (chỉ cần index, <code>Using index</code> trong <code>EXPLAIN</code>) có thể bất ngờ phải đọc PRIMARY cho từng entry khi bảng đang bị ghi nhiều, vì page index liên tục "mới hơn view". Manual 8.4 xác nhận kỹ thuật covering index bị bỏ trong trường hợp đó. ICP vẫn lọc trước khi tra PRIMARY.</p>
+<h3>Secondary index và ảnh chụp</h3>
+<p>Ý chính: khi bảng đang bị ghi nhiều, một câu đọc chỉ cần index (covering) vẫn có thể phải tra thêm PRIMARY.</p>
+<p>Entry của secondary index không có cột ẩn <code>DB_TRX_ID</code>, nên tự nó không cho biết ai đã tạo ra nó. InnoDB dựa vào hai dấu hiệu khác: entry đã bị đánh dấu xoá, hoặc page chứa entry vừa bị một transaction mới hơn ảnh chụp sửa (mỗi page index ghi lại ID lớn nhất từng sửa nó). Gặp một trong hai, InnoDB không tin entry nữa. Nó tra row trong PRIMARY rồi đi chuỗi phiên bản để tìm bản đúng.</p>
+<p>Hệ quả: một câu có <code>Using index</code> trong <code>EXPLAIN</code> (lẽ ra chỉ đọc index) có thể phải đọc PRIMARY cho từng entry khi bảng đang bị ghi liên tục. Manual 8.4 xác nhận điều này.</p>
 </div>
 
 <div class="prose">
-<h3>Isolation level ngăn được gì</h3>
+<h3>Isolation level ngăn được lỗi gì</h3>
+<p>Ý chính: mức mặc định <code>REPEATABLE READ</code> của InnoDB ngăn được phần lớn lỗi đọc, nhưng không ngăn được lost update và write skew.</p>
 </div>
 <div class="tablewrap"><table>
 <thead><tr><th>Hiện tượng</th><th>READ UNCOMMITTED</th><th>READ COMMITTED</th><th>REPEATABLE READ (InnoDB)</th><th>SERIALIZABLE</th></tr></thead>
 <tbody>
-<tr><td>Dirty read: thấy thay đổi chưa commit</td><td>Có</td><td>Không</td><td>Không</td><td>Không</td></tr>
-<tr><td>Non-repeatable read: đọc lại một row thấy giá trị khác</td><td>Có</td><td>Có</td><td>Không, với consistent read</td><td>Không</td></tr>
-<tr><td>Phantom: đọc lại một khoảng thấy row mới</td><td>Có</td><td>Có</td><td>Không với consistent read; locking read dùng next-key lock để chặn chèn</td><td>Không</td></tr>
-<tr><td>Lost update: read-modify-write ở ứng dụng ghi đè nhau</td><td>Có</td><td>Có</td><td>Có, nếu đọc bằng <code>SELECT</code> thường</td><td>Không: <code>FOR SHARE</code> ngầm làm hai bên deadlock, một bên bị rollback</td></tr>
-<tr><td>Write skew: hai transaction đọc chung, ghi hai row khác nhau, cùng phá một ràng buộc</td><td>Có</td><td>Có</td><td>Có</td><td>Không</td></tr>
+<tr><td>Dirty read: thấy thay đổi người khác chưa commit</td><td>Có</td><td>Không</td><td>Không</td><td>Không</td></tr>
+<tr><td>Non-repeatable read: đọc lại một row, thấy giá trị khác</td><td>Có</td><td>Có</td><td>Không, với <code>SELECT</code> thường</td><td>Không</td></tr>
+<tr><td>Phantom: đọc lại một khoảng, thấy thêm row mới</td><td>Có</td><td>Có</td><td>Không với <code>SELECT</code> thường; với đọc có khoá thì InnoDB khoá cả khoảng trống để chặn chèn</td><td>Không</td></tr>
+<tr><td>Lost update: hai bên cùng đọc, tự tính, rồi ghi đè nhau</td><td>Có</td><td>Có</td><td>Có, nếu đọc bằng <code>SELECT</code> thường</td><td>Không: hai bên cùng giữ khoá đọc rồi cùng xin ghi, sinh deadlock, một bên bị huỷ</td></tr>
+<tr><td>Write skew: hai bên cùng đọc một dữ liệu, mỗi bên sửa một row khác, và cùng nhau phá vỡ một quy tắc nghiệp vụ</td><td>Có</td><td>Có</td><td>Có</td><td>Không</td></tr>
 </tbody></table></div>
-<p class="prose">Cột <code>REPEATABLE READ</code> mô tả InnoDB, không phải chuẩn SQL. Chuẩn SQL cho phép phantom ở mức này; InnoDB chặn được cho consistent read nhờ read view, và cho locking read nhờ gap lock.</p>
+<p class="prose">Cột <code>REPEATABLE READ</code> mô tả riêng InnoDB. Chuẩn SQL cho phép phantom ở mức này, nhưng InnoDB chặn được: câu <code>SELECT</code> thường nhờ ảnh chụp, câu đọc có khoá nhờ khoá luôn khoảng trống (gap lock).</p>
 </section>
 
 <!-- 3 -->
 <section id="s3">
 <header><span class="num">03</span><h2>Vì sao thiết kế như vậy</h2></header>
 <div class="prose">
-<p><strong>Đọc không chặn ghi, ghi không chặn đọc.</strong> Workload OLTP có rất nhiều câu đọc ngắn. Nếu đọc phải lấy khoá chia sẻ, mỗi câu ghi sẽ phải đợi các câu đọc, và ngược lại. MVCC đổi chi phí đó lấy dung lượng (giữ phiên bản cũ) và CPU (đi chuỗi undo).</p>
-<p><strong>Read view so ID thay vì so thời gian</strong> vì chỉ cần một bản sao danh sách transaction active lúc tạo view, rẻ và chính xác. Không cần đồng hồ chung.</p>
-<p><strong>Câu ghi đọc phiên bản mới nhất</strong> vì không thể sửa một phiên bản cũ: nếu <code>UPDATE</code> dựa trên ảnh chụp, hai transaction sẽ cùng sửa một bản cũ và một trong hai thay đổi biến mất. InnoDB chọn để câu ghi đợi khoá và làm việc trên bản mới nhất. Cái giá là dị thường "SELECT thấy một thế giới, UPDATE thấy thế giới khác".</p>
+<p><strong>Vì sao dùng nhiều phiên bản?</strong> Để đọc không chặn ghi, và ghi không chặn đọc. Hệ thống giao dịch có rất nhiều câu đọc ngắn. Nếu câu đọc phải khoá, câu ghi sẽ phải chờ câu đọc và ngược lại. Giữ nhiều phiên bản tốn thêm dung lượng (cho bản cũ) và CPU (để lần ngược chuỗi), nhưng không ai phải chờ.</p>
+<p><strong>Vì sao so ID thay vì so thời gian?</strong> Chỉ cần chép lại danh sách transaction đang chạy lúc chụp là đủ. Cách này rẻ, chính xác, và không cần một đồng hồ chung.</p>
+<p><strong>Vì sao câu ghi không dùng ảnh chụp?</strong> Vì không thể sửa một bản cũ. Nếu <code>UPDATE</code> dựa trên ảnh chụp, hai transaction có thể cùng sửa từ một bản cũ, và thay đổi của một bên biến mất. InnoDB bắt câu ghi chờ khoá rồi sửa trên bản mới nhất. Cái giá: <code>SELECT</code> và <code>UPDATE</code> trong cùng transaction có thể thấy hai trạng thái khác nhau.</p>
 </div>
 <div class="tablewrap"><table>
 <thead><tr><th></th><th>InnoDB</th><th>PostgreSQL</th></tr></thead>
@@ -334,7 +347,7 @@ details.answer summary{font-weight:500;color:var(--struct)}
 <tr><td>SERIALIZABLE</td><td>Đổi <code>SELECT</code> thành <code>FOR SHARE</code> (khoá)</td><td>Serializable Snapshot Isolation: không khoá thêm, phát hiện xung đột và huỷ</td></tr>
 <tr><td>Dọn phiên bản cũ</td><td>Purge</td><td>VACUUM</td></tr>
 </tbody></table></div>
-<p class="prose">Cùng tên <code>REPEATABLE READ</code> nhưng hành vi khi có ghi đồng thời khác hẳn. Code viết cho PostgreSQL có thể dựa vào lỗi serialization để phát hiện xung đột; trên InnoDB lỗi đó không xảy ra.</p>
+<p class="prose">Cùng tên <code>REPEATABLE READ</code>, nhưng khi hai bên cùng sửa một row thì hai hệ thống xử lý khác hẳn nhau. Code viết cho PostgreSQL có thể dựa vào lỗi serialization để biết có xung đột; trên InnoDB, lỗi đó không bao giờ xuất hiện.</p>
 </section>
 
 <!-- 4 -->
@@ -365,7 +378,7 @@ COMMIT;</code></pre>
 <pre><code>SELECT @@transaction_isolation;
 SELECT trx_id, trx_state, trx_isolation_level, trx_started, trx_rows_modified
 FROM information_schema.INNODB_TRX;</code></pre>
-<p class="prose">Transaction chỉ đọc vẫn xuất hiện trong <code>INNODB_TRX</code> nếu đã có read view, với một <code>trx_id</code> rất lớn: đó là số hiển thị, không phải ID thật được cấp.</p>
+<p class="prose">Transaction chỉ đọc vẫn hiện trong <code>INNODB_TRX</code> nếu đã có ảnh chụp, kèm một <code>trx_id</code> rất lớn. Số đó chỉ để hiển thị, không phải ID thật.</p>
 
 <div class="prose"><h3>Lost update và hai cách sửa</h3></div>
 <pre><code>-- Sai: đọc ảnh chụp, tính ở ứng dụng, ghi giá trị tuyệt đối
@@ -404,15 +417,15 @@ UPDATE accounts SET balance = ? WHERE id = 7;</code></pre>
 <div class="prose">
 <h3>Chọn isolation level</h3>
 <ul>
-<li><strong>REPEATABLE READ</strong> (mặc định): một ảnh chụp cho cả transaction, hợp với báo cáo nhiều câu cần nhất quán với nhau. Locking read khoá cả gap, nên nhiều khoá hơn và dễ deadlock hơn.</li>
-<li><strong>READ COMMITTED</strong>: nhiều hệ thống OLTP chọn mức này. Ít gap lock hơn (gần như chỉ còn cho kiểm tra foreign key và duplicate key), ít deadlock hơn, ảnh chụp mới ở mỗi câu nên ít giữ undo. Đổi lại, hai câu trong cùng transaction có thể thấy dữ liệu khác nhau.</li>
-<li>Dù chọn mức nào, câu đọc-để-ghi phải dùng locking read, biểu thức tương đối, hoặc kiểm tra version. Isolation level không thay được việc đó.</li>
+<li><strong>REPEATABLE READ</strong> (mặc định): một ảnh chụp cho cả transaction. Hợp với báo cáo gồm nhiều câu cần khớp nhau. Đổi lại, câu đọc có khoá khoá cả khoảng trống, nên khoá nhiều hơn và dễ deadlock hơn.</li>
+<li><strong>READ COMMITTED</strong>: nhiều hệ thống giao dịch chọn mức này. Gần như không khoá khoảng trống, nên ít deadlock hơn. Mỗi câu chụp ảnh mới, nên undo log được dọn sớm hơn. Đổi lại, hai câu trong cùng transaction có thể thấy dữ liệu khác nhau.</li>
+<li>Dù chọn mức nào, câu đọc để rồi ghi vẫn phải dùng <code>FOR UPDATE</code>, để database tự tính, hoặc kiểm tra version. Isolation level không thay được việc đó.</li>
 </ul>
 <h3>Cái giá</h3>
 <ul>
-<li>Transaction mở lâu giữ read view, chặn purge (xem trang <a href="../innodb-buffer-pool-redo-undo/index.html">buffer pool, redo và undo</a>).</li>
-<li>Câu đọc trong transaction cũ phải đi chuỗi undo dài cho những row bị sửa nhiều lần.</li>
-<li>Covering index có thể phải tra PRIMARY khi page index mới hơn view.</li>
+<li>Transaction mở lâu giữ ảnh chụp cũ, nên purge không dọn được bản cũ (xem trang <a href="../innodb-buffer-pool-redo-undo/index.html">buffer pool, redo và undo</a>).</li>
+<li>Câu đọc trong một transaction cũ phải lần qua chuỗi phiên bản dài với những row bị sửa nhiều lần.</li>
+<li>Câu đọc chỉ cần index có thể phải tra thêm PRIMARY khi page index vừa bị sửa.</li>
 </ul>
 <h3>Nhận ra trên production bằng gì</h3>
 </div>
@@ -423,7 +436,7 @@ UPDATE accounts SET balance = ? WHERE id = 7;</code></pre>
 <tr><td>Một báo cáo chạy càng lâu càng chậm</td><td>Tuổi transaction trong <code>INNODB_TRX</code>; history list length</td></tr>
 <tr><td>Ứng dụng đọc được dữ liệu cũ trong một request dài</td><td>Isolation level của connection; transaction có bị giữ mở xuyên request không (connection pool, ORM)</td></tr>
 </tbody></table></div>
-<div class="senior"><h4>Góc nhìn senior: transaction là ranh giới của ảnh chụp</h4><p>Nhiều lỗi dữ liệu đến từ chỗ không ai biết transaction bắt đầu và kết thúc ở đâu: ORM mở transaction ngầm, connection pool trả lại connection còn transaction dở, một request gọi API ngoài khi đang giữ transaction. Khi review code, câu hỏi đầu tiên là "ảnh chụp này được tạo ở đâu và sống bao lâu".</p></div>
+<div class="senior"><h4>Góc nhìn senior: biết ảnh chụp bắt đầu và kết thúc ở đâu</h4><p>Nhiều lỗi dữ liệu đến từ chỗ không ai biết transaction bắt đầu và kết thúc ở đâu. ORM tự mở transaction mà không ai để ý. Connection pool trả lại một connection còn transaction chạy dở. Một request gọi API bên ngoài trong lúc đang giữ transaction. Khi review code, câu hỏi đầu tiên nên là: "ảnh chụp này được tạo ở đâu, và sống bao lâu?"</p></div>
 <div class="prose">
 <h3>Checklist khi review code có transaction</h3>
 <ul>
@@ -440,12 +453,12 @@ UPDATE accounts SET balance = ? WHERE id = 7;</code></pre>
 <section id="s7">
 <header><span class="num">07</span><h2>Hiểu lầm thường gặp</h2></header>
 <div class="prose"><ul>
-<li><strong>Hiểu lầm:</strong> ảnh chụp được tạo ở <code>START TRANSACTION</code>. <strong>Vì sao sai:</strong> trong RR nó được tạo ở consistent read đầu tiên. <strong>Quy tắc:</strong> dùng <code>WITH CONSISTENT SNAPSHOT</code> nếu cần tạo ngay.</li>
-<li><strong>Hiểu lầm:</strong> trong RR, mọi câu trong transaction thấy cùng một dữ liệu. <strong>Vì sao sai:</strong> chỉ <code>SELECT</code> thường dùng read view; locking read và câu ghi đọc bản mới nhất. <strong>Quy tắc:</strong> phân biệt consistent read và current read (<a href="#s2">phần 02</a>).</li>
-<li><strong>Hiểu lầm:</strong> RR chặn được lost update. <strong>Vì sao sai:</strong> read-modify-write với <code>SELECT</code> thường vẫn ghi đè. <strong>Quy tắc:</strong> <code>FOR UPDATE</code>, biểu thức tương đối, hoặc version.</li>
-<li><strong>Hiểu lầm:</strong> read view so thời điểm commit. <strong>Vì sao sai:</strong> nó so ID với danh sách active lúc tạo. <strong>Quy tắc:</strong> transaction active lúc tạo view là vô hình với view, kể cả khi commit sau đó.</li>
-<li><strong>Hiểu lầm:</strong> REPEATABLE READ của MySQL và PostgreSQL giống nhau. <strong>Vì sao sai:</strong> PostgreSQL báo lỗi khi cập nhật row đã đổi; InnoDB sửa bản mới nhất. <strong>Quy tắc:</strong> kiểm tra hành vi của engine, không dựa vào tên.</li>
-<li><strong>Hiểu lầm:</strong> covering index luôn chỉ đọc index. <strong>Vì sao sai:</strong> entry delete-mark hoặc page mới hơn view buộc tra PRIMARY. <strong>Quy tắc:</strong> đo trên bảng đang bị ghi, không chỉ bảng tĩnh.</li>
+<li><strong>Hiểu lầm:</strong> ảnh được chụp ở <code>START TRANSACTION</code>. <strong>Vì sao sai:</strong> dưới RR, ảnh được chụp ở câu <code>SELECT</code> thường đầu tiên. <strong>Quy tắc:</strong> dùng <code>WITH CONSISTENT SNAPSHOT</code> nếu cần chụp ngay.</li>
+<li><strong>Hiểu lầm:</strong> dưới RR, mọi câu trong transaction thấy cùng một dữ liệu. <strong>Vì sao sai:</strong> chỉ <code>SELECT</code> thường dùng ảnh chụp; câu đọc có khoá và câu ghi đọc bản mới nhất. <strong>Quy tắc:</strong> xem câu nào dùng ảnh chụp, câu nào không (<a href="#s2">phần 02</a>).</li>
+<li><strong>Hiểu lầm:</strong> RR chặn được lost update. <strong>Vì sao sai:</strong> đọc bằng <code>SELECT</code> thường rồi tự tính và ghi vẫn có thể ghi đè người khác. <strong>Quy tắc:</strong> dùng <code>FOR UPDATE</code>, để database tự tính, hoặc kiểm tra version.</li>
+<li><strong>Hiểu lầm:</strong> ảnh chụp so thời điểm commit. <strong>Vì sao sai:</strong> nó so ID với danh sách transaction đang chạy lúc chụp. <strong>Quy tắc:</strong> transaction đang chạy dở lúc chụp thì vô hình với ảnh đó, kể cả khi commit ngay sau.</li>
+<li><strong>Hiểu lầm:</strong> REPEATABLE READ của MySQL và PostgreSQL giống nhau. <strong>Vì sao sai:</strong> PostgreSQL báo lỗi khi sửa row đã bị người khác đổi; InnoDB thì sửa luôn trên bản mới nhất. <strong>Quy tắc:</strong> kiểm tra hành vi thật của từng database, đừng dựa vào tên.</li>
+<li><strong>Hiểu lầm:</strong> câu có <code>Using index</code> thì không bao giờ đọc PRIMARY. <strong>Vì sao sai:</strong> entry bị đánh dấu xoá, hoặc page vừa bị sửa, buộc InnoDB tra PRIMARY. <strong>Quy tắc:</strong> đo trên bảng đang bị ghi, không chỉ trên bảng đứng yên.</li>
 </ul></div>
 </section>
 
@@ -455,22 +468,22 @@ UPDATE accounts SET balance = ? WHERE id = 7;</code></pre>
 <p class="prose">Viết ngày 2026-10-19.</p>
 <details><summary><span class="tag">Dự đoán</span>Phiên bản nào được thấy</summary>
 <p>Chuỗi của row: 312 (đặt 700, chưa commit) → 309 (800) → 305 (900) → 290 (1000). Read view tạo khi ID kế tiếp là 310 và transaction active là {305, 309}. View thấy giá trị nào? Nếu active chỉ là {309}?</p>
-<details class="answer"><summary>Xem đáp án</summary><p>Với {305, 309}: up_limit = 305. 312 ≥ 310 bỏ; 309 trong m_ids bỏ; 305 trong m_ids bỏ; 290 &lt; 305 thấy: 1000. Với {309}: up_limit = 309; 312 bỏ, 309 bỏ, 305 &lt; 309 thấy: 900.</p></details></details>
+<details class="answer"><summary>Xem đáp án</summary><p>Với {305, 309}: up_limit = 305. Bản 312: từ 310 trở lên, lúc chụp chưa tồn tại, bỏ. Bản 309 và 305: đang chạy lúc chụp, bỏ. Bản 290: nhỏ hơn 305, đã commit trước, thấy. Kết quả 1000.</p><p>Với {309}: up_limit = 309. Bỏ 312 và 309; bản 305 nhỏ hơn 309 nên thấy. Kết quả 900.</p></details></details>
 <details><summary><span class="tag">Dự đoán</span>Hai session dưới REPEATABLE READ</summary>
 <p>A: <code>START TRANSACTION; SELECT balance</code> → 1000. B trừ 100 và commit. A: <code>SELECT balance</code>; <code>SELECT balance … FOR UPDATE</code>; <code>UPDATE … SET balance = balance - 50</code>; <code>SELECT balance</code>. Bốn giá trị A thấy là gì?</p>
-<details class="answer"><summary>Xem đáp án</summary><p>1000 (ảnh chụp cũ), 900 (locking read đọc bản mới nhất), UPDATE tính từ 900 thành 850, rồi 850 (thấy thay đổi của chính nó). Dưới READ COMMITTED thì câu đầu tiên sau khi B commit đã thấy 900.</p></details></details>
+<details class="answer"><summary>Xem đáp án</summary><p>Lần lượt: 1000 (vẫn dùng ảnh chụp cũ); 900 (<code>FOR UPDATE</code> đọc bản mới nhất); UPDATE tính từ 900 ra 850; rồi 850 (thấy thay đổi của chính mình). Dưới READ COMMITTED, câu <code>SELECT</code> đầu tiên sau khi B commit đã thấy 900.</p></details></details>
 <details><summary><span class="tag">Giải thích</span>Vì sao UPDATE không dùng ảnh chụp</summary>
 <p>Vì sao InnoDB cho <code>UPDATE</code> đọc bản mới nhất thay vì bản trong read view?</p>
-<details class="answer"><summary>Xem đáp án</summary><p>Không thể sửa một phiên bản cũ mà không làm mất phiên bản mới hơn. Nếu UPDATE dựa vào ảnh chụp, hai transaction cùng sửa từ một bản cũ và thay đổi của một bên mất. InnoDB khoá và sửa bản mới nhất; cái giá là SELECT và UPDATE trong cùng transaction có thể nhìn khác nhau.</p></details></details>
+<details class="answer"><summary>Xem đáp án</summary><p>Vì sửa một bản cũ sẽ làm mất bản mới hơn. Nếu UPDATE dựa vào ảnh chụp, hai transaction có thể cùng sửa từ một bản cũ, và thay đổi của một bên biến mất. InnoDB khoá rồi sửa trên bản mới nhất. Cái giá: SELECT và UPDATE trong cùng transaction có thể thấy hai trạng thái khác nhau.</p></details></details>
 <details><summary><span class="tag">Chẩn đoán</span>Tồn kho âm</summary>
 <p>Code: <code>SELECT stock FROM products WHERE id = ?</code>; nếu <code>stock &gt;= qty</code> thì <code>UPDATE products SET stock = stock - qty</code>. Chạy dưới RR, thỉnh thoảng tồn kho âm. Vì sao, sửa thế nào?</p>
-<details class="answer"><summary>Xem đáp án</summary><p>Hai transaction cùng đọc stock = 1 từ ảnh chụp, cùng thấy đủ, cùng trừ trên bản mới nhất: còn -1. Sửa: <code>SELECT … FOR UPDATE</code> để kiểm tra trên bản mới nhất có khoá, hoặc gộp điều kiện vào câu ghi: <code>UPDATE … SET stock = stock - ? WHERE id = ? AND stock &gt;= ?</code> rồi kiểm tra số row bị ảnh hưởng.</p></details></details>
+<details class="answer"><summary>Xem đáp án</summary><p>Hai transaction cùng đọc được stock = 1 từ ảnh chụp, cùng thấy còn đủ, rồi cùng trừ trên bản mới nhất: còn -1. Cách sửa: kiểm tra bằng <code>SELECT … FOR UPDATE</code> để đọc bản mới nhất và khoá nó. Hoặc gộp luôn điều kiện vào câu ghi: <code>UPDATE … SET stock = stock - ? WHERE id = ? AND stock &gt;= ?</code>, rồi xem có bao nhiêu row bị ảnh hưởng.</p></details></details>
 <details><summary><span class="tag">Giải thích</span>Covering index và MVCC</summary>
 <p>Vì sao một query có <code>Using index</code> lại đọc PRIMARY khi bảng đang bị cập nhật nhiều?</p>
-<details class="answer"><summary>Xem đáp án</summary><p>Secondary entry không có transaction ID. Khi entry bị delete-mark hoặc page của nó được sửa bởi transaction mới hơn view, InnoDB không biết entry có hợp với view không, nên tra row trong PRIMARY và đi chuỗi undo. Manual xác nhận kỹ thuật covering bị bỏ trong trường hợp này.</p></details></details>
+<details class="answer"><summary>Xem đáp án</summary><p>Entry của secondary index không ghi ai đã tạo ra nó. Khi entry bị đánh dấu xoá, hoặc page của nó vừa bị một transaction mới hơn ảnh chụp sửa, InnoDB không biết câu đọc có được thấy entry đó không. Nó phải tra row trong PRIMARY rồi lần chuỗi phiên bản. Manual xác nhận trường hợp này.</p></details></details>
 <details><summary><span class="tag">Giải thích</span>Chuyển từ PostgreSQL</summary>
 <p>Một service chuyển từ PostgreSQL sang MySQL. Code bắt lỗi serialization để retry khi hai request cùng sửa một row dưới REPEATABLE READ. Trên MySQL điều gì thay đổi?</p>
-<details class="answer"><summary>Xem đáp án</summary><p>InnoDB không phát ra lỗi đó: UPDATE thứ hai đợi khoá rồi sửa bản mới nhất. Nhánh retry không bao giờ chạy, và nếu code dựa vào lỗi để phát hiện xung đột, nó sẽ lặng lẽ cho cả hai thay đổi đi qua. Cần locking read hoặc kiểm tra version tường minh.</p></details></details>
+<details class="answer"><summary>Xem đáp án</summary><p>InnoDB không báo lỗi đó: câu UPDATE thứ hai chờ khoá rồi sửa trên bản mới nhất. Nhánh retry không bao giờ chạy. Nếu code dựa vào lỗi để biết có xung đột, giờ nó sẽ lặng lẽ cho cả hai thay đổi đi qua. Cần chuyển sang <code>FOR UPDATE</code> hoặc kiểm tra cột version một cách rõ ràng.</p></details></details>
 </section>
 
 <!-- 9 -->
@@ -530,16 +543,16 @@ const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'
 /* ---------- 01: two sessions, RR vs RC ---------- */
 // each step: who runs, sql, result under RR / RC
 const SQ=[
- {w:'A',q:'START TRANSACTION;',rr:'',rc:'',d:{rr:'A mở transaction. Dưới REPEATABLE READ chưa có read view nào: nó chỉ được tạo ở câu đọc đầu tiên. A chưa có transaction ID vì chưa ghi gì.',rc:'A mở transaction. Dưới READ COMMITTED mỗi câu đọc sẽ tạo read view riêng; chưa có câu nào.'}},
- {w:'A',q:'SELECT balance FROM accounts WHERE id = 7;',rr:'1000',rc:'1000',d:{rr:'Câu đọc đầu tiên tạo read view của A. Phiên bản hiện tại 1000 được commit từ lâu nên thấy được. Read view này sẽ dùng tới khi A commit.',rc:'Read view mới cho câu này. Thấy 1000. Read view bị bỏ ngay khi câu xong.'}},
- {w:'B',q:'START TRANSACTION;\nUPDATE accounts SET balance = balance - 100 WHERE id = 7;',rr:'1 row',rc:'1 row',d:{rr:'B được cấp transaction ID 320 khi ghi. Row trong page thành 900, DB_TRX_ID = 320, bản 1000 chuyển vào undo. B giữ khoá X trên row. Không ai phải đợi: A đang không khoá gì.',rc:'Giống bên RR: row thành 900 với DB_TRX_ID = 320, bản cũ vào undo, B giữ khoá X.'}},
- {w:'A',q:'SELECT balance FROM accounts WHERE id = 7;',rr:'1000',rc:'1000',d:{rr:'Read view cũ của A: 320 không tồn tại lúc tạo view, nên bỏ bản 900 và đi theo roll pointer về bản 1000. Câu đọc không đợi khoá của B.',rc:'Read view mới, nhưng 320 đang active nên vô hình. Đi undo về 1000. Không có dirty read.'}},
- {w:'B',q:'COMMIT;',rr:'',rc:'',d:{rr:'B commit. Bản 900 thành bản đã commit. Khoá của B được thả.',rc:'B commit. Bản 900 thành bản đã commit.'}},
- {w:'A',q:'SELECT balance FROM accounts WHERE id = 7;',rr:'1000',rc:'900',diff:true,d:{rr:'Vẫn 1000. Read view của A được tạo trước khi 320 tồn tại; việc 320 vừa commit không đổi gì với view đó. Đây là repeatable read.',rc:'900. Câu này tạo read view mới, trong đó 320 đã commit. Hai câu đọc giống hệt nhau trong một transaction trả hai kết quả: non-repeatable read.'}},
- {w:'A',q:'SELECT balance FROM accounts WHERE id = 7 FOR UPDATE;',rr:'900',rc:'900',diff:true,d:{rr:'900. Locking read không dùng read view: nó đọc bản mới nhất đã commit và đặt khoá X. Cùng transaction, cùng row, câu trước thấy 1000, câu này thấy 900.',rc:'900, và A giữ khoá X trên row. Bên RC, câu thường và câu FOR UPDATE thấy cùng giá trị.'}},
- {w:'A',q:'UPDATE accounts SET balance = balance - 50 WHERE id = 7;',rr:'1 row',rc:'1 row',d:{rr:'UPDATE luôn làm trên bản mới nhất: 900 - 50 = 850. A được cấp transaction ID 321. Thay đổi của B không bị mất.',rc:'900 - 50 = 850 trên bản mới nhất. Giống bên RR.'}},
- {w:'A',q:'SELECT balance FROM accounts WHERE id = 7;',rr:'850',rc:'850',d:{rr:'850. Bản mới nhất có DB_TRX_ID = 321, chính là A, nên view của A thấy nó. A đã đi từ 1000 nhảy thẳng sang 850, chưa từng thấy 900 qua câu đọc thường: một trạng thái mà manual gọi là có thể chưa từng tồn tại.',rc:'850, của chính A.'}},
- {w:'A',q:'COMMIT;',rr:'',rc:'',d:{rr:'Kết quả cuối 850 = 1000 - 100 - 50. Không mất cập nhật nào, vì câu ghi dùng biểu thức tương đối. Nếu ở bước trước A đã tự tính 1000 - 50 ở ứng dụng và ghi SET balance = 950, thay đổi của B sẽ biến mất.',rc:'Kết quả cuối 850. Bẫy lost update vẫn y hệt nếu ứng dụng ghi giá trị tuyệt đối tính từ một câu đọc thường.'}}
+ {w:'A',q:'START TRANSACTION;',rr:'',rc:'',d:{rr:'A mở transaction. Dưới REPEATABLE READ, ảnh chụp chưa được tạo; nó sẽ được chụp ở câu đọc đầu tiên. A cũng chưa có ID vì chưa ghi gì.',rc:'A mở transaction. Dưới READ COMMITTED, mỗi câu đọc sẽ tự chụp ảnh riêng; lúc này chưa có câu nào.'}},
+ {w:'A',q:'SELECT balance FROM accounts WHERE id = 7;',rr:'1000',rc:'1000',d:{rr:'Câu đọc đầu tiên chụp ảnh cho A. Giá trị 1000 đã commit từ lâu nên A thấy. A sẽ dùng tấm ảnh này tới khi commit.',rc:'Câu này chụp một ảnh mới và thấy 1000. Ảnh bị bỏ ngay khi câu xong.'}},
+ {w:'B',q:'START TRANSACTION;\nUPDATE accounts SET balance = balance - 100 WHERE id = 7;',rr:'1 row',rc:'1 row',d:{rr:'B được cấp ID 320 khi ghi. Row trong page đổi thành 900, ghi DB_TRX_ID = 320; bản 1000 được cất vào undo log. B giữ khoá ghi trên row. Không ai phải chờ, vì A không khoá gì cả.',rc:'Giống bên RR: row đổi thành 900, ghi DB_TRX_ID = 320, bản cũ được cất vào undo log, B giữ khoá ghi.'}},
+ {w:'A',q:'SELECT balance FROM accounts WHERE id = 7;',rr:'1000',rc:'1000',d:{rr:'A vẫn dùng ảnh cũ. Lúc chụp, 320 chưa tồn tại, nên A bỏ qua bản 900 và lần về bản 1000 trong undo log. A không phải chờ khoá của B.',rc:'Ảnh chụp mới, nhưng 320 vẫn đang chạy dở nên vô hình. A lần về bản 1000. Không thấy dữ liệu chưa commit.'}},
+ {w:'B',q:'COMMIT;',rr:'',rc:'',d:{rr:'B commit. Bản 900 trở thành bản chính thức. B nhả khoá.',rc:'B commit. Bản 900 trở thành bản chính thức.'}},
+ {w:'A',q:'SELECT balance FROM accounts WHERE id = 7;',rr:'1000',rc:'900',diff:true,d:{rr:'Vẫn 1000. Ảnh của A được chụp trước khi 320 tồn tại; việc 320 vừa commit không làm thay đổi tấm ảnh đó. Đây chính là "repeatable read": đọc lại vẫn ra kết quả cũ.',rc:'900. Câu này chụp ảnh mới, lúc mà 320 đã commit. Hai câu đọc y hệt nhau trong cùng transaction cho hai kết quả khác nhau: non-repeatable read.'}},
+ {w:'A',q:'SELECT balance FROM accounts WHERE id = 7 FOR UPDATE;',rr:'900',rc:'900',diff:true,d:{rr:'900. Câu FOR UPDATE không dùng ảnh chụp: nó đọc bản mới nhất đã commit và khoá row lại. Cùng transaction, cùng row, câu trước thấy 1000, câu này thấy 900.',rc:'900, và A khoá row. Dưới RC, câu thường và câu FOR UPDATE thấy cùng một giá trị.'}},
+ {w:'A',q:'UPDATE accounts SET balance = balance - 50 WHERE id = 7;',rr:'1 row',rc:'1 row',d:{rr:'UPDATE luôn sửa trên bản mới nhất: 900 - 50 = 850. A được cấp ID 321. Thay đổi của B được giữ nguyên.',rc:'Sửa trên bản mới nhất: 900 - 50 = 850. Giống bên RR.'}},
+ {w:'A',q:'SELECT balance FROM accounts WHERE id = 7;',rr:'850',rc:'850',d:{rr:'850. Bản mới nhất do chính A (ID 321) tạo ra, nên A thấy nó. Với các câu đọc thường, A thấy số dư nhảy thẳng từ 1000 sang 850, chưa bao giờ thấy 900. Manual gọi đây là thấy một trạng thái có thể chưa từng tồn tại.',rc:'850, do chính A vừa sửa.'}},
+ {w:'A',q:'COMMIT;',rr:'',rc:'',d:{rr:'Kết quả cuối: 850 = 1000 - 100 - 50. Không mất thay đổi nào, vì câu ghi để database tự tính (balance - 50). Nếu A tự tính 1000 - 50 trong code rồi ghi SET balance = 950, phần trừ 100 của B sẽ biến mất.',rc:'Kết quả cuối: 850. Bẫy mất thay đổi vẫn y nguyên nếu code tự tính từ một câu đọc thường rồi ghi đè giá trị.'}}
 ];
 let iso='rr',si=0;
 function renderSess(){
@@ -575,9 +588,9 @@ const CAND=[305,309,312];
 let active=new Set([309]);
 function drawActive(){
   const low=+$('vLow').value;
-  $('vActive').innerHTML='<span style="color:var(--ink-2)">Active lúc tạo view:</span>'+CAND.map(t=>{
+  $('vActive').innerHTML='<span style="color:var(--ink-2)">Đang chạy dở lúc chụp:</span>'+CAND.map(t=>{
     const ok=t<low;
-    return `<label><input type="checkbox" data-t="${t}" ${ok&&active.has(t)?'checked':''} ${ok?'':'disabled'}> ${t}${ok?'':' (chưa tồn tại)'}</label>`;}).join('');
+    return `<label><input type="checkbox" data-t="${t}" ${ok&&active.has(t)?'checked':''} ${ok?'':'disabled'}> ${t}${ok?'':' (lúc chụp chưa tồn tại)'}</label>`;}).join('');
   $('vActive').querySelectorAll('input').forEach(i=>i.onchange=()=>{const t=+i.dataset.t;i.checked?active.add(t):active.delete(t);vis();});
 }
 function vis(){
@@ -589,11 +602,11 @@ function vis(){
   CHAIN.forEach((v,i)=>{
     if(found>=0){why.push(null);return;}
     let ok,r;
-    if(cr&&v.t===cr){ok=true;r=`${v.t} là chính nó`;}
-    else if(v.t<up){ok=true;r=`${v.t} < up_limit ${up}: đã commit trước view`;}
-    else if(v.t>=low){ok=false;r=`${v.t} ≥ low_limit ${low}: chưa tồn tại lúc tạo view`;}
-    else if(ids.includes(v.t)){ok=false;r=`${v.t} nằm trong m_ids: đang active lúc tạo view`;}
-    else {ok=true;r=`${v.t} < low_limit và không trong m_ids: đã commit trước view`;}
+    if(cr&&v.t===cr){ok=true;r=`${v.t} là chính transaction đang đọc`;}
+    else if(v.t<up){ok=true;r=`${v.t} < up_limit ${up}: đã commit trước lúc chụp`;}
+    else if(v.t>=low){ok=false;r=`${v.t} ≥ low_limit ${low}: lúc chụp chưa tồn tại`;}
+    else if(ids.includes(v.t)){ok=false;r=`${v.t} nằm trong m_ids: lúc chụp đang chạy dở`;}
+    else {ok=true;r=`${v.t} < low_limit và không nằm trong m_ids: đã commit trước lúc chụp`;}
     why.push({ok,r});if(ok)found=i;
   });
   let g='';const W=150,gap=20,y=30;
@@ -601,10 +614,11 @@ function vis(){
     const x=10+i*(W+gap);const w=why[i];
     const cls=w===null?'dim':(w.ok?'row':'miss');
     g+=B(x,y,W,62,cls,`balance = ${v.v}`,`DB_TRX_ID ${v.t}`);
-    g+=T(x,y-10,i===0?'row trong page, chưa commit':'undo record','start','ts');
+    g+=T(x,y-10,i===0?'row trong page':'trong undo log','start','ts');
+    if(i===0)g+=T(x+W/2,y+80,'312 chưa commit','middle','ts');
     if(i<CHAIN.length-1)g+=A(`M${x+W} ${y+31} L${x+W+gap-2} ${y+31}`,'key');
   });
-  g+=T(10,128,found>=0?`Thấy phiên bản ${CHAIN[found].v} sau khi xét ${found+1} phiên bản`:'Không phiên bản nào được thấy: row không tồn tại với view này','start','tb');
+  g+=T(10,138,found>=0?`Thấy bản ${CHAIN[found].v}, sau khi xét ${found+1} bản`:'Không bản nào được thấy: với ảnh chụp này, row không tồn tại','start','tb');
   $('vSvg').innerHTML=DEFS+g;
   $('vDesc').textContent=why.filter(Boolean).map(w=>(w.ok?'Thấy: ':'Bỏ: ')+w.r).join('. ')+'.';
   $('visMeta').textContent=found>=0?`kết quả: ${CHAIN[found].v}`:'kết quả: không có row';
