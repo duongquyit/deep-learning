@@ -156,3 +156,54 @@ Do not add other callout types or decorative boxes.
 - Name the engine whenever behavior differs. The lab is MySQL 8.4; use InnoDB
   first and PostgreSQL as the comparison.
 - Button text says what happens: "Chèn", "Tìm", "Đặt lại", "Trước", "Tiếp".
+
+## Writing for readability
+
+Agreed with the author on 2026-10-20, after the first four Month 1 pages read
+as dense and hard to follow. Accuracy is not enough; the reader has to get the
+idea on the first pass. Apply these to every paragraph, step description and
+recall answer.
+
+1. **Explain a term before using it.** The first time a term appears on the
+   page, say what it is in plain Vietnamese in the same sentence or the one
+   before: "Redo log ghi liên tục, mỗi byte có một số thứ tự gọi là LSN." After
+   that, use the term freely. If a term only appears once, prefer the plain
+   words over the term.
+2. **Main point first.** Open each `h3` and each step description with the
+   takeaway in one plain sentence, then the mechanism. A reader who stops after
+   the first sentence should still leave with the right idea.
+3. **One action per sentence.** Do not chain four steps with commas. Split
+   them, or make a numbered list. Aim for sentences under about 25 words.
+4. **Write Vietnamese, not translated English.** Prefer active voice with a
+   clear subject ("InnoDB đọc page lên", not "page được đọc lên bởi InnoDB").
+   Avoid stacked relative clauses ("mà … nằm trên … trên …"). Replace literal
+   calques with natural words; keep the English term in parentheses only when
+   the reader will meet it in tools or docs.
+5. **Concrete before abstract.** Give the example with real values first
+   ("bảng có PRIMARY và 4 index thì…"), then the general rule.
+6. **Say why it matters.** End a mechanism with what it changes for the
+   reader: a cost, a symptom, a decision.
+
+### Term list
+
+Keep the same choice on every page. "Giải thích lần đầu" is what to say the
+first time the term appears.
+
+| Term | Keep as | Giải thích lần đầu |
+|---|---|---|
+| page | page | khối 16KB, đơn vị InnoDB đọc và ghi |
+| leaf page | leaf page | page ở tầng dưới cùng của cây, nơi chứa entry thật |
+| entry | entry | một dòng trong index: giá trị cột cộng PK |
+| buffer pool | buffer pool | vùng RAM InnoDB giữ page để khỏi đọc disk |
+| dirty page | page đã sửa nhưng chưa ghi xuống disk | (không dùng "page bẩn" trơn; nếu cần thuật ngữ thì "dirty page") |
+| split | tách page (split) | page đầy, InnoDB chia nó thành hai |
+| redo log | redo log | nhật ký ghi lại mọi thay đổi trên page, dùng để làm lại sau sự cố |
+| undo log | undo log | nơi giữ bản cũ của row, dùng để rollback và cho câu đọc cũ |
+| LSN | LSN | số thứ tự của từng byte trong redo log |
+| checkpoint | checkpoint | mốc trên redo log: mọi thay đổi trước mốc đã nằm trong file dữ liệu |
+| purge | purge | thread nền dọn bản cũ và row đã đánh dấu xoá khi không ai cần nữa |
+| delete-mark | đánh dấu xoá | entry vẫn còn đó nhưng được đánh dấu là đã xoá |
+| read view | read view (ảnh chụp) | danh sách transaction đã commit "trong mắt" một câu đọc |
+| made young | chuyển lên vùng new | page được coi là hay dùng |
+| gap lock | gap lock | khoá khoảng trống giữa hai entry để không ai chèn vào |
+| fsync | fsync | lệnh buộc hệ điều hành ghi hẳn xuống thiết bị |
