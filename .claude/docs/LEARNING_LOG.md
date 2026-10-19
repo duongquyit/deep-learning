@@ -42,6 +42,11 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 | Clustered vs secondary index (leaf contents, PK vs TID as pointer, covering by PK) | 2 (prov.) | same, §01–§02 | 2026-10-19 | Predict `EXPLAIN` and page reads for an unseen query on both engines, then confirm (E6) |
 | Index write cost of UPDATE (InnoDB in place vs PostgreSQL HOT / non-HOT) | 2 (prov.) | same, §03 | 2026-10-19 | Exercise E7: measure `n_tup_hot_upd` and index growth |
 | Clustered-index page split and PK choice (sequential vs random) | 2 (prov.) | same, §04 | 2026-10-19 | Exercise E8: count `index_page_splits` for sequential vs UUIDv4 keys |
+| Composite index: leftmost prefix, range stops later columns, `key_len` vs `used_key_parts` | 2 (prov.) | [composite-index-query-plan](../topics/composite-index-query-plan/index.html) §01–§02 | 2026-10-19 | Exercise E9: predict `type`, `key_len` and `used_key_parts` for 7 queries on the 5M lab table, then confirm |
+| Column order (equality, sort, range) and avoiding filesort | 2 (prov.) | same, §03 | 2026-10-19 | Exercise E11: two column orders, measure `Handler_read_next` and latency for a heavy user |
+| Index Condition Pushdown, `Using index condition` vs `Using where` | 2 (prov.) | same, §04 | 2026-10-19 | Exercise E10: `Handler_read_next` and page reads with ICP on and off |
+| Optimizer estimates: index dives, cardinality, histograms, why an index is skipped | 2 (prov.) | same, §05 | 2026-10-19 | Exercise E12: find the range→ALL threshold on the lab and check whether the choice was right by latency |
+| Reading MySQL `EXPLAIN` / `EXPLAIN ANALYZE` (`type`, `key_len`, `rows`, `filtered`, `Extra`) | 2 (prov.) | same, §06 | 2026-10-19 | Read plans for queries I did not write, including a join, and explain every estimate-vs-actual gap |
 
 "(prov.)" = provisional. Every row above rests on one artifact I wrote myself, with no measurement behind it. Week 1 of Month 1 includes a baseline assessment (TECHNICAL_GROWTH.md Section 11) that should confirm or cut these.
 
@@ -54,6 +59,9 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 5. The B+tree playground splits at 3 keys per node for visibility. Does anything in my mental model secretly depend on that small fan-out rather than the real ~400?
 6. The clustered-vs-secondary size calculator assumes ~69% leaf fill and a 5-byte InnoDB record header, and ignores the page directory. How far off is it on a real table (E5)?
 7. The page states that InnoDB's extra cost on a secondary-index lookup is mostly buffer-pool hits (CPU and latches), not I/O. At what hit ratio does that stop being true?
+8. In Claude's sandbox (MySQL 8.0.46) a histogram on `status` did not change `filtered` while `status` was still a column of an index, even an invisible one, but did on a copy of the table with no index on it. Is that the documented rule, and does 8.4 behave the same?
+9. The sandbox optimizer gave up `idx_total` at about 10% of the table *by estimate*, when only about 5% of rows matched (range estimates were roughly 2× too high). Was full scan actually faster at that point? Needs latency on both sides of the threshold (E12).
+10. MySQL printed `Using index condition` for `user_id = 42 AND status = 'paid'` on `(user_id, status, created_at)`, where both conditions are already satisfied by the `ref` key. Why is the ENUM equality kept as a pushed condition?
 
 ## Pending verification (from the session's own exercise list)
 
@@ -68,7 +76,41 @@ These are written in the page as exercises; none have been run yet.
 - **E7** — HOT vs non-HOT: 1M updates on an unindexed vs an indexed column, `fillfactor` 100 vs 90; `n_tup_hot_upd` and index sizes. Same updates on InnoDB.
 - **E8** — *Script ready: `lab/mysql/lab.sh e8`, also covers a time-ordered UUID.* 1M inserts with sequential vs UUIDv4 PK on InnoDB; `index_page_splits` from `INNODB_METRICS`, insert time, PRIMARY size. *(Overlaps E2; run them together in Month 1 Week 3.)*
 - **Q6–Q10** — The five check questions at the end of the clustered-vs-secondary page.
+- **E9** — Leftmost prefix on the 5M lab table with `idx_usc (user_id, status, created_at)` and the single-column indexes made invisible: predict and check `type`, `key_len`, `used_key_parts` for the 7 queries in §01–§02.
+- **E10** — ICP on vs off for `user_id BETWEEN 41 AND 43 AND status = 'paid'`: `Handler_read_next` and `./lab.sh reads`; repeat with a wide range.
+- **E11** — `(user_id, status, created_at)` vs `(user_id, created_at, status)` for an equality + range + `ORDER BY … DESC LIMIT 20` query, with a normal user and a 2,000-order user.
+- **E12** — The range→ALL threshold for `total > X` on the lab, latency on both sides with and without `FORCE INDEX`; histogram on a non-indexed column and its effect on `filtered`.
+- **Q11–Q15** — The five check questions at the end of the composite-index page.
 - **Q1–Q5** — The five check questions at the end of the page (leftmost prefix, `COUNT(*)` and the visibility map, full scan polluting the cache, TOAST, a `sessions` table updated 5,000×/sec). Answer in writing before looking anything up, then verify.
+
+---
+
+## 2026-10-19 — Composite index and query plans (MySQL)
+
+**Topic and objective.** Month 1 Week 2 topic, started early: how MySQL uses a multi-column index and how to read the plan it chose. Leftmost prefix and why a range on a middle column stops the later columns from narrowing the scan; column order (equality, sort, range) and when `ORDER BY` avoids filesort; Index Condition Pushdown and `Using index condition` vs `Using where`; cardinality, index dives and histograms, and why the optimizer skips a good index; reading `EXPLAIN` and `EXPLAIN ANALYZE`.
+
+**Output.** [topics/composite-index-query-plan/index.html](../topics/composite-index-query-plan/index.html) — an interactive page in 7 sections. The hero is a query builder over the real index entries of three users: pick conditions, `SELECT` list, `ORDER BY` and any of the 6 column orders, and it computes the seek intervals, which entries are read, which are rejected inside the index, which rows are looked up through PRIMARY, the resulting `EXPLAIN` fields and whether a filesort is needed. Also: a 10-step range trace (`user_id BETWEEN 41 AND 43 AND status = 'paid'` vs `IN (41, 42, 43)`), a table comparing all 6 column orders for 4 queries, an ICP on/off flow, a chart of estimated vs actual rows around the point where the optimizer drops `idx_total`, and a clickable annotated `EXPLAIN` row.
+
+**What it covers.**
+
+- An InnoDB secondary index on `(user_id, status, created_at)` is really sorted by `(user_id, status, created_at, id)`. Seeking needs a leftmost prefix; the prefix stops at the first column with no condition, and after the first range column no later column narrows the scan, though equality columns after it still appear in the interval end points.
+- `key_len` counts the bytes of every column in the interval end points, so `BETWEEN 41 AND 43 AND status = 'paid'` shows `key_len = 5` while `EXPLAIN FORMAT=JSON` reports `used_key_parts: ["user_id"]`. `IN` is a set of point seeks, so rewriting the range as `IN (41, 42, 43)` lets `status` narrow every interval.
+- `ORDER BY c` comes from the index only when every column before `c` is fixed to a single value; `IN` or a range before it forces filesort. `DESC` gives `Backward index scan`; mixed directions need a descending index (8.0).
+- ICP filters on index entries inside InnoDB before the PRIMARY lookup; `Using where` is the server filtering rows afterwards. ICP applies only to secondary indexes and never with a covering index.
+- Estimates come from index dives (falling back to cardinality from `eq_range_index_dive_limit` = 200 values), sampled cardinality (20 pages), and manually built histograms that fix `filtered` for non-indexed columns. A table of common reasons a good index is skipped: too many estimated rows, function on the column, implicit cast, stale statistics, long `IN` lists, `ORDER BY … LIMIT`, collation mismatch in joins.
+- `EXPLAIN` columns and the `type` ladder; `rows` is rows read by that access, not rows returned; `EXPLAIN ANALYZE` reports estimates next to actual time (first..last row, per loop), rows per loop and loops.
+
+**Initial understanding.** TODO — what did I believe about composite indexes and `EXPLAIN` before this session? The baseline self-score was 2 for composite index and "basic" for `EXPLAIN`; the session started from the topic list only, with no stated prior belief.
+
+**Mistakes and misconceptions corrected.** TODO — only I know which. Traps the page writes down: reading `key_len` as the number of columns used to seek; reading `Using index condition` as "the index is used well"; reading `rows` as rows returned; expecting `ORDER BY created_at` to be free on `(user_id, status, created_at)` with only `user_id` fixed.
+
+**Experiments and results.** None by me. To make the page accurate, Claude ran MySQL 8.0.46 in its own sandbox on a 1M-row `orders` table built with the lab's generator (`users = 100000`) plus `idx_usc (user_id, status, created_at)`, and the page quotes those outputs, each labelled as sandbox output: `EXPLAIN` / `FORMAT=JSON` / `EXPLAIN ANALYZE` lines, `Handler_read_next` 18 with ICP and 23 without, the `total > X` range→ALL threshold, and `filtered` before and after histograms. Several observations were surprising enough to become open questions 8–10 and the redundancy note in §01 (the optimizer chose `idx_user_id` + `Using where` over the composite index with ICP). It was the wrong version on the wrong machine, nothing was predicted beforehand, and none of it is evidence for my competency level; E9–E12 on the 8.4 lab are.
+
+**Competency level.** Level 2 provisional on the five new matrix rows. Nothing above 2 until E9–E12 run.
+
+**Remaining questions.** Open questions 8–10 above.
+
+**Next step.** After E6 from the Week 1 lab: add `idx_usc` to the 5M lab table, write predictions for E9 and E10, run them. Bring a real slow query from work for the Month 1 index-design case study; this page is the toolkit for it.
 
 ---
 
