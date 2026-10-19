@@ -73,7 +73,7 @@ Focus:
 Weekly plan — each week carries its planned dates; edit them when the week slips:
 - `[~]` **Week 1** `2026-10-19 → 2026-10-25` — **Baseline and lab setup**: database baseline assessment (TECHNICAL_GROWTH.md Section 11); MySQL 8.4 in Docker with performance_schema and sys schema enabled; a data generator for 5–10M rows; a repeatable way to measure query latency and insert throughput. Topic: InnoDB pages, B+ tree structure, clustered index.
 - `[~]` **Week 2** `2026-10-26 → 2026-11-01` — **Reads**: secondary index lookups and the extra clustered-index lookup, composite indexes and leftmost prefix, covering indexes, range conditions, cardinality and histograms, EXPLAIN and EXPLAIN ANALYZE.
-- `[ ]` **Week 3** `2026-11-02 → 2026-11-08` — **Writes**: index maintenance on insert/update/delete, page splits, change buffer, sequential vs random primary keys (auto-increment vs UUIDv4 vs UUIDv7), measuring insert throughput and storage with 0, 2, 5, and 8 secondary indexes.
+- `[~]` **Week 3** `2026-11-02 → 2026-11-08` — **Writes**: index maintenance on insert/update/delete, page splits, change buffer, sequential vs random primary keys (auto-increment vs UUIDv4 vs UUIDv7), measuring insert throughput and storage with 0, 2, 5, and 8 secondary indexes.
 - `[ ]` **Week 4** `2026-11-09 → 2026-11-15` — **Transactions**: MVCC and read views, isolation levels with REPEATABLE READ as default, consistent vs locking reads, record/gap/next-key locks, reproducing a lost update and a deadlock by hand. Monthly checkpoint.
 
 Deliverables:

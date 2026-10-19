@@ -1,0 +1,814 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cái giá khi ghi của index trên InnoDB</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F2F4F6; --surface:#FFFFFF; --ink:#18203A; --ink-2:#56607A; --ink-3:#8A93A8;
+  --rule:#CCD3DD; --rule-strong:#8C96AB;
+  --struct:#3446B8; --struct-bg:#E6E9FA;            /* cấu trúc index, chrome của trang */
+  --row:#16795F;    --row-bg:#DDF2EA;               /* dữ liệu row thật */
+  --hot:#9A5F00;    --hot-bg:#FCEFD2; --hot-line:#E3A21A;  /* bị ghi, bị chạm, bị lọc */
+  --miss:#B5302B;   --miss-bg:#FBE1DF;              /* đọc từ disk, việc thừa, lỗi */
+  --path:#0B7A8A;   --path-bg:#D8F1F3;              /* đường đi hoặc khoảng đang đọc */
+  --key:#A8327A;    --key-bg:#F8E0EE;               /* con trỏ: PK, TID */
+  --ram:#5B4BB0;    --ram-bg:#E7E3FA;               /* hit trong buffer pool */
+  --grid:rgba(52,70,184,.06);
+  --r-s:4px; --r-m:8px;
+  --sans:"Instrument Sans",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --paper:#0F1320; --surface:#171C2B; --ink:#E6E9F2; --ink-2:#A3ABC0; --ink-3:#6E7790;
+  --rule:#2C3448; --rule-strong:#55607A;
+  --struct:#97A3FF; --struct-bg:#232A55;
+  --row:#5FD0AE;    --row-bg:#123A31;
+  --hot:#F2BE5C;    --hot-bg:#3B2C0E; --hot-line:#E3A21A;
+  --miss:#FF8A84;   --miss-bg:#3E1A1A;
+  --path:#5ED3E0;   --path-bg:#113A40;
+  --key:#F28DC4;    --key-bg:#3E1A2E;
+  --ram:#B7A8FF;    --ram-bg:#2A2350;
+  --grid:rgba(151,163,255,.05);
+}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important;animation:none!important}}
+body{margin:0;color:var(--ink);font:400 17px/1.65 var(--sans);
+  background-color:var(--paper);
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:24px 24px}
+a{color:var(--struct)}
+:focus-visible{outline:2px solid var(--struct);outline-offset:2px}
+
+/* layout */
+.shell{display:grid;grid-template-columns:230px minmax(0,1fr);gap:56px;max-width:1180px;margin:0 auto;padding:0 32px}
+nav.toc{position:sticky;top:0;align-self:start;height:100vh;padding:48px 0;overflow:auto}
+nav.toc p{font-weight:600;margin:0 0 12px;font-size:15px}
+nav.toc ol,.mobile-toc ol{list-style:none;margin:0;padding:0;counter-reset:s}
+nav.toc li,.mobile-toc li{counter-increment:s;margin:0}
+nav.toc a,.mobile-toc a{display:grid;grid-template-columns:28px 1fr;padding:5px 0;color:var(--ink-2);text-decoration:none;font-size:14.5px;line-height:1.4}
+nav.toc a::before,.mobile-toc a::before{content:counter(s,decimal-leading-zero);font:500 12px/1.9 var(--mono);color:var(--ink-3)}
+nav.toc a:hover,nav.toc a.on{color:var(--struct)}
+main{min-width:0;padding:56px 0 120px}
+.prose{max-width:720px}
+section{padding-top:72px}
+section>header{display:grid;grid-template-columns:auto 1fr;gap:0 18px;align-items:baseline;max-width:720px;margin-bottom:12px}
+section>header .num{font:500 15px var(--mono);color:var(--struct);border:1.5px solid var(--struct);border-radius:var(--r-s);padding:2px 7px;transform:translateY(-4px)}
+h1,h2,h3,h4{line-height:1.2;letter-spacing:-.015em;margin:0}
+h1{font-size:clamp(2.3rem,5.4vw,3.9rem);font-weight:700;letter-spacing:-.03em;line-height:1.02;max-width:14ch;margin-bottom:20px}
+.lede{font-size:19px;color:var(--ink-2);max-width:56ch;margin-bottom:28px}
+h2{font-size:clamp(1.6rem,3vw,2.1rem);font-weight:650}
+h3{font-size:1.2rem;font-weight:600;margin:36px 0 8px}
+p{margin:0 0 14px}
+ul,ol.list{margin:0 0 16px;padding-left:22px}
+li{margin:4px 0}
+code{font:0.88em var(--mono);background:var(--struct-bg);color:var(--ink);padding:1px 5px;border-radius:3px}
+pre{font:13.5px/1.6 var(--mono);background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:var(--r-s);padding:14px 16px;overflow-x:auto;margin:0 0 18px;max-width:720px}
+pre code{background:none;padding:0}
+.tablewrap{overflow-x:auto;max-width:720px;margin:0 0 20px}
+table{border-collapse:collapse;width:100%;max-width:720px;margin:0 0 20px;font-size:15px;background:var(--surface)}
+.tablewrap table{margin:0;min-width:560px}
+th,td{text-align:left;padding:9px 12px;border:1px solid var(--rule);vertical-align:top}
+th{font-weight:600;background:var(--struct-bg)}
+
+/* widget frame: styled like a page, header strip = page header */
+.frame{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);margin:22px 0 28px;max-width:920px;overflow:hidden}
+.frame>.ph{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:9px 16px;border-bottom:1px solid var(--rule);background:var(--struct-bg);font-size:14px}
+.frame>.ph strong{font-weight:600}
+.frame>.ph .meta{margin-left:auto;font:500 12.5px var(--mono);color:var(--ink-2)}
+.frame .bd{padding:16px;min-width:0}
+.frame svg{display:block;width:100%;height:auto}
+.st-t{font:600 16px var(--sans);margin:0 0 8px}
+.desc{background:var(--paper);border-radius:var(--r-s);padding:12px 14px;margin-top:12px;min-height:84px;font-size:15.5px;color:var(--ink-2)}
+.desc pre{margin:10px 0 0;font-size:12.5px;border-left-color:var(--rule-strong)}
+.nav{display:flex;gap:8px;margin-top:12px;align-items:center}
+button{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 14px;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--struct);color:var(--struct)}
+button:disabled{opacity:.4;cursor:default}
+button.primary,button[aria-pressed="true"]{background:var(--struct);border-color:var(--struct);color:var(--surface)}
+button.primary:hover:not(:disabled),button[aria-pressed="true"]:hover{color:var(--surface);filter:brightness(1.1)}
+input,select{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 10px}
+input[type=number]{width:84px}
+input[type=range],input[type=checkbox]{accent-color:var(--struct)}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-top:12px}
+.stat{background:var(--paper);border-radius:var(--r-s);padding:8px 12px}
+.stat span{display:block;font-size:13px;color:var(--ink-2)}
+.stat b{font:600 20px var(--sans);font-variant-numeric:tabular-nums}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;color:var(--ink-2);margin-top:12px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:14px;height:14px;border-radius:3px;border:2px solid;display:inline-block}
+.fine{font-size:13.5px;color:var(--ink-2);margin:10px 0 0}  /* chú thích nhỏ dưới widget */
+
+/* svg text */
+.tb{font:600 14px var(--sans)} .t{font:400 13px var(--sans)} .ts{font:400 12px var(--sans)} .tm{font:500 12.5px var(--mono)}
+.lbl{fill:var(--ink-2);font:400 12.5px var(--sans)}
+
+/* callouts */
+.note{border-left:3px solid var(--hot-line);background:var(--hot-bg);padding:12px 16px;border-radius:0 var(--r-s) var(--r-s) 0;margin:18px 0;max-width:720px;font-size:16px}
+.note strong{color:var(--hot)}
+.senior{border:1.5px solid var(--struct);border-radius:var(--r-m);padding:14px 18px;margin:22px 0;max-width:720px;background:var(--surface)}
+.senior h4{font-size:16px;margin-bottom:6px;color:var(--struct)}
+.senior p:last-child,.senior ul:last-child{margin-bottom:0}
+details{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-s);padding:10px 14px;margin:10px 0;max-width:720px}
+details summary{cursor:pointer;font-weight:600}
+details[open] summary{margin-bottom:8px}
+details.answer{background:var(--paper);border-style:dashed;margin:10px 0 0}
+details.answer summary{font-weight:500;color:var(--struct)}
+.tag{display:inline-block;font:500 12px var(--sans);color:var(--ink-2);border:1px solid var(--rule-strong);border-radius:999px;padding:0 8px;margin-right:6px;vertical-align:1px}
+
+/* hero brief: mục tiêu, cần biết trước, trạng thái */
+.brief{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px 24px;background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);padding:14px 18px;max-width:920px;margin:0 0 8px;font-size:15px}
+.brief h4{font-size:14px;color:var(--struct);margin:0 0 4px}
+.brief ul{margin:0;padding-left:18px}
+.brief p{margin:0}
+
+.mobile-toc{display:none}
+@media (max-width:900px){
+  .shell{grid-template-columns:1fr;padding:0 16px;gap:0}
+  nav.toc{display:none}
+  .mobile-toc{display:block;margin-top:20px}
+  main{padding-top:32px}
+  .frame .bd{padding:12px}
+  body{font-size:16px}
+}
+
+/* ---- page widgets ---- */
+.n rect{fill:var(--surface);stroke:var(--rule-strong);stroke-width:1}
+.n text{fill:var(--ink)}
+.n.struct rect{fill:var(--struct-bg);stroke:var(--struct)} .n.struct text{fill:var(--struct)}
+.n.hot rect{fill:var(--hot-bg);stroke:var(--hot);stroke-width:2} .n.hot text{fill:var(--hot)}
+.n.miss rect{fill:var(--miss-bg);stroke:var(--miss);stroke-width:2} .n.miss text{fill:var(--miss)}
+.n.ram rect{fill:var(--ram-bg);stroke:var(--ram);stroke-width:1.6} .n.ram text{fill:var(--ram)}
+.n.row rect{fill:var(--row-bg);stroke:var(--row);stroke-width:1.6} .n.row text{fill:var(--row)}
+.n.key rect{fill:var(--key-bg);stroke:var(--key);stroke-width:1.6} .n.key text{fill:var(--key)}
+.n.dim rect{fill:var(--paper);stroke:var(--rule)} .n.dim text{fill:var(--ink-3)}
+.edge{stroke:var(--rule-strong);stroke-width:1.2;fill:none}
+.edge.on{stroke:var(--struct);stroke-width:2.4}
+.edge.hot{stroke:var(--hot);stroke-width:2}
+.edge.miss{stroke:var(--miss);stroke-width:2}
+.edge.ram{stroke:var(--ram);stroke-width:2}
+.zone{fill:var(--paper);stroke:var(--rule);stroke-dasharray:4 4}
+.fillbar{fill:var(--row)} .fillbg{fill:var(--paper);stroke:var(--rule)}
+.k{font:500 11.5px var(--mono);fill:var(--ink-2)}
+.k.new{fill:var(--hot);font-weight:600}
+.trees{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin:12px 0 0}
+.tree{border:1.5px solid var(--rule);border-radius:var(--r-s);padding:8px 10px;background:var(--paper);font-size:13.5px;min-height:74px}
+.tree b{display:block;font:600 13px var(--mono);margin-bottom:2px;overflow-wrap:anywhere}
+.tree small{display:block;color:var(--ink-2);font-size:12.5px}
+.tree em{display:block;font-style:normal;font-weight:600;margin-top:4px;font-size:13px}
+.tree.w{border-color:var(--hot);background:var(--hot-bg)} .tree.w em{color:var(--hot)}
+.tree.dw{border-color:var(--miss);background:var(--miss-bg)} .tree.dw em{color:var(--miss)}
+.tree.idle{opacity:.7} .tree.idle em{color:var(--ink-3)}
+.lg-hot{border-color:var(--hot);background:var(--hot-bg)}
+.lg-miss{border-color:var(--miss);background:var(--miss-bg)}
+.lg-dim{border-color:var(--rule);background:var(--paper)}
+.lg-ram{border-color:var(--ram);background:var(--ram-bg)}
+.lg-row{border-color:var(--row);background:var(--row-bg)}
+.lg-struct{border-color:var(--struct);background:var(--struct-bg)}
+.log{font:12.5px/1.6 var(--mono);background:var(--paper);border-radius:var(--r-s);padding:8px 12px;margin-top:10px;min-height:60px;max-height:170px;overflow:auto;color:var(--ink-2)}
+.log div:first-child{color:var(--ink)}
+.calc{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px 14px;margin-bottom:12px}
+.calc label{display:flex;flex-direction:column;gap:4px;font-size:13.5px;color:var(--ink-2)}
+.sizes td.num,.sizes th.num{text-align:right;font-variant-numeric:tabular-nums}
+.sizes{font-size:14px}
+.sqlline{font:13px/1.55 var(--mono);background:var(--paper);border-radius:4px;padding:10px 12px;margin:0;overflow-x:auto;white-space:pre}
+.sizes tr.tot td{font-weight:600}
+</style>
+</head>
+<body>
+
+<div class="shell">
+<nav class="toc" aria-label="Mục lục">
+  <p>Cái giá khi ghi của index</p>
+  <ol>
+    <li><a href="#s1">Bản chất vấn đề</a></li>
+    <li><a href="#s2">Cơ chế hoạt động</a></li>
+    <li><a href="#s3">Vì sao thiết kế như vậy</a></li>
+    <li><a href="#s4">Ví dụ</a></li>
+    <li><a href="#s5">Thí nghiệm</a></li>
+    <li><a href="#s6">Ảnh hưởng khi chạy production</a></li>
+    <li><a href="#s7">Hiểu lầm thường gặp</a></li>
+    <li><a href="#s8">Câu hỏi ôn tập</a></li>
+    <li><a href="#s9">Câu hỏi còn mở</a></li>
+    <li><a href="#s10">Tài liệu tham khảo</a></li>
+  </ol>
+</nav>
+
+<main>
+<div class="hero">
+<h1>Cái giá khi ghi của index trên InnoDB</h1>
+<p class="lede">Mỗi index giúp một nhóm câu đọc nhanh hơn, và bắt mọi câu ghi phải sửa thêm một cây B+tree. Bài này đếm xem một <code>INSERT</code>, <code>UPDATE</code> hay <code>DELETE</code> thực sự chạm vào bao nhiêu cây, vì sao khoá chính ngẫu nhiên làm cả bảng phình ra, và change buffer từng che bớt chi phí đó như thế nào trước khi MySQL 8.4 tắt nó đi.</p>
+<div class="brief">
+  <div><h4>Mục tiêu</h4><ul>
+    <li>Liệt kê được những cây nào bị ghi, và ghi kiểu gì, cho một câu <code>INSERT</code>, <code>UPDATE</code> hoặc <code>DELETE</code> trên một bảng cho trước.</li>
+    <li>Giải thích được vì sao key tăng dần cho page gần đầy còn key ngẫu nhiên cho page khoảng hai phần ba, và hệ quả lên kích thước của mọi index.</li>
+    <li>Nói được change buffer làm gì, không áp dụng cho index nào, và mặc định của nó trong 8.4.</li>
+    <li>Ước lượng được thêm một secondary index tốn bao nhiêu dung lượng và bao nhiêu việc ghi, rồi biết đo lại bằng gì.</li>
+  </ul></div>
+  <div><h4>Cần biết trước</h4><ul>
+    <li><a href="../btree-index-internals/index.html">B+tree index internals</a>: page, leaf, split.</li>
+    <li><a href="../clustered-vs-secondary-index/index.html">Clustered và secondary index</a>: secondary index của InnoDB chứa PK; PK càng dài thì mọi index càng to.</li>
+  </ul></div>
+  <div><h4>Trạng thái</h4><p>Level 2 (prov.). Viết từ manual MySQL 8.4, chưa có số đo nào của bạn. Hai widget có số (mô phỏng split và máy tính dung lượng) là mô hình, không phải kết quả đo.</p></div>
+</div>
+<details class="mobile-toc"><summary>Mục lục</summary><ol><li><a href="#s1">Bản chất vấn đề</a></li><li><a href="#s2">Cơ chế hoạt động</a></li><li><a href="#s3">Vì sao thiết kế như vậy</a></li><li><a href="#s4">Ví dụ</a></li><li><a href="#s5">Thí nghiệm</a></li><li><a href="#s6">Ảnh hưởng khi chạy production</a></li><li><a href="#s7">Hiểu lầm thường gặp</a></li><li><a href="#s8">Câu hỏi ôn tập</a></li><li><a href="#s9">Câu hỏi còn mở</a></li><li><a href="#s10">Tài liệu tham khảo</a></li></ol></details>
+</div>
+
+<!-- 1 -->
+<section id="s1">
+<header><span class="num">01</span><h2>Bản chất vấn đề</h2></header>
+<div class="prose">
+<p>Bảng <code>orders</code> trong lab có PRIMARY và 4 secondary index. Một <code>INSERT</code> không phải là "ghi một row". Nó là 5 lần chèn vào 5 cây B+tree khác nhau, mỗi lần phải tìm đúng leaf page, đưa page đó vào buffer pool nếu chưa có, sửa nó, và sinh redo cho nó. Thêm index thứ 6 thì mọi <code>INSERT</code> sau đó thành 6 lần chèn.</p>
+<p>Giống một thư viện giữ một kệ sách chính xếp theo mã sách, cộng thêm mấy bộ thẻ mục lục: theo tác giả, theo năm, theo chủ đề. Thêm một cuốn sách là phải cắm thêm một thẻ vào từng bộ, đúng vị trí theo thứ tự của bộ đó. Bộ thẻ theo năm thì cắm vào cuối, nhẹ nhàng. Bộ thẻ theo tác giả thì cắm vào giữa, có khi phải dồn cả ngăn.</p>
+<p>Chi phí đó không đều. Nó phụ thuộc vào câu lệnh (<code>UPDATE</code> chỉ chạm những index chứa cột bị đổi), vào thứ tự của key (cuối cây hay giữa cây), và vào việc leaf page cần sửa đã nằm trong buffer pool hay phải đọc từ disk. Chọn một câu lệnh và một bộ index dưới đây để xem cây nào bị ghi.</p>
+</div>
+
+<div class="frame" id="touch">
+  <div class="ph"><strong>Một câu lệnh ghi chạm vào những cây nào</strong><span class="meta" id="touchMeta"></span></div>
+  <div class="bd">
+    <div class="calc">
+      <label>Câu lệnh<select id="tStmt">
+        <option value="ins">INSERT một row mới</option>
+        <option value="upStatus">UPDATE status = 'shipped'</option>
+        <option value="upTotal">UPDATE total = total + 500</option>
+        <option value="upNote">UPDATE note = '…'</option>
+        <option value="upUser">UPDATE user_id = 77</option>
+        <option value="upId">UPDATE id = id + 10000000</option>
+        <option value="del">DELETE row</option>
+      </select></label>
+      <label>Số secondary index<select id="tSet">
+        <option value="0">0 index</option>
+        <option value="2">2 index</option>
+        <option value="5" selected>5 index</option>
+        <option value="8">8 index</option>
+      </select></label>
+    </div>
+    <div class="sqlline" id="tSql"></div>
+    <div class="trees" id="tTrees"></div>
+    <div class="stats">
+      <div class="stat"><span>Cây bị ghi</span><b id="sTrees">0</b></div>
+      <div class="stat"><span>Entry chèn mới</span><b id="sIns">0</b></div>
+      <div class="stat"><span>Entry đánh dấu xoá</span><b id="sDel">0</b></div>
+      <div class="stat"><span>Kiểm tra trùng (phải đọc page)</span><b id="sUniq">0</b></div>
+    </div>
+    <div class="desc" aria-live="polite" id="tDesc"></div>
+    <div class="legend">
+      <span><i class="lg-hot"></i>chèn entry mới hoặc sửa tại chỗ</span>
+      <span><i class="lg-miss"></i>đánh dấu xoá entry cũ (purge xoá sau)</span>
+      <span><i class="lg-dim"></i>không chạm</span>
+    </div>
+    <p class="fine">Mỗi WHERE dưới đây là <code>WHERE id = 1001</code>, tức đã tìm row qua PRIMARY. Bộ 8 index là bộ 5 index cộng thêm ba index thường thấy trên bảng đơn hàng. Đếm theo cơ chế mô tả trong manual 8.4, không phải số đo.</p>
+  </div>
+</div>
+</section>
+
+<!-- 2 -->
+<section id="s2">
+<header><span class="num">02</span><h2>Cơ chế hoạt động</h2></header>
+
+<div class="prose">
+<h3>Mỗi index là một cây riêng, và secondary index không bao giờ sửa tại chỗ</h3>
+<p>PRIMARY chứa cả row. Mỗi secondary index chứa <code>(cột của index, PK)</code>, sort theo đúng thứ tự đó. Hệ quả cho từng loại câu lệnh:</p>
+<ul>
+<li><strong>INSERT</strong>: chèn một entry vào mọi cây. Không có ngoại lệ.</li>
+<li><strong>UPDATE cột không nằm trong index nào</strong>: chỉ sửa row trong PRIMARY. Nếu row không dài ra, InnoDB sửa ngay trên page. Không secondary index nào bị chạm.</li>
+<li><strong>UPDATE cột nằm trong một secondary index</strong>: key của entry đổi, nên vị trí của nó trong cây cũng đổi. InnoDB không dời entry; nó <em>đánh dấu xoá</em> entry cũ (delete-mark) và chèn một entry mới. Có ba index chứa <code>user_id</code> thì đổi <code>user_id</code> là ba lần delete-mark cộng ba lần chèn.</li>
+<li><strong>UPDATE khoá chính</strong>: PK là key của PRIMARY và là phần đuôi của mọi secondary entry. Đổi PK là xoá rồi chèn lại row trong PRIMARY, và xoá rồi chèn lại entry trong <em>mọi</em> secondary index.</li>
+<li><strong>DELETE</strong>: đánh dấu xoá row trong PRIMARY và entry trong mọi secondary index. Thread purge xoá thật sau khi không còn transaction nào cần phiên bản cũ.</li>
+</ul>
+<p>Mỗi page bị sửa sinh redo, mỗi row bị sửa sinh một undo record. Trang <a href="../innodb-buffer-pool-redo-undo/index.html">buffer pool, redo và undo</a> giải thích hai loại log đó. Ở đây chỉ cần nhớ: số cây bị ghi gần như tỉ lệ với số page bẩn và lượng redo.</p>
+</div>
+<div class="note"><strong>Lỗi hay gặp:</strong> nghĩ rằng <code>UPDATE orders SET status = 'shipped'</code> chỉ "sửa một byte" nên rẻ. Nếu <code>status</code> nằm trong 3 index thì câu đó là 1 lần sửa PRIMARY, 3 lần delete-mark và 3 lần chèn, có thể ở 6 leaf page khác nhau. Quy tắc: đếm số index chứa cột bị đổi, không đếm số byte bị đổi.</div>
+<div class="note"><strong>Lỗi hay gặp:</strong> nghĩ rằng unique index chỉ tốn như index thường. Trước khi chèn, InnoDB phải đọc leaf page để chắc chắn key chưa tồn tại, kể cả khi page đó đang nằm trên disk. Một index thường có thể (khi change buffer bật) hoãn việc đọc đó; unique index thì không bao giờ.</div>
+
+<div class="prose">
+<h3>Page split: key tăng dần và key ngẫu nhiên</h3>
+<p>Khi leaf page cần chèn đã đầy, InnoDB tách nó thành hai. Cách tách phụ thuộc vào thứ tự chèn gần đây trên page đó:</p>
+<ul>
+<li>Nếu các lần chèn trước liên tục đi về cùng một phía (mỗi key mới đứng ngay sau key vừa chèn), InnoDB đoán đây là chèn tuần tự. Nó tách ở đúng điểm chèn: page cũ giữ nguyên, page mới chỉ nhận key mới. Page cũ ở lại gần đầy.</li>
+<li>Ngược lại, InnoDB tách ở giữa. Mỗi bên giữ khoảng một nửa. Hai nửa này chỉ đầy lại nếu sau đó có key rơi đúng vào khoảng của chúng.</li>
+</ul>
+<p>Manual 8.4 ghi kết quả: chèn theo thứ tự (tăng hoặc giảm) cho page đầy khoảng 15/16, chèn ngẫu nhiên cho page đầy từ 1/2 tới 15/16. 1/16 còn lại là chỗ InnoDB cố tình chừa cho update làm row dài ra. Mô phỏng dưới thu nhỏ page còn 8 key và bỏ phần chừa 1/16, để thấy được hình dạng.</p>
+</div>
+
+<div class="frame" id="split">
+  <div class="ph"><strong>Mô phỏng leaf page khi chèn</strong><span class="meta" id="splitMeta">page chứa tối đa 8 key</span></div>
+  <div class="bd">
+    <div class="controls">
+      <button data-mode="seq" aria-pressed="true">Tăng dần (AUTO_INCREMENT)</button>
+      <button data-mode="v7" aria-pressed="false">Gần tăng dần (UUIDv7, nhiều app server)</button>
+      <button data-mode="v4" aria-pressed="false">Ngẫu nhiên (UUIDv4)</button>
+    </div>
+    <div class="controls" style="margin-top:8px">
+      <button id="spOne" class="primary">Chèn 1 key</button>
+      <button id="spMany">Chèn 16 key</button>
+      <button id="spReset">Đặt lại</button>
+    </div>
+    <svg id="spSvg" viewBox="0 0 680 220" role="img" aria-label="Các leaf page và các key trong từng page"></svg>
+    <div class="stats">
+      <div class="stat"><span>Key đã chèn</span><b id="spN">0</b></div>
+      <div class="stat"><span>Leaf page</span><b id="spP">1</b></div>
+      <div class="stat"><span>Lần split</span><b id="spS">0</b></div>
+      <div class="stat"><span>Độ đầy trung bình</span><b id="spF">–</b></div>
+    </div>
+    <div class="log" aria-live="polite" id="spLog"></div>
+    <div class="legend">
+      <span><i class="lg-hot"></i>page vừa được chèn</span>
+      <span><i class="lg-miss"></i>page mới sinh ra do split</span>
+      <span><i class="lg-row"></i>thanh độ đầy</span>
+    </div>
+    <p class="fine">Mô hình đơn giản hoá: page 8 key thay vì vài trăm, không chừa 1/16, luật chọn điểm tách rút gọn từ hành vi manual mô tả. Số liệu là của mô phỏng, không phải của InnoDB thật. E8 trong lab đo bản thật.</p>
+  </div>
+</div>
+<p class="prose">Bấm "Chèn 16 key" vài lần ở mỗi chế độ. Tăng dần: mọi page đầy trừ page cuối, mỗi split chỉ chạm page cuối. Ngẫu nhiên: split xảy ra khắp nơi, page dừng ở khoảng 60–75%, và mỗi lần chèn chạm một page khác nhau. UUIDv7 sinh từ nhiều máy chỉ lệch thứ tự trong một khoảng nhỏ ở cuối cây, nên đa phần vẫn hành xử như tăng dần.</p>
+<div class="note"><strong>Lỗi hay gặp:</strong> nghĩ rằng chỉ PRIMARY bị ảnh hưởng bởi thứ tự chèn. Mỗi secondary index có thứ tự riêng. <code>idx_created_at</code> với thời gian hiện tại là gần tăng dần. <code>idx_user_id</code> thì gần như ngẫu nhiên vì user nào đặt hàng cũng được. Bảng có PK tăng dần vẫn có secondary index chèn ngẫu nhiên.</div>
+
+<div class="prose">
+<h3>Page merge</h3>
+<p>Ngược với split. Khi một <code>DELETE</code>, hoặc một <code>UPDATE</code> làm row ngắn đi, khiến page xuống dưới <code>MERGE_THRESHOLD</code> (mặc định 50%), InnoDB thử gộp page đó với page bên cạnh để trả lại một page trống cho tablespace. Đặt được theo bảng hoặc theo index qua <code>COMMENT 'MERGE_THRESHOLD=40'</code>.</p>
+<p>Hai page cùng quanh 50% có thể gộp rồi lại tách ngay sau đó (merge-split). Manual đề xuất hạ ngưỡng nếu đếm được nhiều lần như vậy qua <code>index_page_merge_attempts</code> và <code>index_page_merge_successful</code> trong <code>INNODB_METRICS</code>.</p>
+<p>Page trống được trả về cho tablespace để dùng lại, không trả về cho hệ điều hành. Xoá 60% bảng thì file <code>.ibd</code> vẫn giữ nguyên kích thước cho tới khi rebuild (<code>OPTIMIZE TABLE</code> hoặc <code>ALTER TABLE … FORCE</code>).</p>
+
+<h3>Change buffer</h3>
+<p>Chèn vào secondary index thường rơi vào một leaf page bất kỳ. Nếu page đó không có trong buffer pool, InnoDB phải đọc nó từ disk chỉ để thêm một entry: một random read cho mỗi index, mỗi row. Change buffer né việc đó:</p>
+<ul>
+<li>Thay vì đọc page, InnoDB ghi thao tác ("chèn entry này vào page số X của index Y") vào change buffer. Change buffer nằm trong buffer pool, và được lưu xuống system tablespace.</li>
+<li>Khi về sau có câu đọc cần page X, page được đọc lên như thường, rồi các thao tác đang chờ được áp vào (merge). Main thread cũng merge dần khi server rảnh.</li>
+<li>Chỉ áp dụng cho secondary index không unique. Unique index phải đọc page để kiểm tra trùng, nên không có gì để hoãn. PRIMARY cũng vậy.</li>
+<li>Ba loại thao tác được hoãn: chèn, delete-mark và purge. <code>innodb_change_buffering</code> chọn loại nào; <code>innodb_change_buffer_max_size</code> (mặc định 25, tối đa 50) là phần trăm buffer pool được dùng.</li>
+</ul>
+<p><strong>MySQL 8.4 đổi mặc định của <code>innodb_change_buffering</code> từ <code>all</code> thành <code>none</code></strong>, cùng đợt với tắt adaptive hash index. Trên 8.4 với cấu hình mặc định, mọi lần chèn vào secondary index đều đọc leaf page ngay nếu nó chưa có trong buffer pool.</p>
+</div>
+
+<div class="frame" id="cbuf"></div>
+<div class="senior"><h4>Góc nhìn senior: change buffer chỉ dời chi phí, không xoá nó</h4><p>Page vẫn phải được đọc lên lúc merge. Change buffer có lợi khi nhiều thao tác dồn vào cùng một page trước khi page đó được đọc (gộp N lần đọc thành 1), hoặc khi việc đọc dời được sang lúc rảnh. Nó không có lợi khi page sẽ được đọc ngay sau khi ghi, và nó làm khởi động lại, slow shutdown và crash recovery lâu hơn vì còn việc merge tồn đọng. Với SSD, một random read rẻ hơn nhiều so với thời đĩa quay, nên 8.4 coi phần lợi không còn đáng phần rủi ro.</p></div>
+
+<div class="prose">
+<h3>Khoá chính: tăng dần, UUIDv4 và UUIDv7</h3>
+<p>Khoá chính quyết định hai thứ cùng lúc: thứ tự chèn vào PRIMARY, và số byte được chép vào mọi secondary entry.</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Khoá chính</th><th>Byte trong mỗi secondary entry</th><th>Thứ tự chèn vào PRIMARY</th><th>Hệ quả</th></tr></thead>
+<tbody>
+<tr><td><code>BIGINT AUTO_INCREMENT</code></td><td>8</td><td>Tăng dần</td><td>Page PRIMARY gần đầy; chỉ page cuối bị ghi, nên luôn nằm trong buffer pool. Lộ số lượng đơn và không sinh được ở app trước khi ghi.</td></tr>
+<tr><td>UUIDv4 trong <code>CHAR(36)</code></td><td>36 (ascii) tới 144 (utf8mb4 tính tối đa)</td><td>Ngẫu nhiên</td><td>Split khắp PRIMARY, page khoảng 2/3 đầy; mỗi lần chèn cần một leaf khác nhau. Mọi secondary index to gấp mấy lần.</td></tr>
+<tr><td>UUIDv4 trong <code>BINARY(16)</code></td><td>16</td><td>Ngẫu nhiên</td><td>Nhỏ hơn <code>CHAR(36)</code> nhiều, nhưng vẫn chèn ngẫu nhiên.</td></tr>
+<tr><td>UUIDv7 trong <code>BINARY(16)</code></td><td>16</td><td>Gần tăng dần (48 bit đầu là mili giây)</td><td>Hành xử gần như auto-increment ở PRIMARY, sinh được ở app. Lệch thứ tự nhỏ khi nhiều máy cùng sinh.</td></tr>
+</tbody></table></div>
+<p class="prose">MySQL 8.4 không có hàm sinh UUIDv7. <code>UUID()</code> sinh UUIDv1; <code>UUID_TO_BIN(UUID(), 1)</code> đảo phần thời gian lên đầu để có thứ tự gần tăng dần. UUIDv7 thường được sinh ở ứng dụng và lưu bằng <code>BINARY(16)</code>.</p>
+
+<div class="frame" id="sizeCalc">
+  <div class="ph"><strong>Ước lượng dung lượng theo khoá chính và số index</strong><span class="meta">mô hình</span></div>
+  <div class="bd">
+    <div class="calc">
+      <label>Số row<select id="cRows"><option value="1000000">1 triệu</option><option value="5000000" selected>5 triệu</option><option value="50000000">50 triệu</option></select></label>
+      <label>Khoá chính<select id="cPk">
+        <option value="bigint">BIGINT AUTO_INCREMENT</option>
+        <option value="v7">UUIDv7 BINARY(16)</option>
+        <option value="v4b">UUIDv4 BINARY(16)</option>
+        <option value="v4c">UUIDv4 CHAR(36)</option>
+      </select></label>
+      <label>Số secondary index<select id="cSet"><option value="0">0</option><option value="2">2</option><option value="5" selected>5</option><option value="8">8</option></select></label>
+    </div>
+    <div class="tablewrap"><table class="sizes"><thead><tr><th>Cây</th><th class="num">Byte / entry</th><th class="num">Độ đầy</th><th class="num">Ước lượng</th></tr></thead><tbody id="cBody"></tbody></table></div>
+    <p class="fine">Giả định: page 16KB, khoảng 15.000 byte dùng được cho record; header record 5 byte và khoảng 2 byte page directory mỗi record; row PRIMARY có thêm 13 byte (<code>DB_TRX_ID</code>, <code>DB_ROLL_PTR</code>) và <code>note</code> trung bình 40 byte; chèn tăng dần cho page đầy 15/16, chèn ngẫu nhiên khoảng 69%. Chỉ tính leaf page. Sai số có thể tới ±30%; E5 và E13 đo bản thật.</p>
+  </div>
+</div>
+</section>
+
+<!-- 3 -->
+<section id="s3">
+<header><span class="num">03</span><h2>Vì sao thiết kế như vậy</h2></header>
+<div class="prose">
+<p><strong>Index là một bản sao đã sort.</strong> Giữ một bản sao luôn đúng thứ tự thì mỗi lần ghi phải đặt entry vào đúng chỗ ngay lúc đó. Đó là cái giá để câu đọc được seek. Không có cách nào có index mà không trả chi phí ghi; chỉ có cách dời nó đi (change buffer, LSM) hoặc gom nó lại.</p>
+<p><strong>Secondary index không sửa tại chỗ</strong> vì vị trí của entry do key quyết định. Key đổi thì vị trí đổi. Delete-mark thay vì xoá ngay còn có lý do thứ hai: transaction khác có thể đang đọc phiên bản cũ qua MVCC (xem <a href="../mvcc-read-view/index.html">MVCC và read view</a>), nên entry cũ phải còn đó cho tới khi purge chắc chắn không ai cần.</p>
+<p><strong>Chừa 1/16 page</strong> để update làm row dài ra không phải tách page ngay. <strong>Tách ở điểm chèn khi thấy chèn tuần tự</strong> để workload auto-increment không để lại một loạt page nửa đầy phía sau.</p>
+<p><strong>Change buffer</strong> ra đời khi random I/O trên đĩa quay rất đắt và secondary index thường lớn hơn buffer pool. Trên SSD, random read rẻ đi cả trăm lần; trong khi change buffer vẫn có chi phí riêng: chiếm buffer pool, merge tồn đọng sau khi restart, và độ phức tạp trong code. 8.4 đổi mặc định sang <code>none</code> để phản ánh điều đó.</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Cách lưu</th><th>Khi ghi</th><th>Khi đọc</th><th>Ví dụ</th></tr></thead>
+<tbody>
+<tr><td>B+tree, sửa tại chỗ (InnoDB)</td><td>Mỗi index một lần chèn vào đúng leaf; có thể phải đọc leaf; split khi đầy</td><td>Một lần seek mỗi index</td><td>MySQL InnoDB, SQL Server</td></tr>
+<tr><td>Heap + index trỏ TID (PostgreSQL)</td><td>Row mới chèn vào heap ở bất kỳ page còn chỗ; mọi index được thêm entry khi row có TID mới, trừ khi HOT áp dụng được</td><td>Index rồi heap</td><td>PostgreSQL</td></tr>
+<tr><td>LSM tree</td><td>Ghi tuần tự vào memtable rồi flush thành file đã sort; không đọc trước khi ghi</td><td>Có thể phải xem nhiều file; cần bloom filter và compaction</td><td>RocksDB, MyRocks, Cassandra</td></tr>
+</tbody></table></div>
+<p class="prose">LSM đổi chi phí ghi lấy chi phí đọc và compaction. Không cái nào "nhanh hơn" một cách tuyệt đối; câu hỏi là workload ghi nhiều hơn hay đọc nhiều hơn, và ghi theo thứ tự hay ngẫu nhiên.</p>
+</section>
+
+<!-- 4 -->
+<section id="s4">
+<header><span class="num">04</span><h2>Ví dụ</h2></header>
+<div class="prose">
+<h3>Khoá chính UUID cho đúng</h3>
+<p>Lưu UUID bằng 16 byte, không bằng chuỗi 36 ký tự. Với UUIDv1 do MySQL sinh, cờ <code>1</code> của <code>UUID_TO_BIN</code> đưa phần thời gian lên đầu:</p>
+</div>
+<pre><code>CREATE TABLE orders_v1 (
+  id         BINARY(16) NOT NULL,
+  user_id    INT UNSIGNED NOT NULL,
+  created_at DATETIME NOT NULL,
+  PRIMARY KEY (id),
+  KEY idx_user_id (user_id)
+) ENGINE=InnoDB;
+
+INSERT INTO orders_v1 VALUES (UUID_TO_BIN(UUID(), 1), 42, NOW());
+SELECT BIN_TO_UUID(id, 1) AS id, user_id FROM orders_v1;</code></pre>
+<p class="prose">Nguồn: manual 8.4, Miscellaneous Functions. Với UUIDv7 sinh ở ứng dụng, chèn thẳng 16 byte (<code>UNHEX(REPLACE(?, '-', ''))</code>), không cần cờ đảo vì UUIDv7 đã có thời gian ở đầu.</p>
+
+<div class="prose"><h3>Xem kích thước và số page của từng index</h3></div>
+<pre><code>ANALYZE TABLE orders;
+SELECT index_name,
+       stat_value * @@innodb_page_size / 1024 / 1024 AS size_mb
+FROM mysql.innodb_index_stats
+WHERE database_name = 'lab' AND table_name = 'orders' AND stat_name = 'size';
+
+SELECT index_name, stat_value AS leaf_pages
+FROM mysql.innodb_index_stats
+WHERE database_name = 'lab' AND table_name = 'orders' AND stat_name = 'n_leaf_pages';</code></pre>
+
+<div class="prose"><h3>Đếm split và merge</h3><p>Các counter của module <code>index</code> trong <code>INNODB_METRICS</code> mặc định tắt. Lab bật sẵn bằng <code>innodb_monitor_enable</code> trong <code>lab.cnf</code>.</p></div>
+<pre><code>SET GLOBAL innodb_monitor_enable = 'module_index';
+SELECT name, count
+FROM information_schema.INNODB_METRICS
+WHERE name IN ('index_page_splits', 'index_page_merge_attempts', 'index_page_merge_successful');</code></pre>
+
+<div class="prose"><h3>Change buffer đang bật hay tắt</h3></div>
+<pre><code>SELECT @@innodb_change_buffering, @@innodb_change_buffer_max_size;
+-- dòng "Ibuf: size …, merges" nằm dưới INSERT BUFFER AND ADAPTIVE HASH INDEX
+SHOW ENGINE INNODB STATUS\G
+SELECT name, count FROM information_schema.INNODB_METRICS WHERE name LIKE 'ibuf%';</code></pre>
+
+<div class="prose"><h3>Index không ai dùng và index thừa</h3><p>Mỗi index không ai đọc vẫn bị ghi ở mọi <code>INSERT</code>. Schema <code>sys</code> có hai view cho việc này:</p></div>
+<pre><code>-- index không có lượt đọc nào kể từ lần khởi động server
+SELECT * FROM sys.schema_unused_indexes WHERE object_schema = 'lab';
+-- index là tiền tố bên trái của một index khác
+SELECT table_name, redundant_index_name, dominant_index_name, sql_drop_index
+FROM sys.schema_redundant_indexes WHERE table_schema = 'lab';</code></pre>
+<p class="prose"><code>schema_unused_indexes</code> chỉ đếm từ lần khởi động gần nhất. Một index chỉ được dùng bởi báo cáo cuối tháng sẽ trông như không ai dùng vào giữa tháng. Ẩn nó bằng <code>ALTER TABLE … ALTER INDEX … INVISIBLE</code> trước khi xoá.</p>
+</section>
+
+<!-- 5 -->
+<section id="s5">
+<header><span class="num">05</span><h2>Thí nghiệm</h2></header>
+<div class="prose">
+<p>Chạy trên lab MySQL 8.4. E8 (đã có) đo split và kích thước PRIMARY cho khoá tăng dần, UUID theo thời gian và UUIDv4. Ba thí nghiệm dưới đo phần còn lại của trang. Viết dự đoán vào <code>prediction.md</code> trước khi chạy. Các thí nghiệm này chưa có script trong <code>lab.sh</code>; viết script là việc của giai đoạn lab.</p>
+</div>
+<details><summary>E13. Throughput và dung lượng với 0, 2, 5, 8 secondary index</summary>
+<p><strong>Câu hỏi.</strong> Chèn 1 triệu row vào bốn bản của <code>orders</code> có 0, 2, 5 và 8 secondary index (bộ index ở phần 01). Thời gian chèn và tổng dung lượng tăng tuyến tính theo số index không? Index nào tốn nhất, và có khớp với máy tính ở phần 02 không?</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e13/prediction.md</code></p>
+<p><strong>Chạy.</strong> Tạo bốn bảng từ <code>orders</code>, nạp bằng <code>load_orders</code> với cùng seed, đo thời gian bằng <code>performance_schema</code>, rồi <code>ANALYZE TABLE</code> và đọc <code>mysql.innodb_index_stats</code>.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+<details><summary>E14. Change buffer bật và tắt khi index lớn hơn buffer pool</summary>
+<p><strong>Câu hỏi.</strong> Với buffer pool 128MB và một bảng 5 triệu row có 5 secondary index (lớn hơn buffer pool nhiều lần), chèn thêm 200 nghìn row có <code>user_id</code> ngẫu nhiên. <code>innodb_change_buffering = all</code> so với <code>none</code> khác nhau bao nhiêu về thời gian, <code>Innodb_buffer_pool_reads</code> và <code>ibuf_merges</code>? Sau đó chạy một câu đọc quét <code>idx_user_id</code>: ai trả chi phí merge?</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e14/prediction.md</code></p>
+<p><strong>Chạy.</strong> <code>SET GLOBAL innodb_change_buffering = 'all'</code> (biến dynamic), chèn, đọc counter; khởi động lại, đổi sang <code>'none'</code>, lặp lại.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+<details><summary>E15. Xoá nhiều row: merge và kích thước file</summary>
+<p><strong>Câu hỏi.</strong> Xoá ngẫu nhiên 60% row của bảng 5 triệu row. <code>index_page_merge_attempts</code> và <code>index_page_merge_successful</code> tăng bao nhiêu? Kích thước file <code>.ibd</code> và <code>n_leaf_pages</code> thay đổi thế nào trước và sau <code>OPTIMIZE TABLE</code>?</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e15/prediction.md</code></p>
+<p><strong>Chạy.</strong> <code>DELETE … WHERE id % 5 IN (0, 1, 2)</code> theo lô 10 nghìn row, đợi purge (<code>History list length</code> về gần 0), đọc counter và <code>innodb_index_stats</code>, rồi <code>OPTIMIZE TABLE</code> và đọc lại.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+</section>
+
+<!-- 6 -->
+<section id="s6">
+<header><span class="num">06</span><h2>Ảnh hưởng khi chạy production</h2></header>
+<div class="prose">
+<h3>Khi nào thêm index, khi nào không</h3>
+<ul>
+<li>Thêm khi có một câu đọc quan trọng cần nó, chạy thường xuyên, và <code>EXPLAIN</code> cho thấy nó được dùng như mong đợi.</li>
+<li>Cân nhắc kỹ trên bảng ghi nhiều: bảng log, event, bảng đếm. Ở đó mỗi index phục vụ một câu đọc thỉnh thoảng nhưng bị trả giá ở mọi lần ghi.</li>
+<li>Thay vì thêm một index mới, xem có mở rộng được index sẵn có không: <code>(user_id)</code> thành <code>(user_id, created_at)</code> phục vụ cả hai nhóm câu mà chỉ tốn một cây.</li>
+<li>Khoá chính: mặc định chọn <code>BIGINT AUTO_INCREMENT</code>. Cần ID sinh ở app, hoặc không muốn lộ số lượng, thì UUIDv7 trong <code>BINARY(16)</code>. Tránh UUIDv4, đặc biệt dưới dạng <code>CHAR(36)</code>.</li>
+</ul>
+
+<h3>Cái giá</h3>
+<ul>
+<li><strong>Ghi:</strong> mỗi index thêm một lần chèn mỗi <code>INSERT</code>, thêm redo, thêm page bẩn phải flush.</li>
+<li><strong>RAM:</strong> leaf page của mọi index cạnh tranh chỗ trong buffer pool. Index chèn ngẫu nhiên cần gần như toàn bộ leaf của nó nằm trong RAM để chèn không phải đọc disk.</li>
+<li><strong>Disk và backup:</strong> mỗi index là thêm dung lượng, thêm thời gian backup và restore, thêm thời gian <code>ALTER TABLE</code>.</li>
+<li><strong>Replica:</strong> replica áp dụng cùng các lần ghi, nên index thừa làm replica dễ trễ hơn.</li>
+</ul>
+
+<h3>Nhận ra trên production bằng gì</h3>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Triệu chứng</th><th>Xem ở đâu</th></tr></thead>
+<tbody>
+<tr><td>Insert chậm dần khi bảng lớn lên, không có lock wait</td><td><code>Innodb_buffer_pool_reads</code> tăng theo số insert; so <code>size</code> của từng index trong <code>innodb_index_stats</code> với <code>innodb_buffer_pool_size</code></td></tr>
+<tr><td>Nhiều split</td><td><code>index_page_splits</code> trong <code>INNODB_METRICS</code> (cần bật <code>module_index</code>)</td></tr>
+<tr><td>Index không ai dùng</td><td><code>sys.schema_unused_indexes</code> sau một chu kỳ đủ dài; <code>sys.schema_index_statistics</code> cho lượt đọc và ghi từng index</td></tr>
+<tr><td>Index trùng tiền tố</td><td><code>sys.schema_redundant_indexes</code></td></tr>
+<tr><td>Redo ghi nhiều</td><td><code>Innodb_os_log_written</code> theo giây; so trước và sau khi thêm index</td></tr>
+<tr><td>Purge không theo kịp sau DELETE lớn</td><td><code>History list length</code> trong <code>SHOW ENGINE INNODB STATUS</code></td></tr>
+</tbody></table></div>
+<div class="senior"><h4>Góc nhìn senior: đặt giá cho index trước khi thêm</h4><p>Một đề xuất index tốt nói được ba con số: câu đọc nào nhanh hơn bao nhiêu (từ <code>EXPLAIN ANALYZE</code>), index tốn bao nhiêu dung lượng (ước từ số row và kích thước entry), và bảng nhận bao nhiêu lần ghi mỗi giây ở giờ cao điểm. Không có con số thứ ba thì chưa biết index đó có đáng không.</p></div>
+<div class="prose">
+<h3>Checklist khi review một migration thêm index hoặc đổi khoá chính</h3>
+<ul>
+<li>Câu đọc nào cần index này? Có link tới <code>EXPLAIN</code> trước và sau không?</li>
+<li>Có index nào sẵn có là tiền tố của index mới, hoặc ngược lại, để gộp hoặc xoá?</li>
+<li>Bảng nhận bao nhiêu lần ghi mỗi giây? Index mới chèn tuần tự hay ngẫu nhiên?</li>
+<li>Index có phải <code>UNIQUE</code> không, và có cần là unique không?</li>
+<li>Khoá chính có chuỗi dài hoặc UUIDv4 không? Mọi secondary index sẽ chép nó.</li>
+<li>Kích thước tổng của các index có còn vừa buffer pool ở mức tăng trưởng một năm tới không?</li>
+<li>Tạo index trên bảng lớn bằng online DDL; xoá index cũ bằng cách ẩn trước (<code>INVISIBLE</code>).</li>
+</ul>
+</div>
+</section>
+
+<!-- 7 -->
+<section id="s7">
+<header><span class="num">07</span><h2>Hiểu lầm thường gặp</h2></header>
+<div class="prose"><ul>
+<li><strong>Hiểu lầm:</strong> UPDATE một cột nhỏ thì rẻ. <strong>Vì sao sai:</strong> mỗi index chứa cột đó cần một delete-mark và một lần chèn, ở leaf khác nhau. <strong>Quy tắc:</strong> đếm index chứa cột bị đổi (<a href="#s2">phần 02</a>).</li>
+<li><strong>Hiểu lầm:</strong> PK tăng dần thì bảng không bị split ngẫu nhiên. <strong>Vì sao sai:</strong> mỗi secondary index có thứ tự riêng; <code>idx_user_id</code> vẫn chèn ngẫu nhiên. <strong>Quy tắc:</strong> xét thứ tự chèn của từng cây.</li>
+<li><strong>Hiểu lầm:</strong> UUID trong <code>CHAR(36)</code> chỉ tốn thêm ở PRIMARY. <strong>Vì sao sai:</strong> PK được chép vào mọi secondary entry. <strong>Quy tắc:</strong> PK dài nhân lên theo số index.</li>
+<li><strong>Hiểu lầm:</strong> unique index tốn như index thường. <strong>Vì sao sai:</strong> phải đọc leaf để kiểm tra trùng trước mỗi lần chèn, không hoãn được. <strong>Quy tắc:</strong> chỉ dùng <code>UNIQUE</code> khi thật sự cần ràng buộc.</li>
+<li><strong>Hiểu lầm:</strong> change buffer đang che chi phí ghi của mình. <strong>Vì sao sai:</strong> trên 8.4 mặc định là <code>none</code>. <strong>Quy tắc:</strong> kiểm tra <code>@@innodb_change_buffering</code> thay vì giả định.</li>
+<li><strong>Hiểu lầm:</strong> xoá nửa bảng thì file nhỏ đi một nửa. <strong>Vì sao sai:</strong> page trống trả về tablespace, không trả về hệ điều hành. <strong>Quy tắc:</strong> cần rebuild để thu nhỏ file.</li>
+</ul></div>
+</section>
+
+<!-- 8 -->
+<section id="s8">
+<header><span class="num">08</span><h2>Câu hỏi ôn tập</h2></header>
+<p class="prose">Viết ngày 2026-10-19.</p>
+<details><summary><span class="tag">Dự đoán</span>Đếm cây cho ba câu lệnh</summary>
+<p>Bảng có PRIMARY <code>(id)</code> và các index <code>(user_id)</code>, <code>(created_at)</code>, <code>(status)</code>, <code>(user_id, status, created_at)</code>. Mỗi câu sau ghi vào bao nhiêu cây, và mỗi cây là chèn hay delete-mark: <code>INSERT</code> một row; <code>UPDATE … SET status = 'paid' WHERE id = 7</code>; <code>UPDATE … SET note = 'x' WHERE id = 7</code>?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>INSERT: 5 cây, đều là chèn. Đổi <code>status</code>: PRIMARY sửa tại chỗ, <code>(status)</code> và <code>(user_id, status, created_at)</code> mỗi cây một delete-mark và một lần chèn, tổng 3 cây. Đổi <code>note</code>: chỉ PRIMARY, vì <code>note</code> không nằm trong index nào.</p></details></details>
+<details><summary><span class="tag">Giải thích</span>Vì sao đổi khoá chính đắt nhất</summary>
+<p>Vì sao <code>UPDATE orders SET id = id + 10000000 WHERE id = 7</code> ghi vào mọi index, kể cả những index không chứa cột nào bị đổi?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Secondary entry của InnoDB có dạng <code>(cột index, PK)</code>. Đổi PK là đổi key của mọi entry thuộc row đó, nên mọi secondary index phải delete-mark entry cũ và chèn entry mới. PRIMARY cũng phải xoá và chèn lại row ở vị trí mới.</p></details></details>
+<details><summary><span class="tag">Dự đoán</span>UUIDv4 và dung lượng của secondary index</summary>
+<p>Đổi khoá chính từ <code>BIGINT</code> sang UUIDv4 <code>CHAR(36)</code> trên bảng có <code>idx_user_id (user_id)</code>. <code>idx_user_id</code> to ra khoảng bao nhiêu lần, và vì hai lý do nào?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Entry đi từ khoảng 4 + 8 + 7 = 19 byte lên 4 + 36 + 7 = 47 byte, tức khoảng 2,5 lần. Độ đầy không đổi vì <code>idx_user_id</code> vốn đã chèn ngẫu nhiên theo <code>user_id</code>. Tổng cộng khoảng 2,5 lần. PRIMARY thì to ra vì cả hai lý do: PK dài hơn, và page chỉ đầy khoảng 69% thay vì 94%.</p></details></details>
+<details><summary><span class="tag">Giải thích</span>Change buffer</summary>
+<p>Change buffer giúp gì, vì sao nó không dùng được cho unique index, và trên MySQL 8.4 mặc định nó có bật không?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Nó hoãn thao tác lên leaf page của secondary index khi page không có trong buffer pool, tránh một random read cho mỗi lần chèn; thao tác được áp khi page được đọc lên về sau. Unique index phải đọc page để kiểm tra trùng trước khi chèn, nên không có gì để hoãn. Trên 8.4, <code>innodb_change_buffering</code> mặc định là <code>none</code>.</p></details></details>
+<details><summary><span class="tag">Chẩn đoán</span>Insert chậm dần</summary>
+<p>Một bảng event có PK auto-increment và 6 secondary index. Lúc bảng 10 triệu row, insert đạt 8.000 row/giây; lúc 200 triệu row còn 1.500, không có lock wait, CPU thấp. Nghi gì và xác nhận bằng gì?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Các secondary index chèn ngẫu nhiên đã lớn hơn buffer pool, nên mỗi lần chèn phải đọc leaf từ disk. Xác nhận: <code>Innodb_buffer_pool_reads</code> trên mỗi insert tăng; tổng <code>size</code> của các index trong <code>mysql.innodb_index_stats</code> vượt <code>innodb_buffer_pool_size</code>; I/O wait cao. Hướng xử lý: bỏ index không dùng, gộp index, tăng buffer pool, hoặc partition theo thời gian để phần đang ghi nhỏ lại.</p></details></details>
+<details><summary><span class="tag">Chẩn đoán</span>Xoá xong file vẫn to</summary>
+<p>Sau khi xoá 60% row của một bảng 80GB, disk vẫn báo file <code>.ibd</code> 80GB. Có lỗi gì không?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Không. Purge xoá thật các row đã delete-mark, page được merge khi xuống dưới <code>MERGE_THRESHOLD</code>, và page trống được giữ lại trong tablespace để dùng lại, không trả cho hệ điều hành. Muốn file nhỏ lại thì rebuild bảng (<code>OPTIMIZE TABLE</code> hoặc <code>ALTER TABLE … FORCE</code>), tốn thời gian và I/O tương đương chép lại bảng.</p></details></details>
+</section>
+
+<!-- 9 -->
+<section id="s9">
+<header><span class="num">09</span><h2>Câu hỏi còn mở</h2></header>
+<p class="prose">Số thứ tự trùng với Open questions trong <code>.claude/docs/LEARNING_LOG.md</code>. Log là bản gốc.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>#</th><th>Câu hỏi</th><th>Trạng thái</th></tr></thead>
+<tbody>
+<tr><td>4</td><td>Change buffer và adaptive hash index giúp khi nào, hại khi nào?</td><td>Đã trả lời một phần (2026-10-19, trang này): cơ chế change buffer và việc 8.4 tắt mặc định. Chưa có số đo (E14). Adaptive hash index chưa đụng tới.</td></tr>
+<tr><td>12</td><td>UUIDv7 sinh từ nhiều app server, với đồng hồ lệch nhau vài mili giây, có còn cho page gần đầy như auto-increment không?</td><td>Mở. Có thể đo bằng biến thể của E8.</td></tr>
+<tr><td>13</td><td>Luật tách ở điểm chèn có còn kích hoạt khi nhiều session chèn auto-increment xen kẽ nhau vào cùng page cuối không?</td><td>Mở.</td></tr>
+<tr><td>14</td><td>Trên 8.4 với change buffer tắt, insert chậm đi bao nhiêu khi secondary index vượt buffer pool?</td><td>Mở. E14.</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- 10 -->
+<section id="s10">
+<header><span class="num">10</span><h2>Tài liệu tham khảo</h2></header>
+<div class="prose"><ul>
+<li>MySQL 8.4 Reference Manual, <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-physical-structure.html">The Physical Structure of an InnoDB Index</a>: 15/16 và 1/2 tới 15/16, <code>innodb_fill_factor</code></li>
+<li><a href="https://dev.mysql.com/doc/refman/8.4/en/index-page-merge-threshold.html">Configuring the Merge Threshold for Index Pages</a></li>
+<li><a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-change-buffer.html">Change Buffer</a></li>
+<li><a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-information-schema-metrics-table.html">InnoDB INFORMATION_SCHEMA Metrics Table</a></li>
+<li><a href="https://dev.mysql.com/doc/refman/8.4/en/miscellaneous-functions.html">Miscellaneous Functions</a>: <code>UUID()</code>, <code>UUID_TO_BIN</code>, <code>BIN_TO_UUID</code></li>
+<li><a href="https://dev.mysql.com/doc/refman/8.4/en/sys-schema-unused-indexes.html">sys.schema_unused_indexes</a>, <a href="https://dev.mysql.com/doc/refman/8.4/en/sys-schema-redundant-indexes.html">sys.schema_redundant_indexes</a></li>
+<li>Frédéric Descamps, <a href="https://lefred.be/content/mysql-8-4-lts-new-production-ready-defaults-for-innodb/">MySQL 8.4 LTS: new production-ready defaults for InnoDB</a>: danh sách mặc định đổi trong 8.4</li>
+<li>RFC 9562, <a href="https://www.rfc-editor.org/rfc/rfc9562">Universally Unique IDentifiers (UUIDs)</a>: định dạng UUIDv7</li>
+</ul></div>
+<h3>Mức kiểm chứng</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>Khẳng định</th><th>Nguồn</th></tr></thead>
+<tbody>
+<tr><td>Chèn tuần tự cho page 15/16, ngẫu nhiên 1/2 tới 15/16; chừa 1/16</td><td>manual 8.4 (Physical Structure)</td></tr>
+<tr><td><code>MERGE_THRESHOLD</code> mặc định 50, đặt được theo bảng và index</td><td>manual 8.4</td></tr>
+<tr><td>Change buffer: chỉ secondary index, ba loại thao tác, max_size 25</td><td>manual 8.4 (Change Buffer)</td></tr>
+<tr><td><code>innodb_change_buffering</code> mặc định <code>none</code> trên 8.4</td><td>manual 8.4 và bài của lefred; chưa xem trên lab</td></tr>
+<tr><td>Secondary index: delete-mark rồi chèn khi key đổi; đổi PK ghi mọi index</td><td>đọc tài liệu InnoDB; chưa quan sát bằng counter</td></tr>
+<tr><td>Luật chọn điểm tách (ở điểm chèn hay ở giữa)</td><td>mô tả rút gọn từ hành vi InnoDB; manual chỉ nêu kết quả độ đầy. Chưa đo (E8)</td></tr>
+<tr><td>Kích thước trong máy tính phần 02</td><td>mô hình; chưa so với bảng thật (E5, E13)</td></tr>
+<tr><td>So sánh với PostgreSQL và LSM</td><td>đọc tài liệu; chưa chạy</td></tr>
+</tbody></table></div>
+</section>
+</main>
+
+</div>
+
+<script>
+/* ---------- helpers ---------- */
+const DEFS=`<defs><marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>`;
+function B(x,y,w,h,cls,t,sub){
+  const tx=x+w/2;
+  return `<g class="n ${cls||''}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="5"/>`+
+  `<text class="tb" x="${tx}" y="${y+(sub?h/2-8:h/2)}" text-anchor="middle" dominant-baseline="central">${t}</text>`+
+  (sub?`<text class="ts" x="${tx}" y="${y+h/2+10}" text-anchor="middle" dominant-baseline="central">${sub}</text>`:'')+`</g>`;
+}
+const A=(d,cls)=>`<path d="${d}" class="edge ${cls||''}" marker-end="url(#arw)"/>`;
+const T=(x,y,t,anchor,cls)=>`<text class="${cls||'lbl'}" x="${x}" y="${y}" text-anchor="${anchor||'start'}">${t}</text>`;
+const $=id=>document.getElementById(id);
+const fmt=n=>n.toLocaleString('vi-VN');
+const RM=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function stepper(id,{title,vb,steps,draw}){
+  const el=$(id);
+  el.innerHTML=`<div class="ph"><strong>${title}</strong><span class="meta"></span></div><div class="bd">
+  <h4 class="st-t"></h4>
+  <svg viewBox="${vb}" role="img"></svg>
+  <div class="desc" aria-live="polite"><div class="st-d"></div><pre hidden></pre></div>
+  <div class="nav"><button data-d="-1">Trước</button><button data-d="1" class="primary">Tiếp</button></div></div>`;
+  const svg=el.querySelector('svg'),t=el.querySelector('.st-t'),d=el.querySelector('.st-d'),pre=el.querySelector('pre'),meta=el.querySelector('.meta');
+  const [pv,nx]=el.querySelectorAll('.nav button');let i=0;
+  function render(){const s=steps[i];svg.innerHTML=DEFS+draw(s,i);svg.setAttribute('aria-label',s.t);t.textContent=s.t;d.textContent=s.d;
+    pre.hidden=!s.c;pre.textContent=s.c||'';meta.textContent=`bước ${i+1} / ${steps.length}`;pv.disabled=i===0;nx.disabled=i===steps.length-1;}
+  function go(k){i=Math.max(0,Math.min(steps.length-1,i+k));render();}
+  pv.onclick=()=>go(-1);nx.onclick=()=>go(1);
+  el.tabIndex=0;el.addEventListener('keydown',e=>{if(e.key==='ArrowRight')go(1);if(e.key==='ArrowLeft')go(-1);});
+  render();
+}
+
+/* ---------- index sets (shared by section 01 and the size calculator) ---------- */
+// cols: columns in the index; key: bytes of the index columns; seq: inserted in (near) ascending order
+const IDX=[
+  {n:'idx_user_id',cols:['user_id'],key:4,seq:false},
+  {n:'idx_created_at',cols:['created_at'],key:5,seq:true},
+  {n:'idx_status',cols:['status'],key:1,seq:false},
+  {n:'idx_total',cols:['total'],key:4,seq:false},
+  {n:'idx_usc',cols:['user_id','status','created_at'],key:10,seq:false},
+  {n:'idx_user_created',cols:['user_id','created_at'],key:9,seq:false},
+  {n:'idx_status_created',cols:['status','created_at'],key:6,seq:false},
+  {n:'idx_note',cols:['note'],key:21,seq:false,label:'idx_note (note(20))'}
+];
+const setOf=k=>IDX.slice(0,+k);
+
+/* ---------- 01: which trees a statement touches ---------- */
+const STMT={
+  ins:{sql:"INSERT INTO orders (user_id, created_at, status, total, note)\nVALUES (42, NOW(), 'new', 129000, 'giao giờ hành chính');",cols:null,kind:'ins'},
+  upStatus:{sql:"UPDATE orders SET status = 'shipped' WHERE id = 1001;",cols:['status'],kind:'up'},
+  upTotal:{sql:"UPDATE orders SET total = total + 500 WHERE id = 1001;",cols:['total'],kind:'up'},
+  upNote:{sql:"UPDATE orders SET note = 'gọi trước khi giao' WHERE id = 1001;",cols:['note'],kind:'up'},
+  upUser:{sql:"UPDATE orders SET user_id = 77 WHERE id = 1001;",cols:['user_id'],kind:'up'},
+  upId:{sql:"UPDATE orders SET id = id + 10000000 WHERE id = 1001;",cols:['id'],kind:'pk'},
+  del:{sql:"DELETE FROM orders WHERE id = 1001;",cols:null,kind:'del'}
+};
+function renderTouch(){
+  const s=STMT[$('tStmt').value], idx=setOf($('tSet').value);
+  $('tSql').textContent=s.sql;
+  const trees=[{n:'PRIMARY',cols:['id','(cả row)'],prim:true},...idx];
+  let nT=0,nI=0,nD=0,nU=0;
+  const html=trees.map(tr=>{
+    let cls='idle',what='không chạm';
+    if(s.kind==='ins'){cls='w';what='chèn entry';nI++;if(tr.prim)nU++;}
+    else if(s.kind==='del'){cls='dw';what='đánh dấu xoá';nD++;}
+    else if(s.kind==='pk'){cls='dw';what='đánh dấu xoá + chèn';nD++;nI++;if(tr.prim)nU++;}
+    else if(tr.prim){cls='w';what='sửa row tại chỗ';}
+    else if(tr.cols.some(c=>s.cols.includes(c))){cls='dw';what='đánh dấu xoá + chèn';nD++;nI++;}
+    if(cls!=='idle')nT++;
+    return `<div class="tree ${cls}"><b>${tr.label||tr.n}</b><small>${tr.prim?'key id, leaf chứa cả row':'('+tr.cols.join(', ')+', id)'}</small><em>${what}</em></div>`;
+  }).join('');
+  $('tTrees').innerHTML=html;
+  $('sTrees').textContent=nT;$('sIns').textContent=nI;$('sDel').textContent=nD;$('sUniq').textContent=nU;
+  $('touchMeta').textContent=`${trees.length} cây`;
+  const k=s.kind;
+  let d;
+  if(k==='ins')d=`Mọi cây nhận một entry mới. PRIMARY là unique nên InnoDB phải đọc leaf để kiểm tra id chưa tồn tại; với AUTO_INCREMENT leaf đó là page cuối, luôn nằm trong buffer pool. ${idx.length} secondary index còn lại mỗi cây một lần chèn, phần lớn vào leaf ngẫu nhiên.`;
+  else if(k==='del')d=`Không có gì bị xoá ngay. Row trong PRIMARY và entry trong ${idx.length} secondary index đều được đánh dấu xoá; thread purge xoá thật sau khi không còn read view nào cần phiên bản cũ. Undo log giữ bản cũ của row.`;
+  else if(k==='pk')d=`PK là key của PRIMARY và là phần đuôi của mọi secondary entry. Đổi PK là xoá rồi chèn lại row ở vị trí mới trong PRIMARY, và đánh dấu xoá rồi chèn lại entry trong cả ${idx.length} secondary index, kể cả index không chứa cột nào bị đổi. Kiểm tra trùng trên PRIMARY cho id mới.`;
+  else{
+    const hit=idx.filter(x=>x.cols.some(c=>s.cols.includes(c)));
+    d=hit.length?`Row trong PRIMARY được sửa tại chỗ (nếu không dài ra). ${hit.length} index chứa cột bị đổi (${hit.map(x=>x.n).join(', ')}): mỗi cây đánh dấu xoá entry cũ và chèn entry mới ở vị trí của key mới, thường là hai leaf khác nhau. Các index còn lại không bị chạm.`
+      :`Cột bị đổi không nằm trong index nào của bộ này. Chỉ row trong PRIMARY được sửa; không secondary index nào bị chạm. Câu ghi rẻ nhất có thể.`;
+  }
+  $('tDesc').textContent=d;
+}
+$('tStmt').onchange=renderTouch;$('tSet').onchange=renderTouch;renderTouch();
+
+/* ---------- 02: leaf split simulator ---------- */
+const CAP=8;
+let sp, spMode='seq';
+function spInit(){
+  sp={pages:[{keys:[],last:null,dir:0}],n:0,splits:0,seq:0,hot:-1,fresh:-1,log:[]};
+  spDraw();
+}
+// deterministic pseudo-random so the lesson replays the same way
+let seed=7;function rnd(){seed=(seed*1103515245+12345)&0x7fffffff;return seed/0x7fffffff;}
+const used=new Set();
+function nextKey(){
+  sp.seq++;
+  if(spMode==='seq')return sp.seq*10;
+  if(spMode==='v7'){let k;do{k=sp.seq*10+Math.round((rnd()-.5)*36);}while(used.has(k)||k<1);return k;}
+  let k;do{k=1+Math.floor(rnd()*999);}while(used.has(k));return k;
+}
+function findPage(k){
+  const P=sp.pages;
+  for(let i=P.length-1;i>=0;i--){if(i===0||P[i].keys.length&&k>=P[i].keys[0])return i;}
+  return 0;
+}
+function insertOne(){
+  const k=nextKey();used.add(k);sp.n++;
+  let pi=findPage(k),p=sp.pages[pi];sp.fresh=-1;
+  let msg=`chèn ${k} vào page ${pi+1}`;
+  if(p.keys.length>=CAP){
+    const pos=p.keys.filter(x=>x<k).length;
+    // sequential guess: last insert went to the right end and this one lands right after it
+    const seqRight=p.last!==null && p.dir>0 && pos===p.keys.length && p.keys[p.keys.length-1]===p.last;
+    let right;
+    if(seqRight){right={keys:[],last:null,dir:0};msg+=`: page đầy, chèn tuần tự nên tách ở điểm chèn, page cũ giữ ${p.keys.length} key`;}
+    else{const half=Math.ceil(p.keys.length/2);right={keys:p.keys.slice(half),last:null,dir:0};p.keys=p.keys.slice(0,half);msg+=`: page đầy, tách ở giữa (${p.keys.length} | ${right.keys.length})`;}
+    sp.pages.splice(pi+1,0,right);sp.splits++;sp.fresh=pi+1;
+    if(!right.keys.length||k>=right.keys[0]){pi=pi+1;p=right;}
+  }
+  const before=p.last;
+  p.keys.push(k);p.keys.sort((a,b)=>a-b);
+  p.dir=(before!==null&&k>before)?1:(before!==null?-1:0);p.last=k;
+  sp.hot=pi;sp.lastKey=k;
+  sp.log.unshift(msg);sp.log=sp.log.slice(0,7);
+}
+function spDraw(){
+  const P=sp.pages,per=5,W=124,H=86,gx=10,gy=16;
+  const rows=Math.max(1,Math.ceil(P.length/per));
+  const vh=rows*(H+gy)+8;
+  let g='';
+  P.forEach((p,i)=>{
+    const x=4+(i%per)*(W+gx+2),y=4+Math.floor(i/per)*(H+gy);
+    const cls=i===sp.fresh?'miss':(i===sp.hot?'hot':'');
+    g+=`<g class="n ${cls}"><rect x="${x}" y="${y}" width="${W}" height="${H}" rx="5"/></g>`;
+    g+=T(x+8,y+16,`page ${i+1}`,'start','ts');
+    p.keys.forEach((k,j)=>{g+=`<text class="k ${k===sp.lastKey&&i===sp.hot?'new':''}" x="${x+8+(j%4)*29}" y="${y+36+Math.floor(j/4)*17}">${k}</text>`;});
+    const f=p.keys.length/CAP;
+    g+=`<rect class="fillbg" x="${x+8}" y="${y+H-16}" width="${W-16}" height="7" rx="2"/><rect class="fillbar" x="${x+8}" y="${y+H-16}" width="${(W-16)*f}" height="7" rx="2"/>`;
+  });
+  const svg=$('spSvg');svg.setAttribute('viewBox',`0 0 680 ${vh}`);svg.innerHTML=g;
+  $('spN').textContent=sp.n;$('spP').textContent=P.length;$('spS').textContent=sp.splits;
+  const tot=P.reduce((a,p)=>a+p.keys.length,0);
+  $('spF').textContent=sp.n?Math.round(100*tot/(P.length*CAP))+'%':'–';
+  $('spLog').innerHTML=sp.log.map(l=>`<div>${l}</div>`).join('')||'<div>Chưa chèn key nào. Chọn kiểu khoá rồi bấm Chèn.</div>';
+}
+let busy=false;
+$('spOne').onclick=()=>{if(busy)return;insertOne();spDraw();};
+$('spMany').onclick=()=>{if(busy)return;busy=true;let c=0;
+  const tick=()=>{insertOne();spDraw();c++;if(c<16)setTimeout(tick,RM?0:90);else busy=false;};tick();};
+$('spReset').onclick=()=>{if(busy)return;seed=7;used.clear();spInit();};
+document.querySelectorAll('#split [data-mode]').forEach(b=>b.onclick=()=>{if(busy)return;
+  spMode=b.dataset.mode;document.querySelectorAll('#split [data-mode]').forEach(x=>x.setAttribute('aria-pressed',x===b));
+  seed=7;used.clear();spInit();});
+spInit();
+
+/* ---------- 02: change buffer stepper ---------- */
+const CB=[
+  {t:'Một INSERT, user_id = 73120',d:'Row mới có id = 5000001. Leaf cuối của PRIMARY đang nằm trong buffer pool vì mọi insert auto-increment đều ghi vào nó. Entry mới của idx_user_id thuộc leaf page 2817, nơi chứa các user_id quanh 73120. Page đó không có trong buffer pool.',
+   s:{prim:'hot',leaf:'dim',disk:'dim',cb:'dim',q:''}},
+  {t:'Change buffer tắt: đọc page từ disk',d:'Với innodb_change_buffering = none (mặc định 8.4), InnoDB phải đọc page 2817 vào buffer pool ngay, trong lúc câu INSERT đang chạy. Đây là một random read 16KB chỉ để thêm 19 byte.',
+   s:{prim:'hot',leaf:'miss',disk:'miss',cb:'dim',q:'read'}},
+  {t:'Change buffer tắt: sửa page trong buffer pool',d:'Entry (73120, 5000001) được chèn vào page 2817, page thành bẩn, redo được ghi. Page bẩn sẽ được flush xuống disk sau, bởi page cleaner. INSERT xong sau khi đợi lần đọc ở bước trước.',
+   s:{prim:'hot',leaf:'hot',disk:'dim',cb:'dim',q:''}},
+  {t:'Change buffer bật: ghi thao tác thay vì đọc page',d:'Với innodb_change_buffering = all (mặc định trước 8.4), InnoDB không đọc page 2817. Nó ghi một bản ghi "chèn (73120, 5000001) vào page 2817 của idx_user_id" vào change buffer, vốn nằm trong buffer pool. INSERT xong mà không đợi disk.',
+   s:{prim:'hot',leaf:'dim',disk:'dim',cb:'ram',q:''}},
+  {t:'Change buffer bật: thêm thao tác dồn vào cùng page',d:'Ba insert khác cũng rơi vào page 2817 trước khi ai đọc nó. Change buffer giữ cả bốn thao tác. Đây là lúc nó có lợi nhất: bốn lần đọc disk sẽ gộp thành một.',
+   s:{prim:'hot',leaf:'dim',disk:'dim',cb:'ram',q:'×4'}},
+  {t:'Merge khi page được đọc',d:'Về sau một câu SELECT … WHERE user_id = 73118 cần page 2817. Page được đọc từ disk như thường, rồi bốn thao tác đang chờ được áp vào nó trước khi trả kết quả. Câu SELECT này trả chi phí merge, không phải câu INSERT.',
+   s:{prim:'dim',leaf:'hot',disk:'miss',cb:'ram',q:'merge'}},
+  {t:'Merge nền và khi tắt server',d:'Main thread của InnoDB cũng merge dần khi server gần rảnh, và slow shutdown merge hết. Merge tồn đọng lớn có thể kéo dài nhiều giờ và tiếp tục sau khi restart. Change buffer không áp dụng cho PRIMARY và unique index, vì chúng phải đọc page để kiểm tra trùng.',
+   s:{prim:'dim',leaf:'dim',disk:'dim',cb:'ram',q:'nền'}}
+];
+stepper('cbuf',{title:'Chèn vào secondary index khi leaf không có trong buffer pool',vb:'0 0 680 230',steps:CB,draw:(s)=>{
+  const z=s.s;let g='';
+  g+=`<rect class="zone" x="10" y="10" width="420" height="200" rx="8"/>`+T(22,30,'Buffer pool (RAM)','start','tb');
+  g+=`<rect class="zone" x="460" y="10" width="210" height="200" rx="8"/>`+T(472,30,'Disk','start','tb');
+  g+=B(30,50,170,54,z.prim,'PRIMARY, leaf cuối','id ≤ 5000001');
+  g+=B(230,50,180,54,z.leaf==='dim'?'dim':z.leaf,'idx_user_id page 2817',z.leaf==='dim'?'không có trong RAM':'đã ở trong RAM');
+  g+=B(30,134,380,54,z.cb,'Change buffer',z.cb==='ram'?(z.q==='×4'?'4 thao tác chờ cho page 2817':'thao tác chờ cho page 2817'):'trống');
+  g+=B(485,90,160,54,z.disk==='miss'?'miss':'struct','idx_user_id page 2817','trên tablespace');
+  if(z.q==='read'||z.q==='merge')g+=A('M485 117 L414 82','miss');
+  if(z.q==='merge')g+=A('M300 132 L310 108','ram');
+  if(z.cb==='ram'&&!z.q)g+=A('M200 104 L230 132','ram');
+  return g;}});
+
+/* ---------- 02: size calculator ---------- */
+const PK={bigint:{b:8,seq:true,n:'BIGINT'},v7:{b:16,seq:true,n:'UUIDv7'},v4b:{b:16,seq:false,n:'UUIDv4 BINARY(16)'},v4c:{b:36,seq:false,n:'UUIDv4 CHAR(36)'}};
+const USABLE=15000,OV=7,SEQF=15/16,RNDF=0.69;
+function calc(){
+  const rows=+$('cRows').value,pk=PK[$('cPk').value],idx=setOf($('cSet').value);
+  const rowBytes=4+5+1+4+40+13+pk.b+OV;
+  const mk=(name,bytes,seq)=>{const f=seq?SEQF:RNDF;const per=Math.floor(USABLE*f/bytes);const pages=Math.ceil(rows/per);return {name,bytes,f,mb:pages*16/1024};};
+  const out=[mk('PRIMARY',rowBytes,pk.seq),...idx.map(x=>mk(x.label||x.n,x.key+pk.b+OV,x.seq))];
+  const total=out.reduce((a,r)=>a+r.mb,0);
+  $('cBody').innerHTML=out.map(r=>`<tr><td><code>${r.name}</code></td><td class="num">${r.bytes}</td><td class="num">${Math.round(r.f*100)}%</td><td class="num">${r.mb<1024?fmt(Math.round(r.mb))+' MB':(r.mb/1024).toFixed(1).replace('.',',')+' GB'}</td></tr>`).join('')+
+    `<tr class="tot"><td>Tổng</td><td></td><td></td><td class="num">${total<1024?fmt(Math.round(total))+' MB':(total/1024).toFixed(1).replace('.',',')+' GB'}</td></tr>`;
+}
+['cRows','cPk','cSet'].forEach(i=>$(i).onchange=calc);calc();
+</script>
+</body>
+</html>
