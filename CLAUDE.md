@@ -14,7 +14,7 @@ Reference implementation: `topics/btree-index-internals/index.html`.
 
 ## Building a page
 
-Use the `topic-page` skill (`.claude/skills/topic-page/SKILL.md`) whenever creating, extending, or reviewing a topic page. It defines the workflow (lesson → learning-order outline → one widget per mechanism → verify), the content conventions (Vietnamese copy, callouts, exercises), and the widget patterns (stepper, simulator, playground, calculator, static figure) with copy-ready helper code.
+Use the `topic-page` skill (`.claude/skills/topic-page/SKILL.md`) whenever creating, extending, or reviewing a topic page. It defines the workflow (lesson → fixed document structure → one widget per mechanism → verify), the document structure every topic follows (hero brief with goals, prerequisites and status; then core concept, mechanism, design reasons, examples, experiments, production implications, misconceptions, recall questions with answers, open questions, references — see `references/content.md`), the content conventions (Vietnamese copy, callouts), and the widget patterns (stepper, simulator, playground, calculator, static figure) with copy-ready helper code.
 
 Before committing a page, run its check and review the screenshots:
 

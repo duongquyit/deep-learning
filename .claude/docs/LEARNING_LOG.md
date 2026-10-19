@@ -59,9 +59,10 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 5. The B+tree playground splits at 3 keys per node for visibility. Does anything in my mental model secretly depend on that small fan-out rather than the real ~400?
 6. The clustered-vs-secondary size calculator assumes ~69% leaf fill and a 5-byte InnoDB record header, and ignores the page directory. How far off is it on a real table (E5)?
 7. The page states that InnoDB's extra cost on a secondary-index lookup is mostly buffer-pool hits (CPU and latches), not I/O. At what hit ratio does that stop being true?
-8. In Claude's sandbox (MySQL 8.0.46) a histogram on `status` did not change `filtered` while `status` was still a column of an index, even an invisible one, but did on a copy of the table with no index on it. Is that the documented rule, and does 8.4 behave the same?
+8. In Claude's sandbox (MySQL 8.0.46) a histogram on `status` did not change `filtered` while `status` was still a column of an index, even an invisible one, but did on a copy of the table with no index on it. Is that the documented rule, and does 8.4 behave the same? *Partly answered 2026-10-19: the 8.4 manual (Optimizer Statistics) says the optimizer does not use histogram statistics when the range optimizer applies. Whether an invisible index counts is still open; E12 checks it on 8.4.*
 9. The sandbox optimizer gave up `idx_total` at about 10% of the table *by estimate*, when only about 5% of rows matched (range estimates were roughly 2× too high). Was full scan actually faster at that point? Needs latency on both sides of the threshold (E12).
 10. MySQL printed `Using index condition` for `user_id = 42 AND status = 'paid'` on `(user_id, status, created_at)`, where both conditions are already satisfied by the `ref` key. Why is the ENUM equality kept as a pushed condition?
+11. The 8.4 manual (Range Optimization) says that after a range operator on a key part the optimizer "considers no more key parts", yet the 8.0.46 sandbox printed `key_len = 5` and an interval `(41 <= user_id <= 43 AND status = 'paid')` with `used_key_parts: ["user_id"]`. Which describes 8.4, and does the extra key part in the interval ever narrow the scan beyond the edges? E9 checks it.
 
 ## Pending verification (from the session's own exercise list)
 
@@ -80,7 +81,7 @@ These are written in the page as exercises; none have been run yet.
 - **E10** — ICP on vs off for `user_id BETWEEN 41 AND 43 AND status = 'paid'`: `Handler_read_next` and `./lab.sh reads`; repeat with a wide range.
 - **E11** — `(user_id, status, created_at)` vs `(user_id, created_at, status)` for an equality + range + `ORDER BY … DESC LIMIT 20` query, with a normal user and a 2,000-order user.
 - **E12** — The range→ALL threshold for `total > X` on the lab, latency on both sides with and without `FORCE INDEX`; histogram on a non-indexed column and its effect on `filtered`.
-- **Q11–Q15** — The five check questions at the end of the composite-index page.
+- **Q11–Q16** — The six recall questions in section 08 of the composite-index page (answers are on the page, hidden).
 - **Q1–Q5** — The five check questions at the end of the page (leftmost prefix, `COUNT(*)` and the visibility map, full scan polluting the cache, TOAST, a `sessions` table updated 5,000×/sec). Answer in writing before looking anything up, then verify.
 
 ---
@@ -111,6 +112,8 @@ These are written in the page as exercises; none have been run yet.
 **Remaining questions.** Open questions 8–10 above.
 
 **Next step.** After E6 from the Week 1 lab: add `idx_usc` to the 5M lab table, write predictions for E9 and E10, run them. Bring a real slow query from work for the Month 1 index-design case study; this page is the toolkit for it.
+
+*Later the same day:* the page was restructured into the fixed document structure now required for every topic (see `.claude/skills/topic-page/references/content.md`): goals, prerequisites and status in the hero; then core concept, mechanism, design reasons, examples, experiments, production implications, misconceptions, recall questions with hidden answers, open questions, references with a verification table. Reading the 8.4 manual for the references section partly answered open question 8 and raised open question 11. Prediction templates for E9–E12 were added under `lab/mysql/experiments/`.
 
 ---
 

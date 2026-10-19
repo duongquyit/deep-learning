@@ -20,10 +20,12 @@ topic pages share one style, the style of the first topic, written down in
    every concept, example, number, correction and exercise from it. Corrections
    the learner needed ("you forgot the parent", "INCLUDE needs id too") are the
    most valuable content; keep them.
-2. **Outline as a learning sequence.** Order sections the way the concept is
-   learned, from "what/where" to "how it works inside" to "what it costs" to
-   "how a senior reasons about it". Numbered section markers are allowed only
-   because the sections really are a sequence. See `references/content.md`.
+2. **Fill the fixed document structure.** Every page has the same hero brief
+   and the same ten sections in the same order: Bản chất vấn đề, Cơ chế hoạt
+   động, Vì sao thiết kế như vậy, Ví dụ, Thí nghiệm, Ảnh hưởng khi chạy
+   production, Hiểu lầm thường gặp, Câu hỏi ôn tập, Câu hỏi còn mở, Tài liệu
+   tham khảo. What goes in each is in `references/content.md`. Sort the
+   gathered material into them before writing anything.
 3. **Pick one widget per mechanism.** For each section ask: what moves or
    changes here? That is the widget. Use the patterns in
    `references/widgets.md` (stepper, simulator, playground, calculator, static
@@ -38,7 +40,8 @@ topic pages share one style, the style of the first topic, written down in
    screenshots. Fix every JS error, stuck stepper and overflow before
    committing.
 7. **Commit** as `Add interactive <topic> topic` with a body listing the
-   sections.
+   widgets, together with the `prediction.md` templates for section 5 and the
+   log entry and roadmap mark that CLAUDE.md requires.
 
 ## Non-negotiables
 

@@ -150,6 +150,15 @@ input[type=range],input[type=checkbox]{accent-color:var(--struct)}
 details{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-s);padding:10px 14px;margin:10px 0;max-width:720px}
 details summary{cursor:pointer;font-weight:600}
 details[open] summary{margin-bottom:8px}
+details.answer{background:var(--paper);border-style:dashed;margin:10px 0 0}
+details.answer summary{font-weight:500;color:var(--struct)}
+.tag{display:inline-block;font:500 12px var(--sans);color:var(--ink-2);border:1px solid var(--rule-strong);border-radius:999px;padding:0 8px;margin-right:6px;vertical-align:1px}
+
+/* hero brief: mục tiêu, cần biết trước, trạng thái */
+.brief{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px 24px;background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);padding:14px 18px;max-width:920px;margin:0 0 8px;font-size:15px}
+.brief h4{font-size:14px;color:var(--struct);margin:0 0 4px}
+.brief ul{margin:0;padding-left:18px}
+.brief p{margin:0}
 
 .mobile-toc{display:none}
 @media (max-width:900px){
@@ -164,7 +173,8 @@ details[open] summary{margin-bottom:8px}
 
 ## Markup that goes with it
 
-- Hero: `<div class="hero"><h1>…</h1><p class="lede">…</p> …first widget… </div>` at the top of `<main>`.
+- Hero: `<div class="hero"><h1>…</h1><p class="lede">…</p><div class="brief">…</div></div>` at the top of `<main>`. The brief has three blocks, each `<div><h4>Mục tiêu</h4><ul>…</ul></div>`, then Cần biết trước, then Trạng thái. Section order and headings are in `content.md`.
+- Recall question: `<details><summary><span class="tag">Dự đoán</span>Short title</summary><p>Question</p><details class="answer"><summary>Xem đáp án</summary><p>…</p></details></details>`.
 - Section: `<section id="sN"><header><span class="num">0N</span><h2>…</h2></header> … </section>`.
 - Mistake callout: `<div class="note"><strong>Lỗi hay gặp:</strong> …</div>`.
 - Senior callout: `<div class="senior"><h4>Góc nhìn senior</h4><p>…</p></div>`, a short title after a colon is allowed (`Góc nhìn senior: điểm tách không phải lúc nào cũng ở giữa`).
