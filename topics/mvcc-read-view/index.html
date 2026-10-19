@@ -211,7 +211,7 @@ details.answer summary{font-weight:500;color:var(--struct)}
     <li><a href="../innodb-buffer-pool-redo-undo/index.html">Buffer pool, redo và undo</a>: undo record, <code>DB_TRX_ID</code>, <code>DB_ROLL_PTR</code>, purge.</li>
     <li><a href="../index-write-cost/index.html">Cái giá khi ghi của index</a>: secondary index delete-mark rồi chèn.</li>
   </ul></div>
-  <div><h4>Trạng thái</h4><p>Level 2 (prov.). Viết từ manual MySQL 8.4 và cấu trúc read view trong mã nguồn InnoDB. Kết quả trong timeline hai session là dự đoán theo manual, chưa chạy trên lab.</p></div>
+  <div><h4>Trạng thái</h4><p>Level 2 (prov.). Viết từ manual MySQL 8.4 và mã nguồn read view của nhánh 8.4. Kết quả trong timeline hai session là dự đoán theo manual, chưa chạy trên lab.</p></div>
 </div>
 <details class="mobile-toc"><summary>Mục lục</summary><ol><li><a href="#s1">Bản chất vấn đề</a></li><li><a href="#s2">Cơ chế hoạt động</a></li><li><a href="#s3">Vì sao thiết kế như vậy</a></li><li><a href="#s4">Ví dụ</a></li><li><a href="#s5">Thí nghiệm</a></li><li><a href="#s6">Ảnh hưởng khi chạy production</a></li><li><a href="#s7">Hiểu lầm thường gặp</a></li><li><a href="#s8">Câu hỏi ôn tập</a></li><li><a href="#s9">Câu hỏi còn mở</a></li><li><a href="#s10">Tài liệu tham khảo</a></li></ol></details>
 </div>
@@ -504,7 +504,7 @@ UPDATE accounts SET balance = ? WHERE id = 7;</code></pre>
 <tr><td><code>DB_TRX_ID</code> 6 byte, <code>DB_ROLL_PTR</code> 7 byte; insert undo bỏ sau commit, update undo giữ cho consistent read</td><td>manual 8.4</td></tr>
 <tr><td>RR tạo snapshot ở consistent read đầu tiên; RC mỗi câu</td><td>manual 8.4</td></tr>
 <tr><td>DML và locking read đọc bản mới nhất; ví dụ COUNT 0 rồi UPDATE 10 row</td><td>manual 8.4</td></tr>
-<tr><td>Luật visibility bốn giá trị</td><td>mã nguồn InnoDB, đọc lại từ trí nhớ; chưa đối chiếu trực tiếp với 8.4</td></tr>
+<tr><td>Luật visibility bốn giá trị</td><td>mã nguồn MySQL nhánh 8.4, <code>read0types.h</code> (<code>changes_visible</code>), đã đối chiếu 2026-10-19</td></tr>
 <tr><td>Secondary index buộc tra PRIMARY khi delete-mark hoặc page mới hơn</td><td>manual 8.4; chi tiết transaction ID theo page từ mã nguồn</td></tr>
 <tr><td>Timeline hai session ở phần 01</td><td>suy ra từ manual; chưa chạy (E19)</td></tr>
 <tr><td>Hành vi PostgreSQL REPEATABLE READ khi update đồng thời</td><td>tài liệu PostgreSQL; chưa chạy</td></tr>

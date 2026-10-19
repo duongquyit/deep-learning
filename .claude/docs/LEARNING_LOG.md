@@ -126,7 +126,7 @@ These are written in the page as exercises; none have been run yet.
 **What it covers.**
 
 - Hidden columns `DB_TRX_ID` (6 bytes) and `DB_ROLL_PTR` (7 bytes), the version chain through undo; insert undo dropped at commit, update undo kept for consistent reads. Transaction IDs are assigned on first write.
-- Read view: creator, `low_limit_id`, `m_ids`, `up_limit_id`, and the visibility rule (from InnoDB's `ReadView::changes_visible`, recalled from the source, not re-checked against 8.4).
+- Read view: creator, `low_limit_id`, `m_ids`, `up_limit_id`, and the visibility rule (checked against `ReadView::changes_visible` in `storage/innobase/include/read0types.h` on the 8.4 branch).
 - RR takes the snapshot at the first consistent read (not at `START TRANSACTION`; `WITH CONSISTENT SNAPSHOT` takes it immediately); RC per statement; RU none; SERIALIZABLE turns plain `SELECT` into `FOR SHARE` when autocommit is off.
 - Locking reads and DML read the latest committed version; the manual's `COUNT = 0` then `UPDATE` affects 10 rows example; lost update with application-side read-modify-write, and three fixes.
 - Secondary-index entries have no hidden columns; delete-marked entries or pages modified by newer transactions force a PRIMARY lookup, disabling the covering-index shortcut.
