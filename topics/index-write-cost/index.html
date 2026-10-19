@@ -203,19 +203,19 @@ details.answer summary{font-weight:500;color:var(--struct)}
 <main>
 <div class="hero">
 <h1>Cái giá khi ghi của index trên InnoDB</h1>
-<p class="lede">Mỗi index giúp một nhóm câu đọc nhanh hơn, và bắt mọi câu ghi phải sửa thêm một cây B+tree. Bài này đếm xem một <code>INSERT</code>, <code>UPDATE</code> hay <code>DELETE</code> thực sự chạm vào bao nhiêu cây, vì sao khoá chính ngẫu nhiên làm cả bảng phình ra, và change buffer từng che bớt chi phí đó như thế nào trước khi MySQL 8.4 tắt nó đi.</p>
+<p class="lede">Index làm câu đọc nhanh hơn, nhưng làm câu ghi chậm đi: mỗi index là một cây riêng, và mỗi lần ghi phải sửa thêm cây đó. Bài này trả lời ba câu hỏi. Một <code>INSERT</code>, <code>UPDATE</code> hay <code>DELETE</code> phải sửa bao nhiêu cây? Vì sao chọn khoá chính ngẫu nhiên làm cả bảng to ra? Và change buffer, cơ chế từng giúp giảm chi phí này, giờ còn tác dụng không trên MySQL 8.4?</p>
 <div class="brief">
   <div><h4>Mục tiêu</h4><ul>
-    <li>Liệt kê được những cây nào bị ghi, và ghi kiểu gì, cho một câu <code>INSERT</code>, <code>UPDATE</code> hoặc <code>DELETE</code> trên một bảng cho trước.</li>
-    <li>Giải thích được vì sao key tăng dần cho page gần đầy còn key ngẫu nhiên cho page khoảng hai phần ba, và hệ quả lên kích thước của mọi index.</li>
-    <li>Nói được change buffer làm gì, không áp dụng cho index nào, và mặc định của nó trong 8.4.</li>
-    <li>Ước lượng được thêm một secondary index tốn bao nhiêu dung lượng và bao nhiêu việc ghi, rồi biết đo lại bằng gì.</li>
+    <li>Nhìn một câu <code>INSERT</code>, <code>UPDATE</code> hoặc <code>DELETE</code>, nói được nó phải sửa những index nào và sửa ra sao.</li>
+    <li>Giải thích được vì sao chèn key tăng dần thì page gần đầy, còn chèn key ngẫu nhiên thì page chỉ đầy khoảng hai phần ba, và điều đó làm index to ra bao nhiêu.</li>
+    <li>Nói được change buffer giúp gì, không dùng được cho index nào, và vì sao trên 8.4 nó mặc định bị tắt.</li>
+    <li>Ước lượng được một index mới tốn thêm bao nhiêu dung lượng và bao nhiêu việc ghi, và biết đo lại bằng công cụ nào.</li>
   </ul></div>
   <div><h4>Cần biết trước</h4><ul>
-    <li><a href="../btree-index-internals/index.html">B+tree index internals</a>: page, leaf, split.</li>
-    <li><a href="../clustered-vs-secondary-index/index.html">Clustered và secondary index</a>: secondary index của InnoDB chứa PK; PK càng dài thì mọi index càng to.</li>
+    <li><a href="../btree-index-internals/index.html">B+tree index internals</a>: page là gì, leaf là gì, page tách đôi khi nào.</li>
+    <li><a href="../clustered-vs-secondary-index/index.html">Clustered và secondary index</a>: mỗi entry của secondary index có chép kèm khoá chính, nên khoá chính càng dài thì mọi index càng to.</li>
   </ul></div>
-  <div><h4>Trạng thái</h4><p>Level 2 (prov.). Viết từ manual MySQL 8.4, chưa có số đo nào của bạn. Hai widget có số (mô phỏng split và máy tính dung lượng) là mô hình, không phải kết quả đo.</p></div>
+  <div><h4>Trạng thái</h4><p>Level 2 (prov.). Nội dung lấy từ manual MySQL 8.4; bạn chưa đo gì. Hai widget có con số (mô phỏng tách page và máy tính dung lượng) chỉ là mô hình để hình dung, không phải kết quả đo.</p></div>
 </div>
 <details class="mobile-toc"><summary>Mục lục</summary><ol><li><a href="#s1">Bản chất vấn đề</a></li><li><a href="#s2">Cơ chế hoạt động</a></li><li><a href="#s3">Vì sao thiết kế như vậy</a></li><li><a href="#s4">Ví dụ</a></li><li><a href="#s5">Thí nghiệm</a></li><li><a href="#s6">Ảnh hưởng khi chạy production</a></li><li><a href="#s7">Hiểu lầm thường gặp</a></li><li><a href="#s8">Câu hỏi ôn tập</a></li><li><a href="#s9">Câu hỏi còn mở</a></li><li><a href="#s10">Tài liệu tham khảo</a></li></ol></details>
 </div>
@@ -224,9 +224,22 @@ details.answer summary{font-weight:500;color:var(--struct)}
 <section id="s1">
 <header><span class="num">01</span><h2>Bản chất vấn đề</h2></header>
 <div class="prose">
-<p>Bảng <code>orders</code> trong lab có PRIMARY và 4 secondary index. Một <code>INSERT</code> không phải là "ghi một row". Nó là 5 lần chèn vào 5 cây B+tree khác nhau, mỗi lần phải tìm đúng leaf page, đưa page đó vào buffer pool nếu chưa có, sửa nó, và sinh redo cho nó. Thêm index thứ 6 thì mọi <code>INSERT</code> sau đó thành 6 lần chèn.</p>
-<p>Giống một thư viện giữ một kệ sách chính xếp theo mã sách, cộng thêm mấy bộ thẻ mục lục: theo tác giả, theo năm, theo chủ đề. Thêm một cuốn sách là phải cắm thêm một thẻ vào từng bộ, đúng vị trí theo thứ tự của bộ đó. Bộ thẻ theo năm thì cắm vào cuối, nhẹ nhàng. Bộ thẻ theo tác giả thì cắm vào giữa, có khi phải dồn cả ngăn.</p>
-<p>Chi phí đó không đều. Nó phụ thuộc vào câu lệnh (<code>UPDATE</code> chỉ chạm những index chứa cột bị đổi), vào thứ tự của key (cuối cây hay giữa cây), và vào việc leaf page cần sửa đã nằm trong buffer pool hay phải đọc từ disk. Chọn một câu lệnh và một bộ index dưới đây để xem cây nào bị ghi.</p>
+<p>Bảng <code>orders</code> trong lab có PRIMARY và 4 secondary index. Mỗi index là một cây B+tree riêng, nên một <code>INSERT</code> phải ghi vào 5 chỗ chứ không phải 1. Với mỗi cây, InnoDB làm bốn việc:</p>
+<ol class="list">
+<li>Tìm leaf page, tức page ở tầng dưới cùng của cây, nơi entry mới phải nằm.</li>
+<li>Nếu page đó chưa có trong buffer pool (vùng RAM InnoDB giữ page), đọc nó lên từ disk.</li>
+<li>Sửa page trong RAM.</li>
+<li>Ghi lại thay đổi vào redo log, để làm lại được nếu server sập.</li>
+</ol>
+<p>Thêm index thứ 6 thì từ đó mọi <code>INSERT</code> phải làm bốn việc này 6 lần.</p>
+<p>Hãy hình dung một thư viện. Sách xếp trên kệ theo mã sách, và thư viện còn giữ mấy hộp thẻ tra cứu: theo tác giả, theo năm, theo chủ đề. Mỗi lần nhập một cuốn mới, thủ thư phải cắm thêm một thẻ vào từng hộp, đúng chỗ theo thứ tự của hộp đó. Hộp theo năm thì chỉ việc cắm vào cuối. Hộp theo tác giả thì phải chen vào giữa, có khi phải dồn cả ngăn cho đủ chỗ.</p>
+<p>Vì vậy chi phí ghi không cố định. Nó phụ thuộc vào ba thứ:</p>
+<ul>
+<li><strong>Loại câu lệnh.</strong> <code>UPDATE</code> chỉ phải sửa những index có chứa cột bị đổi.</li>
+<li><strong>Thứ tự của key.</strong> Chèn vào cuối cây rẻ hơn chèn vào giữa.</li>
+<li><strong>Page đã có trong RAM chưa.</strong> Chưa có thì phải đợi đọc từ disk.</li>
+</ul>
+<p>Chọn một câu lệnh và số index dưới đây để xem câu đó phải sửa những cây nào.</p>
 </div>
 
 <div class="frame" id="touch">
@@ -255,15 +268,15 @@ details.answer summary{font-weight:500;color:var(--struct)}
       <div class="stat"><span>Cây bị ghi</span><b id="sTrees">0</b></div>
       <div class="stat"><span>Entry chèn mới</span><b id="sIns">0</b></div>
       <div class="stat"><span>Entry đánh dấu xoá</span><b id="sDel">0</b></div>
-      <div class="stat"><span>Kiểm tra trùng (phải đọc page)</span><b id="sUniq">0</b></div>
+      <div class="stat"><span>Lần kiểm tra trùng (phải đọc page)</span><b id="sUniq">0</b></div>
     </div>
     <div class="desc" aria-live="polite" id="tDesc"></div>
     <div class="legend">
-      <span><i class="lg-hot"></i>chèn entry mới hoặc sửa tại chỗ</span>
-      <span><i class="lg-miss"></i>đánh dấu xoá entry cũ (purge xoá sau)</span>
-      <span><i class="lg-dim"></i>không chạm</span>
+      <span><i class="lg-hot"></i>chèn entry mới, hoặc sửa ngay tại chỗ</span>
+      <span><i class="lg-miss"></i>đánh dấu xoá entry cũ (xoá thật sau)</span>
+      <span><i class="lg-dim"></i>không bị đụng tới</span>
     </div>
-    <p class="fine">Mỗi WHERE dưới đây là <code>WHERE id = 1001</code>, tức đã tìm row qua PRIMARY. Bộ 8 index là bộ 5 index cộng thêm ba index thường thấy trên bảng đơn hàng. Đếm theo cơ chế mô tả trong manual 8.4, không phải số đo.</p>
+    <p class="fine">Các câu UPDATE và DELETE đều tìm row bằng <code>WHERE id = 1001</code>. Bộ 8 index gồm bộ 5 index cộng thêm ba index hay gặp trên bảng đơn hàng. Con số đếm theo cơ chế trong manual 8.4, không phải số đo.</p>
   </div>
 </div>
 </section>
@@ -273,32 +286,35 @@ details.answer summary{font-weight:500;color:var(--struct)}
 <header><span class="num">02</span><h2>Cơ chế hoạt động</h2></header>
 
 <div class="prose">
-<h3>Mỗi index là một cây riêng, và secondary index không bao giờ sửa tại chỗ</h3>
-<p>PRIMARY chứa cả row. Mỗi secondary index chứa <code>(cột của index, PK)</code>, sort theo đúng thứ tự đó. Hệ quả cho từng loại câu lệnh:</p>
+<h3>Mỗi loại câu lệnh sửa những cây nào</h3>
+<p>Ý chính: <code>INSERT</code> và <code>DELETE</code> sửa mọi cây; <code>UPDATE</code> chỉ sửa cây có chứa cột bị đổi, nhưng sửa đắt hơn ta nghĩ.</p>
+<p>Nhắc lại cách InnoDB lưu: PRIMARY chứa cả row, xếp theo khoá chính. Mỗi secondary index chứa các entry dạng <code>(giá trị cột, khoá chính)</code>, xếp theo giá trị cột. Từ đó:</p>
 <ul>
-<li><strong>INSERT</strong>: chèn một entry vào mọi cây. Không có ngoại lệ.</li>
-<li><strong>UPDATE cột không nằm trong index nào</strong>: chỉ sửa row trong PRIMARY. Nếu row không dài ra, InnoDB sửa ngay trên page. Không secondary index nào bị chạm.</li>
-<li><strong>UPDATE cột nằm trong một secondary index</strong>: key của entry đổi, nên vị trí của nó trong cây cũng đổi. InnoDB không dời entry; nó <em>đánh dấu xoá</em> entry cũ (delete-mark) và chèn một entry mới. Có ba index chứa <code>user_id</code> thì đổi <code>user_id</code> là ba lần delete-mark cộng ba lần chèn.</li>
-<li><strong>UPDATE khoá chính</strong>: PK là key của PRIMARY và là phần đuôi của mọi secondary entry. Đổi PK là xoá rồi chèn lại row trong PRIMARY, và xoá rồi chèn lại entry trong <em>mọi</em> secondary index.</li>
-<li><strong>DELETE</strong>: đánh dấu xoá row trong PRIMARY và entry trong mọi secondary index. Thread purge xoá thật sau khi không còn transaction nào cần phiên bản cũ.</li>
+<li><strong>INSERT</strong>: thêm một entry vào mọi cây, không có ngoại lệ.</li>
+<li><strong>UPDATE một cột không có index</strong> (ví dụ <code>note</code>): chỉ sửa row trong PRIMARY. Nếu row không dài ra, InnoDB sửa ngay tại chỗ. Không index nào khác bị đụng tới.</li>
+<li><strong>UPDATE một cột có index</strong> (ví dụ <code>status</code>): giá trị đổi thì entry phải sang vị trí khác trong cây, vì cây xếp theo giá trị. InnoDB không dời entry. Nó đánh dấu entry cũ là đã xoá (delete-mark) rồi chèn một entry mới ở đúng chỗ. Ba index có chứa <code>user_id</code> thì đổi <code>user_id</code> là ba lần đánh dấu xoá và ba lần chèn.</li>
+<li><strong>UPDATE khoá chính</strong>: khoá chính nằm trong mọi entry của mọi index. Đổi nó là xoá rồi chèn lại ở tất cả các cây, kể cả những index không liên quan gì tới cột bị đổi.</li>
+<li><strong>DELETE</strong>: đánh dấu xoá ở mọi cây. Việc xoá thật do purge làm sau. Purge là thread nền của InnoDB, chờ tới khi không còn transaction nào cần đọc bản cũ rồi mới dọn.</li>
 </ul>
-<p>Mỗi page bị sửa sinh redo, mỗi row bị sửa sinh một undo record. Trang <a href="../innodb-buffer-pool-redo-undo/index.html">buffer pool, redo và undo</a> giải thích hai loại log đó. Ở đây chỉ cần nhớ: số cây bị ghi gần như tỉ lệ với số page bẩn và lượng redo.</p>
+<p>Điều này quan trọng vì mỗi cây bị sửa là thêm một page phải ghi xuống disk sau này và thêm một đoạn redo log. Nói gọn: số cây bị sửa tỉ lệ gần thẳng với lượng việc ghi. Trang <a href="../innodb-buffer-pool-redo-undo/index.html">buffer pool, redo và undo</a> nói kỹ về hai loại log này.</p>
 </div>
-<div class="note"><strong>Lỗi hay gặp:</strong> nghĩ rằng <code>UPDATE orders SET status = 'shipped'</code> chỉ "sửa một byte" nên rẻ. Nếu <code>status</code> nằm trong 3 index thì câu đó là 1 lần sửa PRIMARY, 3 lần delete-mark và 3 lần chèn, có thể ở 6 leaf page khác nhau. Quy tắc: đếm số index chứa cột bị đổi, không đếm số byte bị đổi.</div>
-<div class="note"><strong>Lỗi hay gặp:</strong> nghĩ rằng unique index chỉ tốn như index thường. Trước khi chèn, InnoDB phải đọc leaf page để chắc chắn key chưa tồn tại, kể cả khi page đó đang nằm trên disk. Một index thường có thể (khi change buffer bật) hoãn việc đọc đó; unique index thì không bao giờ.</div>
+<div class="note"><strong>Lỗi hay gặp:</strong> nghĩ rằng <code>UPDATE orders SET status = 'shipped'</code> rẻ vì chỉ đổi một byte. Nếu <code>status</code> có mặt trong 3 index, câu này phải sửa PRIMARY một lần, rồi đánh dấu xoá 3 entry cũ và chèn 3 entry mới, có thể nằm ở 6 page khác nhau. Quy tắc: đếm số index chứa cột bị đổi, đừng đếm số byte.</div>
+<div class="note"><strong>Lỗi hay gặp:</strong> nghĩ rằng unique index tốn như index thường. Trước mỗi lần chèn, InnoDB phải đọc page ra để kiểm tra giá trị đã tồn tại chưa, kể cả khi phải đọc từ disk. Index thường có thể hoãn việc đọc này (nhờ change buffer, nói ở dưới); unique index thì không bao giờ hoãn được.</div>
 
 <div class="prose">
-<h3>Page split: key tăng dần và key ngẫu nhiên</h3>
-<p>Khi leaf page cần chèn đã đầy, InnoDB tách nó thành hai. Cách tách phụ thuộc vào thứ tự chèn gần đây trên page đó:</p>
+<h3>Tách page: chèn tăng dần và chèn ngẫu nhiên</h3>
+<p>Ý chính: chèn key tăng dần thì page gần như đầy; chèn key ngẫu nhiên thì page chỉ đầy khoảng hai phần ba, nên cùng số row mà index to hơn chừng 40%.</p>
+<p>Khi page cần chèn đã đầy, InnoDB tách nó làm hai (split). Nó chọn chỗ tách dựa vào các lần chèn gần nhất:</p>
 <ul>
-<li>Nếu các lần chèn trước liên tục đi về cùng một phía (mỗi key mới đứng ngay sau key vừa chèn), InnoDB đoán đây là chèn tuần tự. Nó tách ở đúng điểm chèn: page cũ giữ nguyên, page mới chỉ nhận key mới. Page cũ ở lại gần đầy.</li>
-<li>Ngược lại, InnoDB tách ở giữa. Mỗi bên giữ khoảng một nửa. Hai nửa này chỉ đầy lại nếu sau đó có key rơi đúng vào khoảng của chúng.</li>
+<li><strong>Nếu key mới luôn nằm ngay sau key vừa chèn</strong>, InnoDB đoán đây là chèn tăng dần. Nó để nguyên page cũ, và mở page mới chỉ chứa key mới. Page cũ vẫn đầy.</li>
+<li><strong>Nếu không</strong>, InnoDB tách ở giữa, mỗi page giữ một nửa. Hai nửa này chỉ đầy lại khi về sau có key rơi đúng vào khoảng của chúng.</li>
 </ul>
-<p>Manual 8.4 ghi kết quả: chèn theo thứ tự (tăng hoặc giảm) cho page đầy khoảng 15/16, chèn ngẫu nhiên cho page đầy từ 1/2 tới 15/16. 1/16 còn lại là chỗ InnoDB cố tình chừa cho update làm row dài ra. Mô phỏng dưới thu nhỏ page còn 8 key và bỏ phần chừa 1/16, để thấy được hình dạng.</p>
+<p>Manual 8.4 cho con số cụ thể: chèn theo thứ tự thì page đầy khoảng 15/16; chèn ngẫu nhiên thì từ 1/2 tới 15/16. Phần 1/16 còn trống là chỗ InnoDB cố ý chừa ra, để khi update làm row dài thêm thì không phải tách page ngay.</p>
+<p>Mô phỏng dưới thu nhỏ mỗi page còn 8 key và bỏ phần chừa 1/16, để dễ nhìn.</p>
 </div>
 
 <div class="frame" id="split">
-  <div class="ph"><strong>Mô phỏng leaf page khi chèn</strong><span class="meta" id="splitMeta">page chứa tối đa 8 key</span></div>
+  <div class="ph"><strong>Mô phỏng page khi chèn</strong><span class="meta" id="splitMeta">page chứa tối đa 8 key</span></div>
   <div class="bd">
     <div class="controls">
       <button data-mode="seq" aria-pressed="true">Tăng dần (AUTO_INCREMENT)</button>
@@ -314,44 +330,52 @@ details.answer summary{font-weight:500;color:var(--struct)}
     <div class="stats">
       <div class="stat"><span>Key đã chèn</span><b id="spN">0</b></div>
       <div class="stat"><span>Leaf page</span><b id="spP">1</b></div>
-      <div class="stat"><span>Lần split</span><b id="spS">0</b></div>
+      <div class="stat"><span>Số lần tách page</span><b id="spS">0</b></div>
       <div class="stat"><span>Độ đầy trung bình</span><b id="spF">–</b></div>
     </div>
     <div class="log" aria-live="polite" id="spLog"></div>
     <div class="legend">
-      <span><i class="lg-hot"></i>page vừa được chèn</span>
-      <span><i class="lg-miss"></i>page mới sinh ra do split</span>
+      <span><i class="lg-hot"></i>page vừa nhận key</span>
+      <span><i class="lg-miss"></i>page mới sinh ra khi tách</span>
       <span><i class="lg-row"></i>thanh độ đầy</span>
     </div>
-    <p class="fine">Mô hình đơn giản hoá: page 8 key thay vì vài trăm, không chừa 1/16, luật chọn điểm tách rút gọn từ hành vi manual mô tả. Số liệu là của mô phỏng, không phải của InnoDB thật. E8 trong lab đo bản thật.</p>
+    <p class="fine">Đây là mô hình đơn giản: mỗi page 8 key thay vì vài trăm, không chừa 1/16, và luật chọn chỗ tách được rút gọn. Con số là của mô phỏng, không phải của InnoDB. Thí nghiệm E8 trong lab đo bản thật.</p>
   </div>
 </div>
-<p class="prose">Bấm "Chèn 16 key" vài lần ở mỗi chế độ. Tăng dần: mọi page đầy trừ page cuối, mỗi split chỉ chạm page cuối. Ngẫu nhiên: split xảy ra khắp nơi, page dừng ở khoảng 60–75%, và mỗi lần chèn chạm một page khác nhau. UUIDv7 sinh từ nhiều máy chỉ lệch thứ tự trong một khoảng nhỏ ở cuối cây, nên đa phần vẫn hành xử như tăng dần.</p>
-<div class="note"><strong>Lỗi hay gặp:</strong> nghĩ rằng chỉ PRIMARY bị ảnh hưởng bởi thứ tự chèn. Mỗi secondary index có thứ tự riêng. <code>idx_created_at</code> với thời gian hiện tại là gần tăng dần. <code>idx_user_id</code> thì gần như ngẫu nhiên vì user nào đặt hàng cũng được. Bảng có PK tăng dần vẫn có secondary index chèn ngẫu nhiên.</div>
+<p class="prose">Bấm "Chèn 16 key" vài lần ở mỗi chế độ rồi so:</p>
+<ul class="prose">
+<li><strong>Tăng dần:</strong> mọi page đều đầy, trừ page cuối. Lần chèn nào cũng chỉ đụng tới page cuối.</li>
+<li><strong>Ngẫu nhiên:</strong> page bị tách ở khắp nơi và chỉ đầy khoảng 60–75%. Mỗi lần chèn rơi vào một page khác.</li>
+<li><strong>UUIDv7:</strong> nhiều máy cùng sinh ID nên thứ tự hơi lộn xộn, nhưng chỉ trong vùng cuối cây. Kết quả gần giống tăng dần.</li>
+</ul>
+<div class="note"><strong>Lỗi hay gặp:</strong> nghĩ rằng khoá chính tăng dần thì cả bảng được chèn tăng dần. Mỗi index có thứ tự riêng. <code>idx_created_at</code> nhận thời gian hiện tại nên gần như tăng dần. <code>idx_user_id</code> thì gần như ngẫu nhiên, vì user nào cũng có thể đặt hàng lúc nào. Quy tắc: xét thứ tự chèn của từng index, không chỉ khoá chính.</div>
 
 <div class="prose">
-<h3>Page merge</h3>
-<p>Ngược với split. Khi một <code>DELETE</code>, hoặc một <code>UPDATE</code> làm row ngắn đi, khiến page xuống dưới <code>MERGE_THRESHOLD</code> (mặc định 50%), InnoDB thử gộp page đó với page bên cạnh để trả lại một page trống cho tablespace. Đặt được theo bảng hoặc theo index qua <code>COMMENT 'MERGE_THRESHOLD=40'</code>.</p>
-<p>Hai page cùng quanh 50% có thể gộp rồi lại tách ngay sau đó (merge-split). Manual đề xuất hạ ngưỡng nếu đếm được nhiều lần như vậy qua <code>index_page_merge_attempts</code> và <code>index_page_merge_successful</code> trong <code>INNODB_METRICS</code>.</p>
-<p>Page trống được trả về cho tablespace để dùng lại, không trả về cho hệ điều hành. Xoá 60% bảng thì file <code>.ibd</code> vẫn giữ nguyên kích thước cho tới khi rebuild (<code>OPTIMIZE TABLE</code> hoặc <code>ALTER TABLE … FORCE</code>).</p>
+<h3>Gộp page khi xoá</h3>
+<p>Ý chính: xoá row không làm file nhỏ đi; nó chỉ tạo chỗ trống để InnoDB dùng lại.</p>
+<p>Đây là chiều ngược của tách page. Khi <code>DELETE</code> (hoặc <code>UPDATE</code> làm row ngắn lại) khiến một page còn chưa tới một nửa, InnoDB thử gộp nó với page bên cạnh để giải phóng một page. Ngưỡng một nửa này là <code>MERGE_THRESHOLD</code>, mặc định 50%, đổi được cho từng bảng hoặc từng index bằng <code>COMMENT 'MERGE_THRESHOLD=40'</code>.</p>
+<p>Nếu hai page cứ quanh mức 50%, chúng có thể bị gộp rồi lại tách ngay sau đó, lặp đi lặp lại. Manual khuyên đếm việc này bằng hai counter <code>index_page_merge_attempts</code> và <code>index_page_merge_successful</code> trong <code>INNODB_METRICS</code>, và hạ ngưỡng nếu nó xảy ra nhiều.</p>
+<p>Page được giải phóng vẫn nằm trong file của bảng để dùng lại, không được trả cho hệ điều hành. Xoá 60% bảng thì file <code>.ibd</code> vẫn to như cũ. Muốn file nhỏ lại phải dựng lại bảng bằng <code>OPTIMIZE TABLE</code> hoặc <code>ALTER TABLE … FORCE</code>.</p>
 
 <h3>Change buffer</h3>
-<p>Chèn vào secondary index thường rơi vào một leaf page bất kỳ. Nếu page đó không có trong buffer pool, InnoDB phải đọc nó từ disk chỉ để thêm một entry: một random read cho mỗi index, mỗi row. Change buffer né việc đó:</p>
-<ul>
-<li>Thay vì đọc page, InnoDB ghi thao tác ("chèn entry này vào page số X của index Y") vào change buffer. Change buffer nằm trong buffer pool, và được lưu xuống system tablespace.</li>
-<li>Khi về sau có câu đọc cần page X, page được đọc lên như thường, rồi các thao tác đang chờ được áp vào (merge). Main thread cũng merge dần khi server rảnh.</li>
-<li>Chỉ áp dụng cho secondary index không unique. Unique index phải đọc page để kiểm tra trùng, nên không có gì để hoãn. PRIMARY cũng vậy.</li>
-<li>Ba loại thao tác được hoãn: chèn, delete-mark và purge. <code>innodb_change_buffering</code> chọn loại nào; <code>innodb_change_buffer_max_size</code> (mặc định 25, tối đa 50) là phần trăm buffer pool được dùng.</li>
-</ul>
-<p><strong>MySQL 8.4 đổi mặc định của <code>innodb_change_buffering</code> từ <code>all</code> thành <code>none</code></strong>, cùng đợt với tắt adaptive hash index. Trên 8.4 với cấu hình mặc định, mọi lần chèn vào secondary index đều đọc leaf page ngay nếu nó chưa có trong buffer pool.</p>
+<p>Ý chính: change buffer cho phép "ghi chú lại để sửa sau" thay vì đọc page từ disk ngay. Trên MySQL 8.4 nó mặc định đã bị tắt.</p>
+<p>Vấn đề nó giải quyết: entry mới của một secondary index thường rơi vào một page bất kỳ. Nếu page đó không có trong RAM, InnoDB phải đọc nó từ disk chỉ để thêm vài byte. Mỗi row, mỗi index, một lần đọc disk.</p>
+<p>Change buffer tránh việc đó như sau:</p>
+<ol class="list">
+<li>Thay vì đọc page, InnoDB ghi một dòng ghi chú kiểu "chèn entry này vào page số X của index Y". Ghi chú nằm trong RAM, và được lưu cả xuống disk để không mất khi sập.</li>
+<li>Về sau, khi có câu đọc cần đúng page X, InnoDB đọc page lên như thường, rồi áp các ghi chú đang chờ vào (gọi là merge).</li>
+<li>Lúc server rảnh, thread nền cũng merge dần các ghi chú.</li>
+</ol>
+<p>Change buffer chỉ dùng được cho secondary index <em>không unique</em>. Unique index và PRIMARY phải đọc page để kiểm tra trùng, nên không hoãn được. Hai biến điều khiển nó: <code>innodb_change_buffering</code> chọn loại thao tác nào được hoãn, <code>innodb_change_buffer_max_size</code> (mặc định 25, tối đa 50) là phần trăm RAM của buffer pool nó được dùng.</p>
+<p><strong>Từ MySQL 8.4, <code>innodb_change_buffering</code> mặc định là <code>none</code></strong> (trước đó là <code>all</code>). Nghĩa là với cấu hình mặc định, mỗi lần chèn vào secondary index mà page chưa có trong RAM, InnoDB sẽ đọc page từ disk ngay.</p>
 </div>
 
 <div class="frame" id="cbuf"></div>
-<div class="senior"><h4>Góc nhìn senior: change buffer chỉ dời chi phí, không xoá nó</h4><p>Page vẫn phải được đọc lên lúc merge. Change buffer có lợi khi nhiều thao tác dồn vào cùng một page trước khi page đó được đọc (gộp N lần đọc thành 1), hoặc khi việc đọc dời được sang lúc rảnh. Nó không có lợi khi page sẽ được đọc ngay sau khi ghi, và nó làm khởi động lại, slow shutdown và crash recovery lâu hơn vì còn việc merge tồn đọng. Với SSD, một random read rẻ hơn nhiều so với thời đĩa quay, nên 8.4 coi phần lợi không còn đáng phần rủi ro.</p></div>
+<div class="senior"><h4>Góc nhìn senior: change buffer chỉ dời chi phí sang lúc khác</h4><p>Page vẫn phải được đọc lên lúc merge, chỉ là muộn hơn. Change buffer có lợi trong hai trường hợp: nhiều ghi chú dồn vào cùng một page trước khi page được đọc (nhiều lần đọc gộp thành một), hoặc việc đọc được dời sang lúc server rảnh. Nó không có lợi nếu page sẽ bị đọc ngay sau đó. Nó còn làm khởi động lại và khôi phục sau sự cố lâu hơn, vì phải merge nốt các ghi chú tồn đọng. Trên SSD, đọc ngẫu nhiên rẻ hơn rất nhiều so với thời ổ cứng quay, nên MySQL 8.4 cho rằng cái lợi không còn đáng cái rủi ro.</p></div>
 
 <div class="prose">
-<h3>Khoá chính: tăng dần, UUIDv4 và UUIDv7</h3>
-<p>Khoá chính quyết định hai thứ cùng lúc: thứ tự chèn vào PRIMARY, và số byte được chép vào mọi secondary entry.</p>
+<h3>Chọn khoá chính: tăng dần, UUIDv4 hay UUIDv7</h3>
+<p>Ý chính: khoá chính ảnh hưởng tới mọi index, không chỉ PRIMARY. Nó quyết định hai thứ: thứ tự chèn vào PRIMARY (tăng dần hay ngẫu nhiên), và số byte bị chép thêm vào từng entry của mọi secondary index.</p>
 </div>
 <div class="tablewrap"><table>
 <thead><tr><th>Khoá chính</th><th>Byte trong mỗi secondary entry</th><th>Thứ tự chèn vào PRIMARY</th><th>Hệ quả</th></tr></thead>
@@ -361,7 +385,7 @@ details.answer summary{font-weight:500;color:var(--struct)}
 <tr><td>UUIDv4 trong <code>BINARY(16)</code></td><td>16</td><td>Ngẫu nhiên</td><td>Nhỏ hơn <code>CHAR(36)</code> nhiều, nhưng vẫn chèn ngẫu nhiên.</td></tr>
 <tr><td>UUIDv7 trong <code>BINARY(16)</code></td><td>16</td><td>Gần tăng dần (48 bit đầu là mili giây)</td><td>Hành xử gần như auto-increment ở PRIMARY, sinh được ở app. Lệch thứ tự nhỏ khi nhiều máy cùng sinh.</td></tr>
 </tbody></table></div>
-<p class="prose">MySQL 8.4 không có hàm sinh UUIDv7. <code>UUID()</code> sinh UUIDv1; <code>UUID_TO_BIN(UUID(), 1)</code> đảo phần thời gian lên đầu để có thứ tự gần tăng dần. UUIDv7 thường được sinh ở ứng dụng và lưu bằng <code>BINARY(16)</code>.</p>
+<p class="prose">MySQL 8.4 không có hàm sinh UUIDv7. Hàm <code>UUID()</code> sinh UUIDv1, và <code>UUID_TO_BIN(UUID(), 1)</code> đưa phần thời gian lên đầu để giá trị gần như tăng dần. Thường thì ứng dụng tự sinh UUIDv7 rồi lưu vào cột <code>BINARY(16)</code>.</p>
 
 <div class="frame" id="sizeCalc">
   <div class="ph"><strong>Ước lượng dung lượng theo khoá chính và số index</strong><span class="meta">mô hình</span></div>
@@ -377,7 +401,7 @@ details.answer summary{font-weight:500;color:var(--struct)}
       <label>Số secondary index<select id="cSet"><option value="0">0</option><option value="2">2</option><option value="5" selected>5</option><option value="8">8</option></select></label>
     </div>
     <div class="tablewrap"><table class="sizes"><thead><tr><th>Cây</th><th class="num">Byte / entry</th><th class="num">Độ đầy</th><th class="num">Ước lượng</th></tr></thead><tbody id="cBody"></tbody></table></div>
-    <p class="fine">Giả định: page 16KB, khoảng 15.000 byte dùng được cho record; header record 5 byte và khoảng 2 byte page directory mỗi record; row PRIMARY có thêm 13 byte (<code>DB_TRX_ID</code>, <code>DB_ROLL_PTR</code>) và <code>note</code> trung bình 40 byte; chèn tăng dần cho page đầy 15/16, chèn ngẫu nhiên khoảng 69%. Chỉ tính leaf page. Sai số có thể tới ±30%; E5 và E13 đo bản thật.</p>
+    <p class="fine">Cách tính: mỗi page 16KB dùng được khoảng 15.000 byte. Mỗi entry tốn thêm khoảng 7 byte quản lý. Mỗi row trong PRIMARY tốn thêm 13 byte cho hai cột ẩn, và cột <code>note</code> dài trung bình 40 byte. Index chèn tăng dần đầy 15/16, chèn ngẫu nhiên đầy khoảng 69%. Chỉ tính leaf page. Có thể lệch tới ±30%; thí nghiệm E5 và E13 đo bản thật.</p>
   </div>
 </div>
 </section>
@@ -386,10 +410,10 @@ details.answer summary{font-weight:500;color:var(--struct)}
 <section id="s3">
 <header><span class="num">03</span><h2>Vì sao thiết kế như vậy</h2></header>
 <div class="prose">
-<p><strong>Index là một bản sao đã sort.</strong> Giữ một bản sao luôn đúng thứ tự thì mỗi lần ghi phải đặt entry vào đúng chỗ ngay lúc đó. Đó là cái giá để câu đọc được seek. Không có cách nào có index mà không trả chi phí ghi; chỉ có cách dời nó đi (change buffer, LSM) hoặc gom nó lại.</p>
-<p><strong>Secondary index không sửa tại chỗ</strong> vì vị trí của entry do key quyết định. Key đổi thì vị trí đổi. Delete-mark thay vì xoá ngay còn có lý do thứ hai: transaction khác có thể đang đọc phiên bản cũ qua MVCC (xem <a href="../mvcc-read-view/index.html">MVCC và read view</a>), nên entry cũ phải còn đó cho tới khi purge chắc chắn không ai cần.</p>
-<p><strong>Chừa 1/16 page</strong> để update làm row dài ra không phải tách page ngay. <strong>Tách ở điểm chèn khi thấy chèn tuần tự</strong> để workload auto-increment không để lại một loạt page nửa đầy phía sau.</p>
-<p><strong>Change buffer</strong> ra đời khi random I/O trên đĩa quay rất đắt và secondary index thường lớn hơn buffer pool. Trên SSD, random read rẻ đi cả trăm lần; trong khi change buffer vẫn có chi phí riêng: chiếm buffer pool, merge tồn đọng sau khi restart, và độ phức tạp trong code. 8.4 đổi mặc định sang <code>none</code> để phản ánh điều đó.</p>
+<p><strong>Index là một bản sao dữ liệu luôn được xếp sẵn.</strong> Để câu đọc nhảy thẳng tới đúng chỗ, bản sao phải luôn đúng thứ tự, nên mỗi lần ghi phải đặt entry vào đúng vị trí ngay lúc đó. Không có index nào miễn phí khi ghi. Các thiết kế chỉ khác nhau ở chỗ trả chi phí lúc nào: ngay (InnoDB), để sau (change buffer), hay gom lại trả một lần (LSM, xem bảng dưới).</p>
+<p><strong>Vì sao đánh dấu xoá thay vì xoá ngay?</strong> Lý do thứ nhất: vị trí entry do giá trị quyết định, giá trị đổi thì phải sang chỗ khác. Lý do thứ hai: transaction khác có thể vẫn đang đọc bản cũ (xem <a href="../mvcc-read-view/index.html">MVCC và read view</a>), nên entry cũ phải còn đó cho tới khi purge chắc chắn không ai cần nữa.</p>
+<p><strong>Vì sao chừa 1/16 page?</strong> Để khi update làm row dài thêm, InnoDB không phải tách page ngay. <strong>Vì sao tách ở điểm chèn khi thấy chèn tăng dần?</strong> Để bảng dùng AUTO_INCREMENT không để lại phía sau cả dãy page chỉ đầy một nửa.</p>
+<p><strong>Vì sao 8.4 tắt change buffer?</strong> Nó ra đời thời ổ cứng quay, khi một lần đọc ngẫu nhiên rất đắt. Trên SSD, lần đọc đó rẻ hơn cả trăm lần, trong khi change buffer vẫn tốn RAM, làm khởi động lại chậm hơn và làm code phức tạp hơn.</p>
 </div>
 <div class="tablewrap"><table>
 <thead><tr><th>Cách lưu</th><th>Khi ghi</th><th>Khi đọc</th><th>Ví dụ</th></tr></thead>
@@ -398,7 +422,7 @@ details.answer summary{font-weight:500;color:var(--struct)}
 <tr><td>Heap + index trỏ TID (PostgreSQL)</td><td>Row mới chèn vào heap ở bất kỳ page còn chỗ; mọi index được thêm entry khi row có TID mới, trừ khi HOT áp dụng được</td><td>Index rồi heap</td><td>PostgreSQL</td></tr>
 <tr><td>LSM tree</td><td>Ghi tuần tự vào memtable rồi flush thành file đã sort; không đọc trước khi ghi</td><td>Có thể phải xem nhiều file; cần bloom filter và compaction</td><td>RocksDB, MyRocks, Cassandra</td></tr>
 </tbody></table></div>
-<p class="prose">LSM đổi chi phí ghi lấy chi phí đọc và compaction. Không cái nào "nhanh hơn" một cách tuyệt đối; câu hỏi là workload ghi nhiều hơn hay đọc nhiều hơn, và ghi theo thứ tự hay ngẫu nhiên.</p>
+<p class="prose">LSM ghi rất rẻ nhưng đọc đắt hơn và phải chạy compaction (gộp file) liên tục. Không cách nào nhanh hơn trong mọi trường hợp. Câu hỏi đúng là: hệ thống ghi nhiều hay đọc nhiều, và ghi theo thứ tự hay ngẫu nhiên?</p>
 </section>
 
 <!-- 4 -->
@@ -484,18 +508,18 @@ FROM sys.schema_redundant_indexes WHERE table_schema = 'lab';</code></pre>
 <div class="prose">
 <h3>Khi nào thêm index, khi nào không</h3>
 <ul>
-<li>Thêm khi có một câu đọc quan trọng cần nó, chạy thường xuyên, và <code>EXPLAIN</code> cho thấy nó được dùng như mong đợi.</li>
-<li>Cân nhắc kỹ trên bảng ghi nhiều: bảng log, event, bảng đếm. Ở đó mỗi index phục vụ một câu đọc thỉnh thoảng nhưng bị trả giá ở mọi lần ghi.</li>
-<li>Thay vì thêm một index mới, xem có mở rộng được index sẵn có không: <code>(user_id)</code> thành <code>(user_id, created_at)</code> phục vụ cả hai nhóm câu mà chỉ tốn một cây.</li>
-<li>Khoá chính: mặc định chọn <code>BIGINT AUTO_INCREMENT</code>. Cần ID sinh ở app, hoặc không muốn lộ số lượng, thì UUIDv7 trong <code>BINARY(16)</code>. Tránh UUIDv4, đặc biệt dưới dạng <code>CHAR(36)</code>.</li>
+<li>Thêm index khi có một câu đọc quan trọng, chạy thường xuyên, cần đến nó, và <code>EXPLAIN</code> xác nhận index thật sự được dùng.</li>
+<li>Cẩn thận với bảng ghi nhiều như bảng log, event, bộ đếm. Ở đó một index có thể chỉ phục vụ một câu đọc thỉnh thoảng mới chạy, nhưng lần ghi nào cũng phải trả giá cho nó.</li>
+<li>Trước khi thêm index mới, xem có mở rộng index cũ được không. Đổi <code>(user_id)</code> thành <code>(user_id, created_at)</code> phục vụ được cả hai nhóm câu mà chỉ tốn một cây.</li>
+<li>Khoá chính: mặc định dùng <code>BIGINT AUTO_INCREMENT</code>. Nếu cần ứng dụng tự sinh ID, hoặc không muốn lộ số lượng bản ghi, dùng UUIDv7 lưu trong <code>BINARY(16)</code>. Tránh UUIDv4, nhất là khi lưu dạng chuỗi <code>CHAR(36)</code>.</li>
 </ul>
 
 <h3>Cái giá</h3>
 <ul>
-<li><strong>Ghi:</strong> mỗi index thêm một lần chèn mỗi <code>INSERT</code>, thêm redo, thêm page bẩn phải flush.</li>
-<li><strong>RAM:</strong> leaf page của mọi index cạnh tranh chỗ trong buffer pool. Index chèn ngẫu nhiên cần gần như toàn bộ leaf của nó nằm trong RAM để chèn không phải đọc disk.</li>
-<li><strong>Disk và backup:</strong> mỗi index là thêm dung lượng, thêm thời gian backup và restore, thêm thời gian <code>ALTER TABLE</code>.</li>
-<li><strong>Replica:</strong> replica áp dụng cùng các lần ghi, nên index thừa làm replica dễ trễ hơn.</li>
+<li><strong>Ghi:</strong> mỗi index thêm một lần chèn cho mỗi <code>INSERT</code>, thêm redo log, thêm page phải ghi xuống disk.</li>
+<li><strong>RAM:</strong> page của mọi index tranh nhau chỗ trong buffer pool. Index chèn ngẫu nhiên cần gần như toàn bộ leaf page của nó nằm trong RAM, nếu không mỗi lần chèn phải đọc disk.</li>
+<li><strong>Disk và backup:</strong> mỗi index tốn thêm dung lượng, làm backup, restore và <code>ALTER TABLE</code> lâu hơn.</li>
+<li><strong>Replica:</strong> replica phải làm lại mọi lần ghi, nên index thừa khiến replica dễ bị trễ.</li>
 </ul>
 
 <h3>Nhận ra trên production bằng gì</h3>
@@ -510,7 +534,7 @@ FROM sys.schema_redundant_indexes WHERE table_schema = 'lab';</code></pre>
 <tr><td>Redo ghi nhiều</td><td><code>Innodb_os_log_written</code> theo giây; so trước và sau khi thêm index</td></tr>
 <tr><td>Purge không theo kịp sau DELETE lớn</td><td><code>History list length</code> trong <code>SHOW ENGINE INNODB STATUS</code></td></tr>
 </tbody></table></div>
-<div class="senior"><h4>Góc nhìn senior: đặt giá cho index trước khi thêm</h4><p>Một đề xuất index tốt nói được ba con số: câu đọc nào nhanh hơn bao nhiêu (từ <code>EXPLAIN ANALYZE</code>), index tốn bao nhiêu dung lượng (ước từ số row và kích thước entry), và bảng nhận bao nhiêu lần ghi mỗi giây ở giờ cao điểm. Không có con số thứ ba thì chưa biết index đó có đáng không.</p></div>
+<div class="senior"><h4>Góc nhìn senior: biết giá của index trước khi thêm</h4><p>Một đề xuất thêm index tốt nêu được ba con số. Một: câu đọc nào nhanh hơn, nhanh hơn bao nhiêu (đo bằng <code>EXPLAIN ANALYZE</code>). Hai: index tốn bao nhiêu dung lượng (ước từ số row và kích thước entry). Ba: bảng nhận bao nhiêu lần ghi mỗi giây lúc cao điểm. Thiếu con số thứ ba thì chưa biết index đó có đáng không.</p></div>
 <div class="prose">
 <h3>Checklist khi review một migration thêm index hoặc đổi khoá chính</h3>
 <ul>
@@ -529,12 +553,12 @@ FROM sys.schema_redundant_indexes WHERE table_schema = 'lab';</code></pre>
 <section id="s7">
 <header><span class="num">07</span><h2>Hiểu lầm thường gặp</h2></header>
 <div class="prose"><ul>
-<li><strong>Hiểu lầm:</strong> UPDATE một cột nhỏ thì rẻ. <strong>Vì sao sai:</strong> mỗi index chứa cột đó cần một delete-mark và một lần chèn, ở leaf khác nhau. <strong>Quy tắc:</strong> đếm index chứa cột bị đổi (<a href="#s2">phần 02</a>).</li>
-<li><strong>Hiểu lầm:</strong> PK tăng dần thì bảng không bị split ngẫu nhiên. <strong>Vì sao sai:</strong> mỗi secondary index có thứ tự riêng; <code>idx_user_id</code> vẫn chèn ngẫu nhiên. <strong>Quy tắc:</strong> xét thứ tự chèn của từng cây.</li>
-<li><strong>Hiểu lầm:</strong> UUID trong <code>CHAR(36)</code> chỉ tốn thêm ở PRIMARY. <strong>Vì sao sai:</strong> PK được chép vào mọi secondary entry. <strong>Quy tắc:</strong> PK dài nhân lên theo số index.</li>
-<li><strong>Hiểu lầm:</strong> unique index tốn như index thường. <strong>Vì sao sai:</strong> phải đọc leaf để kiểm tra trùng trước mỗi lần chèn, không hoãn được. <strong>Quy tắc:</strong> chỉ dùng <code>UNIQUE</code> khi thật sự cần ràng buộc.</li>
+<li><strong>Hiểu lầm:</strong> UPDATE một cột nhỏ thì rẻ. <strong>Vì sao sai:</strong> mỗi index chứa cột đó phải đánh dấu xoá entry cũ và chèn entry mới, thường ở hai page khác nhau. <strong>Quy tắc:</strong> đếm số index chứa cột bị đổi (<a href="#s2">phần 02</a>).</li>
+<li><strong>Hiểu lầm:</strong> khoá chính tăng dần thì không có tách page ngẫu nhiên. <strong>Vì sao sai:</strong> mỗi index có thứ tự riêng; <code>idx_user_id</code> vẫn bị chèn ngẫu nhiên. <strong>Quy tắc:</strong> xét thứ tự chèn của từng index.</li>
+<li><strong>Hiểu lầm:</strong> UUID dạng <code>CHAR(36)</code> chỉ làm to PRIMARY. <strong>Vì sao sai:</strong> khoá chính được chép vào từng entry của mọi index. <strong>Quy tắc:</strong> khoá chính dài thì cái giá nhân lên theo số index.</li>
+<li><strong>Hiểu lầm:</strong> unique index tốn như index thường. <strong>Vì sao sai:</strong> trước mỗi lần chèn phải đọc page để kiểm tra trùng, không hoãn được. <strong>Quy tắc:</strong> chỉ dùng <code>UNIQUE</code> khi thật sự cần ràng buộc đó.</li>
 <li><strong>Hiểu lầm:</strong> change buffer đang che chi phí ghi của mình. <strong>Vì sao sai:</strong> trên 8.4 mặc định là <code>none</code>. <strong>Quy tắc:</strong> kiểm tra <code>@@innodb_change_buffering</code> thay vì giả định.</li>
-<li><strong>Hiểu lầm:</strong> xoá nửa bảng thì file nhỏ đi một nửa. <strong>Vì sao sai:</strong> page trống trả về tablespace, không trả về hệ điều hành. <strong>Quy tắc:</strong> cần rebuild để thu nhỏ file.</li>
+<li><strong>Hiểu lầm:</strong> xoá nửa bảng thì file nhỏ đi một nửa. <strong>Vì sao sai:</strong> page trống được giữ lại trong file để dùng lại, không trả cho hệ điều hành. <strong>Quy tắc:</strong> muốn file nhỏ lại thì phải dựng lại bảng.</li>
 </ul></div>
 </section>
 
@@ -544,22 +568,22 @@ FROM sys.schema_redundant_indexes WHERE table_schema = 'lab';</code></pre>
 <p class="prose">Viết ngày 2026-10-19.</p>
 <details><summary><span class="tag">Dự đoán</span>Đếm cây cho ba câu lệnh</summary>
 <p>Bảng có PRIMARY <code>(id)</code> và các index <code>(user_id)</code>, <code>(created_at)</code>, <code>(status)</code>, <code>(user_id, status, created_at)</code>. Mỗi câu sau ghi vào bao nhiêu cây, và mỗi cây là chèn hay delete-mark: <code>INSERT</code> một row; <code>UPDATE … SET status = 'paid' WHERE id = 7</code>; <code>UPDATE … SET note = 'x' WHERE id = 7</code>?</p>
-<details class="answer"><summary>Xem đáp án</summary><p>INSERT: 5 cây, đều là chèn. Đổi <code>status</code>: PRIMARY sửa tại chỗ, <code>(status)</code> và <code>(user_id, status, created_at)</code> mỗi cây một delete-mark và một lần chèn, tổng 3 cây. Đổi <code>note</code>: chỉ PRIMARY, vì <code>note</code> không nằm trong index nào.</p></details></details>
+<details class="answer"><summary>Xem đáp án</summary><p>INSERT: cả 5 cây, mỗi cây một lần chèn. Đổi <code>status</code>: 3 cây. PRIMARY được sửa tại chỗ; <code>(status)</code> và <code>(user_id, status, created_at)</code> mỗi cây đánh dấu xoá entry cũ rồi chèn entry mới. Đổi <code>note</code>: chỉ PRIMARY, vì <code>note</code> không nằm trong index nào.</p></details></details>
 <details><summary><span class="tag">Giải thích</span>Vì sao đổi khoá chính đắt nhất</summary>
 <p>Vì sao <code>UPDATE orders SET id = id + 10000000 WHERE id = 7</code> ghi vào mọi index, kể cả những index không chứa cột nào bị đổi?</p>
-<details class="answer"><summary>Xem đáp án</summary><p>Secondary entry của InnoDB có dạng <code>(cột index, PK)</code>. Đổi PK là đổi key của mọi entry thuộc row đó, nên mọi secondary index phải delete-mark entry cũ và chèn entry mới. PRIMARY cũng phải xoá và chèn lại row ở vị trí mới.</p></details></details>
+<details class="answer"><summary>Xem đáp án</summary><p>Mỗi entry của secondary index có dạng <code>(giá trị cột, khoá chính)</code>. Đổi khoá chính là đổi mọi entry của row đó, nên index nào cũng phải đánh dấu xoá entry cũ và chèn entry mới. PRIMARY cũng phải xoá rồi chèn lại row ở vị trí mới.</p></details></details>
 <details><summary><span class="tag">Dự đoán</span>UUIDv4 và dung lượng của secondary index</summary>
 <p>Đổi khoá chính từ <code>BIGINT</code> sang UUIDv4 <code>CHAR(36)</code> trên bảng có <code>idx_user_id (user_id)</code>. <code>idx_user_id</code> to ra khoảng bao nhiêu lần, và vì hai lý do nào?</p>
-<details class="answer"><summary>Xem đáp án</summary><p>Entry đi từ khoảng 4 + 8 + 7 = 19 byte lên 4 + 36 + 7 = 47 byte, tức khoảng 2,5 lần. Độ đầy không đổi vì <code>idx_user_id</code> vốn đã chèn ngẫu nhiên theo <code>user_id</code>. Tổng cộng khoảng 2,5 lần. PRIMARY thì to ra vì cả hai lý do: PK dài hơn, và page chỉ đầy khoảng 69% thay vì 94%.</p></details></details>
+<details class="answer"><summary>Xem đáp án</summary><p>Khoảng 2,5 lần. Mỗi entry tăng từ khoảng 19 byte (4 + 8 + 7) lên 47 byte (4 + 36 + 7). Độ đầy của page không đổi, vì <code>idx_user_id</code> vốn đã bị chèn ngẫu nhiên. PRIMARY thì to ra vì cả hai lý do: khoá chính dài hơn, và page chỉ còn đầy khoảng 69% thay vì 94%.</p></details></details>
 <details><summary><span class="tag">Giải thích</span>Change buffer</summary>
 <p>Change buffer giúp gì, vì sao nó không dùng được cho unique index, và trên MySQL 8.4 mặc định nó có bật không?</p>
-<details class="answer"><summary>Xem đáp án</summary><p>Nó hoãn thao tác lên leaf page của secondary index khi page không có trong buffer pool, tránh một random read cho mỗi lần chèn; thao tác được áp khi page được đọc lên về sau. Unique index phải đọc page để kiểm tra trùng trước khi chèn, nên không có gì để hoãn. Trên 8.4, <code>innodb_change_buffering</code> mặc định là <code>none</code>.</p></details></details>
+<details class="answer"><summary>Xem đáp án</summary><p>Khi page cần sửa không có trong RAM, change buffer ghi lại thao tác để làm sau thay vì đọc page từ disk ngay. Thao tác được áp vào khi page được đọc lên về sau. Unique index không dùng được vì phải đọc page để kiểm tra trùng trước khi chèn. Trên 8.4, <code>innodb_change_buffering</code> mặc định là <code>none</code>, tức là tắt.</p></details></details>
 <details><summary><span class="tag">Chẩn đoán</span>Insert chậm dần</summary>
 <p>Một bảng event có PK auto-increment và 6 secondary index. Lúc bảng 10 triệu row, insert đạt 8.000 row/giây; lúc 200 triệu row còn 1.500, không có lock wait, CPU thấp. Nghi gì và xác nhận bằng gì?</p>
-<details class="answer"><summary>Xem đáp án</summary><p>Các secondary index chèn ngẫu nhiên đã lớn hơn buffer pool, nên mỗi lần chèn phải đọc leaf từ disk. Xác nhận: <code>Innodb_buffer_pool_reads</code> trên mỗi insert tăng; tổng <code>size</code> của các index trong <code>mysql.innodb_index_stats</code> vượt <code>innodb_buffer_pool_size</code>; I/O wait cao. Hướng xử lý: bỏ index không dùng, gộp index, tăng buffer pool, hoặc partition theo thời gian để phần đang ghi nhỏ lại.</p></details></details>
+<details class="answer"><summary>Xem đáp án</summary><p>Nghi các index chèn ngẫu nhiên đã to hơn buffer pool, nên mỗi lần chèn phải đọc page từ disk. Xác nhận bằng ba dấu hiệu: <code>Innodb_buffer_pool_reads</code> tính trên mỗi insert tăng dần; tổng <code>size</code> của các index trong <code>mysql.innodb_index_stats</code> vượt <code>innodb_buffer_pool_size</code>; I/O wait cao. Cách xử lý: bỏ index không dùng, gộp index, tăng buffer pool, hoặc chia bảng theo thời gian để phần đang được ghi nhỏ lại.</p></details></details>
 <details><summary><span class="tag">Chẩn đoán</span>Xoá xong file vẫn to</summary>
 <p>Sau khi xoá 60% row của một bảng 80GB, disk vẫn báo file <code>.ibd</code> 80GB. Có lỗi gì không?</p>
-<details class="answer"><summary>Xem đáp án</summary><p>Không. Purge xoá thật các row đã delete-mark, page được merge khi xuống dưới <code>MERGE_THRESHOLD</code>, và page trống được giữ lại trong tablespace để dùng lại, không trả cho hệ điều hành. Muốn file nhỏ lại thì rebuild bảng (<code>OPTIMIZE TABLE</code> hoặc <code>ALTER TABLE … FORCE</code>), tốn thời gian và I/O tương đương chép lại bảng.</p></details></details>
+<details class="answer"><summary>Xem đáp án</summary><p>Không có lỗi. Purge xoá thật các row, page vơi được gộp lại, nhưng page trống vẫn nằm trong file để dùng lại chứ không trả cho hệ điều hành. Muốn file nhỏ lại thì dựng lại bảng bằng <code>OPTIMIZE TABLE</code> hoặc <code>ALTER TABLE … FORCE</code>. Việc này tốn thời gian và I/O ngang với chép lại cả bảng.</p></details></details>
 </section>
 
 <!-- 9 -->
@@ -669,7 +693,7 @@ function renderTouch(){
   const trees=[{n:'PRIMARY',cols:['id','(cả row)'],prim:true},...idx];
   let nT=0,nI=0,nD=0,nU=0;
   const html=trees.map(tr=>{
-    let cls='idle',what='không chạm';
+    let cls='idle',what='không đụng tới';
     if(s.kind==='ins'){cls='w';what='chèn entry';nI++;if(tr.prim)nU++;}
     else if(s.kind==='del'){cls='dw';what='đánh dấu xoá';nD++;}
     else if(s.kind==='pk'){cls='dw';what='đánh dấu xoá + chèn';nD++;nI++;if(tr.prim)nU++;}
@@ -683,13 +707,13 @@ function renderTouch(){
   $('touchMeta').textContent=`${trees.length} cây`;
   const k=s.kind;
   let d;
-  if(k==='ins')d=`Mọi cây nhận một entry mới. PRIMARY là unique nên InnoDB phải đọc leaf để kiểm tra id chưa tồn tại; với AUTO_INCREMENT leaf đó là page cuối, luôn nằm trong buffer pool. ${idx.length} secondary index còn lại mỗi cây một lần chèn, phần lớn vào leaf ngẫu nhiên.`;
-  else if(k==='del')d=`Không có gì bị xoá ngay. Row trong PRIMARY và entry trong ${idx.length} secondary index đều được đánh dấu xoá; thread purge xoá thật sau khi không còn read view nào cần phiên bản cũ. Undo log giữ bản cũ của row.`;
-  else if(k==='pk')d=`PK là key của PRIMARY và là phần đuôi của mọi secondary entry. Đổi PK là xoá rồi chèn lại row ở vị trí mới trong PRIMARY, và đánh dấu xoá rồi chèn lại entry trong cả ${idx.length} secondary index, kể cả index không chứa cột nào bị đổi. Kiểm tra trùng trên PRIMARY cho id mới.`;
+  if(k==='ins')d=`Cây nào cũng nhận một entry mới. Với PRIMARY, InnoDB phải đọc page ra để chắc id chưa tồn tại; vì id tăng dần nên đó luôn là page cuối, vốn đã nằm sẵn trong RAM. ${idx.length} secondary index còn lại, mỗi cây một lần chèn, phần lớn rơi vào page ngẫu nhiên.`;
+  else if(k==='del')d=`Chưa có gì bị xoá thật. InnoDB chỉ đánh dấu xoá row trong PRIMARY và entry trong ${idx.length} secondary index. Purge sẽ xoá thật sau, khi không còn transaction nào cần đọc bản cũ. Bản cũ của row được giữ trong undo log.`;
+  else if(k==='pk')d=`Khoá chính nằm trong mọi entry của mọi index. Đổi nó thì PRIMARY phải xoá row rồi chèn lại ở vị trí mới, và cả ${idx.length} secondary index phải đánh dấu xoá entry cũ rồi chèn entry mới, kể cả index không liên quan tới cột bị đổi. InnoDB còn phải kiểm tra id mới chưa tồn tại.`;
   else{
     const hit=idx.filter(x=>x.cols.some(c=>s.cols.includes(c)));
-    d=hit.length?`Row trong PRIMARY được sửa tại chỗ (nếu không dài ra). ${hit.length} index chứa cột bị đổi (${hit.map(x=>x.n).join(', ')}): mỗi cây đánh dấu xoá entry cũ và chèn entry mới ở vị trí của key mới, thường là hai leaf khác nhau. Các index còn lại không bị chạm.`
-      :`Cột bị đổi không nằm trong index nào của bộ này. Chỉ row trong PRIMARY được sửa; không secondary index nào bị chạm. Câu ghi rẻ nhất có thể.`;
+    d=hit.length?`PRIMARY sửa row ngay tại chỗ (nếu row không dài ra). ${hit.length} index có chứa cột bị đổi (${hit.map(x=>x.n).join(', ')}). Ở mỗi index đó, InnoDB đánh dấu xoá entry cũ rồi chèn entry mới ở vị trí mới, thường là hai page khác nhau. Các index còn lại không bị đụng tới.`
+      :`Cột bị đổi không nằm trong index nào. Chỉ có row trong PRIMARY được sửa, không index nào khác bị đụng tới. Đây là kiểu câu ghi rẻ nhất.`;
   }
   $('tDesc').textContent=d;
 }
@@ -725,8 +749,8 @@ function insertOne(){
     // sequential guess: last insert went to the right end and this one lands right after it
     const seqRight=p.last!==null && p.dir>0 && pos===p.keys.length && p.keys[p.keys.length-1]===p.last;
     let right;
-    if(seqRight){right={keys:[],last:null,dir:0};msg+=`: page đầy, chèn tuần tự nên tách ở điểm chèn, page cũ giữ ${p.keys.length} key`;}
-    else{const half=Math.ceil(p.keys.length/2);right={keys:p.keys.slice(half),last:null,dir:0};p.keys=p.keys.slice(0,half);msg+=`: page đầy, tách ở giữa (${p.keys.length} | ${right.keys.length})`;}
+    if(seqRight){right={keys:[],last:null,dir:0};msg+=`: page đầy; chèn tăng dần nên mở page mới, page cũ giữ nguyên ${p.keys.length} key`;}
+    else{const half=Math.ceil(p.keys.length/2);right={keys:p.keys.slice(half),last:null,dir:0};p.keys=p.keys.slice(0,half);msg+=`: page đầy, tách đôi ở giữa (${p.keys.length} | ${right.keys.length})`;}
     sp.pages.splice(pi+1,0,right);sp.splits++;sp.fresh=pi+1;
     if(!right.keys.length||k>=right.keys[0]){pi=pi+1;p=right;}
   }
@@ -768,29 +792,29 @@ spInit();
 
 /* ---------- 02: change buffer stepper ---------- */
 const CB=[
-  {t:'Một INSERT, user_id = 73120',d:'Row mới có id = 5000001. Leaf cuối của PRIMARY đang nằm trong buffer pool vì mọi insert auto-increment đều ghi vào nó. Entry mới của idx_user_id thuộc leaf page 2817, nơi chứa các user_id quanh 73120. Page đó không có trong buffer pool.',
+  {t:'Một INSERT, user_id = 73120',d:'Row mới có id = 5000001. Page cuối của PRIMARY đã có sẵn trong RAM, vì mọi insert với id tăng dần đều ghi vào nó. Còn entry mới của idx_user_id phải vào page 2817, nơi chứa các user_id quanh 73120. Page này không có trong RAM.',
    s:{prim:'hot',leaf:'dim',disk:'dim',cb:'dim',q:''}},
-  {t:'Change buffer tắt: đọc page từ disk',d:'Với innodb_change_buffering = none (mặc định 8.4), InnoDB phải đọc page 2817 vào buffer pool ngay, trong lúc câu INSERT đang chạy. Đây là một random read 16KB chỉ để thêm 19 byte.',
+  {t:'Change buffer tắt: đọc page từ disk',d:'Khi change buffer tắt (mặc định trên 8.4), InnoDB phải đọc page 2817 từ disk ngay, và câu INSERT phải chờ. Đọc cả 16KB chỉ để thêm 19 byte.',
    s:{prim:'hot',leaf:'miss',disk:'miss',cb:'dim',q:'read'}},
-  {t:'Change buffer tắt: sửa page trong buffer pool',d:'Entry (73120, 5000001) được chèn vào page 2817, page thành bẩn, redo được ghi. Page bẩn sẽ được flush xuống disk sau, bởi page cleaner. INSERT xong sau khi đợi lần đọc ở bước trước.',
+  {t:'Change buffer tắt: sửa page trong RAM',d:'InnoDB chèn entry (73120, 5000001) vào page 2817 và ghi redo log. Page đã sửa sẽ được ghi xuống disk sau, bởi một thread nền. Câu INSERT xong, nhưng đã phải chờ lần đọc disk ở bước trước.',
    s:{prim:'hot',leaf:'hot',disk:'dim',cb:'dim',q:''}},
-  {t:'Change buffer bật: ghi thao tác thay vì đọc page',d:'Với innodb_change_buffering = all (mặc định trước 8.4), InnoDB không đọc page 2817. Nó ghi một bản ghi "chèn (73120, 5000001) vào page 2817 của idx_user_id" vào change buffer, vốn nằm trong buffer pool. INSERT xong mà không đợi disk.',
+  {t:'Change buffer bật: ghi chú lại thay vì đọc page',d:'Khi change buffer bật (mặc định trước 8.4), InnoDB không đọc page 2817. Nó chỉ ghi chú "chèn (73120, 5000001) vào page 2817 của idx_user_id" vào change buffer, nằm trong RAM. Câu INSERT xong ngay, không chờ disk.',
    s:{prim:'hot',leaf:'dim',disk:'dim',cb:'ram',q:''}},
-  {t:'Change buffer bật: thêm thao tác dồn vào cùng page',d:'Ba insert khác cũng rơi vào page 2817 trước khi ai đọc nó. Change buffer giữ cả bốn thao tác. Đây là lúc nó có lợi nhất: bốn lần đọc disk sẽ gộp thành một.',
+  {t:'Change buffer bật: nhiều ghi chú cho cùng một page',d:'Ba insert khác cũng cần vào page 2817 trước khi có ai đọc page này. Change buffer giữ cả bốn ghi chú. Đây là lúc nó có lợi nhất: bốn lần đọc disk sẽ gộp lại còn một.',
    s:{prim:'hot',leaf:'dim',disk:'dim',cb:'ram',q:'×4'}},
-  {t:'Merge khi page được đọc',d:'Về sau một câu SELECT … WHERE user_id = 73118 cần page 2817. Page được đọc từ disk như thường, rồi bốn thao tác đang chờ được áp vào nó trước khi trả kết quả. Câu SELECT này trả chi phí merge, không phải câu INSERT.',
+  {t:'Áp ghi chú khi page được đọc',d:'Một lúc sau, câu SELECT … WHERE user_id = 73118 cần page 2817. InnoDB đọc page từ disk như thường, rồi áp bốn ghi chú vào trước khi trả kết quả. Lần này câu SELECT chịu chi phí, không phải các câu INSERT.',
    s:{prim:'dim',leaf:'hot',disk:'miss',cb:'ram',q:'merge'}},
-  {t:'Merge nền và khi tắt server',d:'Main thread của InnoDB cũng merge dần khi server gần rảnh, và slow shutdown merge hết. Merge tồn đọng lớn có thể kéo dài nhiều giờ và tiếp tục sau khi restart. Change buffer không áp dụng cho PRIMARY và unique index, vì chúng phải đọc page để kiểm tra trùng.',
+  {t:'Áp ghi chú lúc rảnh và khi tắt server',d:'Khi server rảnh, thread nền cũng áp dần các ghi chú. Khi tắt server theo kiểu chậm (slow shutdown), InnoDB áp hết. Nếu tồn đọng nhiều, việc này có thể kéo dài hàng giờ, kể cả sau khi khởi động lại. PRIMARY và unique index không dùng change buffer vì phải đọc page để kiểm tra trùng.',
    s:{prim:'dim',leaf:'dim',disk:'dim',cb:'ram',q:'nền'}}
 ];
-stepper('cbuf',{title:'Chèn vào secondary index khi leaf không có trong buffer pool',vb:'0 0 680 230',steps:CB,draw:(s)=>{
+stepper('cbuf',{title:'Chèn vào secondary index khi page chưa có trong RAM',vb:'0 0 680 230',steps:CB,draw:(s)=>{
   const z=s.s;let g='';
-  g+=`<rect class="zone" x="10" y="10" width="420" height="200" rx="8"/>`+T(22,30,'Buffer pool (RAM)','start','tb');
+  g+=`<rect class="zone" x="10" y="10" width="420" height="200" rx="8"/>`+T(22,30,'RAM (buffer pool)','start','tb');
   g+=`<rect class="zone" x="460" y="10" width="210" height="200" rx="8"/>`+T(472,30,'Disk','start','tb');
-  g+=B(30,50,170,54,z.prim,'PRIMARY, leaf cuối','id ≤ 5000001');
+  g+=B(30,50,170,54,z.prim,'PRIMARY, page cuối','id ≤ 5000001');
   g+=B(230,50,180,54,z.leaf==='dim'?'dim':z.leaf,'idx_user_id page 2817',z.leaf==='dim'?'không có trong RAM':'đã ở trong RAM');
-  g+=B(30,134,380,54,z.cb,'Change buffer',z.cb==='ram'?(z.q==='×4'?'4 thao tác chờ cho page 2817':'thao tác chờ cho page 2817'):'trống');
-  g+=B(485,90,160,54,z.disk==='miss'?'miss':'struct','idx_user_id page 2817','trên tablespace');
+  g+=B(30,134,380,54,z.cb,'Change buffer',z.cb==='ram'?(z.q==='×4'?'4 ghi chú chờ cho page 2817':'ghi chú chờ cho page 2817'):'trống');
+  g+=B(485,90,160,54,z.disk==='miss'?'miss':'struct','idx_user_id page 2817','trong file của bảng');
   if(z.q==='read'||z.q==='merge')g+=A('M485 117 L414 82','miss');
   if(z.q==='merge')g+=A('M300 132 L310 108','ram');
   if(z.cb==='ram'&&!z.q)g+=A('M200 104 L230 132','ram');
