@@ -603,7 +603,7 @@ footer.page-foot a{color:var(--text-1)}
         },
         {
           "n": 4,
-          "status": " ",
+          "status": "~",
           "start": "2026-11-09",
           "end": "2026-11-15",
           "title": "Transactions: MVCC and read views, isolation levels with REPEATABLE READ as default, consistent vs locking reads, record/gap/next-key locks, reproducing a lost update and a deadlock by hand. Monthly checkpoint."
@@ -808,6 +808,13 @@ footer.page-foot a{color:var(--text-1)}
     "total": 27
   },
   "sessions": [
+    {
+      "date": "2026-10-19",
+      "title": "MVCC and read views (InnoDB)",
+      "artifact": "../topics/mvcc-read-view/index.html",
+      "planned": true,
+      "feeds": ""
+    },
     {
       "date": "2026-10-19",
       "title": "Buffer pool, redo log and undo log (InnoDB)",
@@ -1071,10 +1078,38 @@ footer.page-foot a{color:var(--text-1)}
         "provisional": true,
         "evidence": "same, §02",
         "date": "2026-10-19"
+      },
+      {
+        "topic": "MVCC: version chain, read view and the visibility rule",
+        "level": 2,
+        "provisional": true,
+        "evidence": "mvcc-read-view §02",
+        "date": "2026-10-19"
+      },
+      {
+        "topic": "Isolation levels in InnoDB (RR snapshot at first read, RC per statement) and which anomalies each allows",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §01–§02",
+        "date": "2026-10-19"
+      },
+      {
+        "topic": "Consistent read vs locking read / DML (current read) and the lost-update trap",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §02, §04",
+        "date": "2026-10-19"
+      },
+      {
+        "topic": "MVCC on secondary indexes (no hidden columns, fallback to PRIMARY)",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §02",
+        "date": "2026-10-19"
       }
     ],
     "levels": {
-      "2": 26,
+      "2": 30,
       "1": 1
     }
   }
