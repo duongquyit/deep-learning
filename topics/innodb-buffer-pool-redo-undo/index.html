@@ -209,19 +209,19 @@ details.answer summary{font-weight:500;color:var(--struct)}
 <main>
 <div class="hero">
 <h1>Buffer pool, redo log và undo log của InnoDB</h1>
-<p class="lede">Một <code>COMMIT</code> trả về sau khoảng một mili giây, trong khi page dữ liệu vừa bị sửa vẫn chỉ nằm trong RAM. Dữ liệu vẫn không mất khi server sập là nhờ ba thứ phối hợp: buffer pool giữ page, redo log ghi lại thay đổi trước, undo log giữ bản cũ. Bài này đi qua từng thứ ở mức đủ để giải thích hành vi, không đi vào định dạng byte.</p>
+<p class="lede">Một <code>COMMIT</code> xong chỉ sau khoảng một mili giây, dù dữ liệu vừa sửa vẫn còn trong RAM, chưa ghi vào file. Vậy nếu server sập ngay sau đó, vì sao dữ liệu không mất? Nhờ ba thứ phối hợp với nhau: buffer pool giữ page trong RAM, redo log ghi lại mọi thay đổi trước tiên, undo log giữ bản cũ để có thể quay lại. Bài này giải thích từng thứ vừa đủ để hiểu hành vi của MySQL, không đi vào định dạng byte.</p>
 <div class="brief">
   <div><h4>Mục tiêu</h4><ul>
-    <li>Kể lại được thứ tự việc InnoDB làm cho một <code>UPDATE</code> rồi <code>COMMIT</code>, và tại thời điểm nào dữ liệu được coi là bền.</li>
-    <li>Giải thích được LRU có midpoint insertion bảo vệ buffer pool khỏi một lần quét bảng như thế nào.</li>
-    <li>Dự đoán được mất bao nhiêu dữ liệu với từng giá trị <code>innodb_flush_log_at_trx_commit</code> khi mysqld sập và khi máy mất điện.</li>
-    <li>Chẩn đoán được undo phình và purge tụt lại do một transaction mở quá lâu.</li>
+    <li>Kể lại được InnoDB làm những gì, theo thứ tự nào, cho một <code>UPDATE</code> rồi <code>COMMIT</code>, và từ lúc nào dữ liệu không thể mất nữa.</li>
+    <li>Giải thích được vì sao một câu quét cả bảng không đẩy hết dữ liệu hay dùng ra khỏi RAM.</li>
+    <li>Dự đoán được mỗi giá trị của <code>innodb_flush_log_at_trx_commit</code> có thể làm mất bao nhiêu dữ liệu, khi mysqld sập và khi máy mất điện.</li>
+    <li>Nhận ra được khi một transaction mở quá lâu làm undo log phình to, và biết tìm nó ở đâu.</li>
   </ul></div>
   <div><h4>Cần biết trước</h4><ul>
-    <li><a href="../btree-index-internals/index.html">B+tree index internals</a>: page 16KB, buffer pool, WAL theo kiểu PostgreSQL.</li>
-    <li><a href="../index-write-cost/index.html">Cái giá khi ghi của index</a>: một câu ghi làm bẩn bao nhiêu page.</li>
+    <li><a href="../btree-index-internals/index.html">B+tree index internals</a>: page 16KB, buffer pool, ý tưởng "ghi log trước" (WAL) theo cách PostgreSQL làm.</li>
+    <li><a href="../index-write-cost/index.html">Cái giá khi ghi của index</a>: một câu ghi phải sửa bao nhiêu page.</li>
   </ul></div>
-  <div><h4>Trạng thái</h4><p>Level 2 (prov.). Viết từ manual MySQL 8.4. Các con số LSN trong trace là ví dụ tự đặt cho nhất quán, không phải output của server. Chưa có số đo nào của bạn.</p></div>
+  <div><h4>Trạng thái</h4><p>Level 2 (prov.). Nội dung lấy từ manual MySQL 8.4; bạn chưa đo gì. Các con số LSN trong ví dụ là số tự đặt cho dễ theo dõi, không phải output thật của server.</p></div>
 </div>
 <details class="mobile-toc"><summary>Mục lục</summary><ol><li><a href="#s1">Bản chất vấn đề</a></li><li><a href="#s2">Cơ chế hoạt động</a></li><li><a href="#s3">Vì sao thiết kế như vậy</a></li><li><a href="#s4">Ví dụ</a></li><li><a href="#s5">Thí nghiệm</a></li><li><a href="#s6">Ảnh hưởng khi chạy production</a></li><li><a href="#s7">Hiểu lầm thường gặp</a></li><li><a href="#s8">Câu hỏi ôn tập</a></li><li><a href="#s9">Câu hỏi còn mở</a></li><li><a href="#s10">Tài liệu tham khảo</a></li></ol></details>
 </div>
@@ -230,21 +230,26 @@ details.answer summary{font-weight:500;color:var(--struct)}
 <section id="s1">
 <header><span class="num">01</span><h2>Bản chất vấn đề</h2></header>
 <div class="prose">
-<p>Ghi một page 16KB về đúng chỗ của nó trên disk là một lần random write. Một <code>UPDATE</code> trên bảng có 4 index có thể làm bẩn 5–6 page ở những chỗ khác nhau. Nếu <code>COMMIT</code> phải đợi ghi hết những page đó, mỗi transaction tốn vài lần random write và server chỉ chịu được vài trăm commit mỗi giây.</p>
-<p>InnoDB tách hai việc ra. Lúc commit, nó chỉ ghi một bản mô tả ngắn của thay đổi ("page 4127, offset 212, đổi 1 byte thành 'shipped'") vào cuối redo log, là một lần ghi tuần tự, rồi fsync. Page thật được ghi về sau, gom nhiều thay đổi lại, bởi thread nền. Nếu server sập giữa chừng, khi khởi động lại InnoDB đọc redo và áp lại những gì page trên disk còn thiếu.</p>
-<p>Giống người giữ sổ cái ở quầy: mỗi giao dịch ghi một dòng vào cuốn nhật ký đóng gáy (redo), tiền trong két (page) thì cuối ngày mới đếm và sắp lại. Mất điện thì đọc nhật ký từ lần đếm két gần nhất là biết két phải có bao nhiêu. Còn nếu một giao dịch bị huỷ giữa chừng, cần biết trước đó két có gì: đó là undo.</p>
-<p>Đi từng bước một câu <code>UPDATE</code> rồi <code>COMMIT</code> dưới đây. Để ý ba con số LSN (log sequence number, vị trí byte trong dòng redo) và lúc nào thì trả OK cho client.</p>
+<p>Một <code>UPDATE</code> trên bảng có 4 index có thể sửa 5–6 page nằm rải rác trong file. Ghi mỗi page về đúng chỗ của nó là một lần ghi ngẫu nhiên lên disk, khá chậm. Nếu <code>COMMIT</code> phải chờ ghi xong hết những page đó, server chỉ chịu được vài trăm commit mỗi giây.</p>
+<p>InnoDB tách thành hai việc:</p>
+<ol class="list">
+<li><strong>Lúc commit:</strong> chỉ ghi một dòng mô tả ngắn của thay đổi (kiểu "page 4127, vị trí 212, đổi thành 'shipped'") vào cuối redo log. Redo log là một file nhật ký chỉ ghi nối thêm, nên việc ghi rất nhanh. Rồi InnoDB gọi fsync, tức là buộc hệ điều hành ghi hẳn xuống thiết bị.</li>
+<li><strong>Về sau:</strong> một thread nền mới ghi page thật vào file dữ liệu, gom nhiều thay đổi lại cho đỡ tốn.</li>
+</ol>
+<p>Nếu server sập giữa hai việc đó, lần khởi động sau InnoDB đọc redo log và làm lại những thay đổi mà file dữ liệu còn thiếu.</p>
+<p>Giống thu ngân ở một cửa hàng. Mỗi giao dịch được ghi ngay một dòng vào sổ nhật ký (redo). Tiền trong két (page) thì cuối ngày mới đếm và sắp lại. Mất điện giữa ngày, chỉ cần lấy lần đếm két gần nhất rồi cộng các dòng nhật ký sau đó là biết két phải có bao nhiêu. Còn nếu một giao dịch bị huỷ giữa chừng, cần biết trước đó két có gì để trả lại như cũ: đó là việc của undo.</p>
+<p>Bấm qua từng bước của một câu <code>UPDATE</code> rồi <code>COMMIT</code> dưới đây. Mỗi byte trong redo log có một số thứ tự, gọi là LSN. Thanh dưới cùng theo dõi ba mốc LSN: mốc checkpoint, mốc đã fsync, và mốc hiện tại. Để ý xem lúc nào client nhận được OK.</p>
 </div>
 
 <div class="frame" id="life"></div>
 <div class="legend">
   <span><i class="lg-miss"></i>đọc hoặc ghi disk</span>
-  <span><i class="lg-hot"></i>page bẩn (đã sửa trong RAM, chưa ghi xuống)</span>
-  <span><i class="lg-ram"></i>page sạch trong buffer pool</span>
-  <span><i class="lg-row"></i>redo đã fsync</span>
+  <span><i class="lg-hot"></i>page đã sửa trong RAM, chưa ghi xuống disk</span>
+  <span><i class="lg-ram"></i>page trong RAM, khớp với disk</span>
+  <span><i class="lg-row"></i>redo đã ghi chắc xuống disk</span>
   <span><i class="lg-key"></i>undo record</span>
 </div>
-<p class="fine">LSN tự đặt cho dễ theo dõi; mỗi khoảng là số byte redo tượng trưng, không phải kích thước thật. Thứ tự các bước theo manual 8.4.</p>
+<p class="fine">Con số LSN là tự đặt cho dễ theo dõi, không phải kích thước thật. Thứ tự các bước theo manual 8.4.</p>
 </section>
 
 <!-- 2 -->
@@ -252,61 +257,63 @@ details.answer summary{font-weight:500;color:var(--struct)}
 <header><span class="num">02</span><h2>Cơ chế hoạt động</h2></header>
 
 <div class="prose">
-<h3>Buffer pool và LRU có midpoint</h3>
-<p>Buffer pool là vùng RAM giữ page của mọi tablespace: data, index, undo. Mọi câu đọc và ghi đều làm việc trên page trong buffer pool; page nào chưa có thì đọc từ disk vào. Khi đầy, InnoDB loại page ít dùng nhất theo một danh sách LRU.</p>
-<p>LRU thuần có một điểm yếu: một câu quét bảng lớn đọc hàng triệu page, mỗi page chỉ dùng một lần, và đẩy hết các page "nóng" ra ngoài. InnoDB chia danh sách làm hai:</p>
+<h3>Buffer pool: giữ page hay dùng trong RAM</h3>
+<p>Ý chính: InnoDB bắt page mới đọc vào phải "thử việc" trước khi được coi là hay dùng, nên một lần quét cả bảng không đẩy được dữ liệu quan trọng ra khỏi RAM.</p>
+<p>Buffer pool là vùng RAM nơi InnoDB giữ page: page dữ liệu, page index, page undo. Mọi câu đọc và ghi đều làm việc trên bản trong RAM. Page nào chưa có thì đọc từ disk lên. Khi RAM đầy, InnoDB bỏ bớt page ít dùng nhất, dựa trên một danh sách xếp theo mức độ dùng gần đây (gọi là danh sách LRU).</p>
+<p>Cách làm đơn giản nhất có một điểm yếu. Một câu quét bảng lớn đọc hàng triệu page, mỗi page chỉ dùng một lần, và đẩy hết các page hay dùng ra ngoài. InnoDB tránh việc này bằng cách chia danh sách làm hai vùng:</p>
 <ul>
-<li><strong>New sublist</strong> (khoảng 5/8 đầu danh sách): page đã chứng minh được là hay dùng.</li>
-<li><strong>Old sublist</strong> (3/8 cuối, <code>innodb_old_blocks_pct = 37</code>): page mới đọc vào được chèn ở <em>đầu old sublist</em> (midpoint), không phải đầu danh sách.</li>
-<li>Page trong old sublist chỉ được đưa lên đầu new sublist ("made young") khi được truy cập lại sau khi đã ở đó ít nhất <code>innodb_old_blocks_time</code> mili giây (mặc định 1000).</li>
+<li><strong>Vùng new</strong> (khoảng 5/8 danh sách): page đã chứng tỏ là hay được dùng.</li>
+<li><strong>Vùng old</strong> (3/8 còn lại, <code>innodb_old_blocks_pct = 37</code>): page mới đọc vào được đặt ở đầu vùng này, không phải đầu cả danh sách.</li>
+<li>Page ở vùng old chỉ được chuyển lên vùng new nếu nó được dùng lại sau khi đã nằm đó ít nhất 1 giây (<code>innodb_old_blocks_time</code>, mặc định 1000 ms). Đó là thời gian "thử việc".</li>
 </ul>
-<p>Một lần quét đọc mỗi page vài lần trong vài micro giây (một lần cho mỗi row trên page), rồi không bao giờ đụng lại. Những lần truy cập đó rơi vào trong 1000ms đầu, nên page quét không được made young và trôi ra khỏi old sublist. New sublist không bị đụng tới.</p>
+<p>Câu quét bảng đọc mỗi page vài lần liên tiếp trong vài micro giây (mỗi row trên page một lần), rồi không bao giờ đọc lại. Mọi lần đọc đó đều rơi vào trong 1 giây đầu, nên page của lần quét không qua được thử việc. Chúng bị loại khỏi vùng old, còn vùng new vẫn nguyên.</p>
 </div>
 
 <div class="frame" id="lruSim">
-  <div class="ph"><strong>Buffer pool 8 page: page nóng và một lần quét bảng</strong><span class="meta" id="lruMeta"></span></div>
+  <div class="ph"><strong>Buffer pool 8 page: page hay dùng và một lần quét bảng</strong><span class="meta" id="lruMeta"></span></div>
   <div class="bd">
     <div class="controls">
       <label style="font-size:14px;color:var(--ink-2)">innodb_old_blocks_time
       <select id="lruTime"><option value="1000" selected>1000 ms (mặc định)</option><option value="0">0 ms</option></select></label>
     </div>
     <div class="controls" style="margin-top:8px">
-      <button id="lruHot" class="primary">Đọc lại page nóng H1–H5</button>
+      <button id="lruHot" class="primary">Đọc lại page hay dùng H1–H5</button>
       <button id="lruScan">Quét bảng: 6 page S1–S6</button>
       <button id="lruReset">Đặt lại</button>
     </div>
-    <div class="lruhd"><span>New sublist (5/8)</span><span>Old sublist (3/8)</span></div>
+    <div class="lruhd"><span>Vùng new (5/8)</span><span>Vùng old (3/8)</span></div>
     <div class="lru" id="lruBox"></div>
     <div class="stats">
       <div class="stat"><span>Đọc từ disk</span><b id="lruReads">0</b></div>
-      <div class="stat"><span>Hit trong buffer pool</span><b id="lruHits">0</b></div>
-      <div class="stat"><span>Page nóng còn trong RAM</span><b id="lruHotLeft">5 / 5</b></div>
+      <div class="stat"><span>Đọc trúng RAM</span><b id="lruHits">0</b></div>
+      <div class="stat"><span>Page hay dùng còn trong RAM</span><b id="lruHotLeft">5 / 5</b></div>
     </div>
     <div class="log" aria-live="polite" id="lruLog"></div>
     <div class="legend">
-      <span><i class="lg-ram"></i>page nóng</span>
+      <span><i class="lg-ram"></i>page hay dùng</span>
       <span><i class="lg-hot"></i>page của lần quét</span>
     </div>
-    <p class="fine">Mô hình rút gọn: 8 frame, mỗi page quét được truy cập 2 lần cách nhau dưới 1 ms, mỗi vòng đọc page nóng cách nhau 2 giây. Buffer pool thật có hàng chục nghìn tới hàng triệu page.</p>
+    <p class="fine">Mô hình rút gọn: buffer pool chỉ có 8 chỗ. Mỗi page của lần quét được đọc 2 lần cách nhau dưới 1 ms. Mỗi lần bấm đọc page hay dùng cách lần trước 2 giây. Buffer pool thật có từ hàng chục nghìn tới hàng triệu page.</p>
   </div>
 </div>
-<p class="prose">Thử: đọc page nóng một lần, rồi quét bảng với 1000 ms và với 0 ms, rồi đọc lại page nóng và so số lần đọc disk.</p>
-<div class="note"><strong>Lỗi hay gặp:</strong> nghĩ rằng buffer pool hit rate 99% là đủ tốt. Với 10.000 lần đọc page mỗi giây, 1% miss là 100 lần đọc disk mỗi giây, và chúng thường rơi đúng vào câu query chậm. Quy tắc: nhìn số lần đọc disk mỗi giây (<code>Innodb_buffer_pool_reads</code>) và nó thuộc về query nào, không nhìn tỉ lệ.</div>
+<p class="prose">Thử thế này: đọc page hay dùng một lần, rồi quét bảng, rồi đọc lại page hay dùng. Làm với 1000 ms, sau đó đặt lại và làm với 0 ms. So số lần đọc disk giữa hai lần.</p>
+<div class="note"><strong>Lỗi hay gặp:</strong> nghĩ rằng tỉ lệ đọc trúng RAM 99% là đủ tốt. Nếu server đọc 10.000 page mỗi giây, 1% trượt nghĩa là 100 lần đọc disk mỗi giây, và chúng thường rơi đúng vào những câu query đang chậm. Quy tắc: nhìn số lần đọc disk mỗi giây (<code>Innodb_buffer_pool_reads</code>) và xem chúng thuộc câu nào, đừng chỉ nhìn tỉ lệ.</div>
 
 <div class="prose">
-<h3>Page bẩn, page cleaner và checkpoint</h3>
-<p>Page bị sửa trong buffer pool là page bẩn. Nó nằm trong flush list, sắp theo LSN của lần sửa <em>đầu tiên</em> chưa được ghi xuống. Thread page cleaner ghi page bẩn xuống disk theo thứ tự đó.</p>
-<p><strong>Checkpoint LSN</strong> là LSN nhỏ nhất mà mọi thay đổi trước nó đã nằm trên page trên disk. Redo phía trước checkpoint không còn cần cho recovery, nên vùng đó được dùng lại. Khoảng cách từ checkpoint tới LSN hiện tại là <strong>checkpoint age</strong>: lượng redo mà recovery sẽ phải đọc lại nếu sập lúc này.</p>
-<p>Redo có dung lượng cố định (<code>innodb_redo_log_capacity</code>, mặc định 100MB, chia thành 32 file trong thư mục <code>#innodb_redo</code>). Checkpoint age không được vượt dung lượng đó. Khi ghi nhanh hơn page cleaner flush, checkpoint age tăng; InnoDB flush ngày càng gắt (adaptive flushing), và sát giới hạn thì các câu ghi phải đợi flush. Đó là những đợt "stall" theo chu kỳ mà người vận hành MySQL hay gặp.</p>
+<h3>Ghi page xuống disk và checkpoint</h3>
+<p>Ý chính: redo log có dung lượng cố định. Nếu ứng dụng ghi nhanh hơn tốc độ InnoDB kịp đưa page xuống disk, redo log sẽ đầy và mọi câu ghi phải chờ.</p>
+<p>Page đã sửa trong RAM mà chưa ghi xuống disk gọi là dirty page. Một thread nền tên page cleaner lần lượt ghi chúng xuống, page nào bị sửa sớm nhất thì ghi trước.</p>
+<p><strong>Checkpoint</strong> là một mốc trên redo log: mọi thay đổi nằm trước mốc này đã có trong file dữ liệu. Phần redo trước checkpoint không còn cần cho việc khôi phục, nên InnoDB ghi đè lên nó. Khoảng cách từ checkpoint tới vị trí ghi hiện tại gọi là <strong>checkpoint age</strong>. Đó cũng là lượng redo phải đọc lại nếu server sập ngay lúc này.</p>
+<p>Dung lượng redo log do <code>innodb_redo_log_capacity</code> quy định, mặc định 100MB, chia thành 32 file trong thư mục <code>#innodb_redo</code>. Checkpoint age không được vượt quá dung lượng này. Khi ứng dụng ghi nhanh hơn page cleaner, checkpoint age tăng dần. InnoDB phản ứng bằng cách ghi page xuống ngày càng gắt. Khi sát giới hạn, các câu ghi phải dừng lại chờ. Đó là những lần "khựng" theo chu kỳ mà người vận hành MySQL hay gặp.</p>
 </div>
 
 <div class="frame" id="ckCalc">
-  <div class="ph"><strong>Redo còn đủ chỗ trong bao lâu</strong><span class="meta">mô hình</span></div>
+  <div class="ph"><strong>Redo log còn đủ chỗ trong bao lâu</strong><span class="meta">mô hình</span></div>
   <div class="bd">
     <div class="calc">
       <label>innodb_redo_log_capacity<select id="kCap"><option value="100">100 MB (mặc định)</option><option value="1024">1 GB</option><option value="4096">4 GB</option><option value="16384">16 GB</option></select></label>
       <label>Redo sinh ra (MB/s)<input type="range" id="kGen" min="1" max="200" value="40"><span id="kGenV"></span></label>
-      <label>Page cleaner kéo checkpoint theo (MB redo/s)<input type="range" id="kFl" min="0" max="200" value="30"><span id="kFlV"></span></label>
+      <label>Page cleaner ghi kịp (MB redo/s)<input type="range" id="kFl" min="0" max="200" value="30"><span id="kFlV"></span></label>
     </div>
     <svg id="kSvg" viewBox="0 0 680 120" role="img" aria-label="Thanh dung lượng redo, checkpoint age theo thời gian"></svg>
     <div class="stats">
@@ -315,20 +322,27 @@ details.answer summary{font-weight:500;color:var(--struct)}
       <div class="stat"><span>Redo phải đọc lại nếu sập ở giới hạn</span><b id="kRec">–</b></div>
     </div>
     <div class="desc" aria-live="polite" id="kDesc"></div>
-    <p class="fine">Mô hình tuyến tính, bỏ qua adaptive flushing (thật ra page cleaner tăng tốc khi age lớn lên). Dùng để cảm nhận độ lớn: dung lượng redo nhỏ thì đợt ghi lớn chạm giới hạn trong vài giây.</p>
+    <p class="fine">Mô hình đơn giản: coi tốc độ page cleaner là cố định, trong khi thật ra nó tăng tốc khi checkpoint age lớn lên. Dùng để cảm nhận độ lớn: redo log nhỏ thì một đợt ghi lớn chạm giới hạn chỉ sau vài giây.</p>
   </div>
 </div>
 
 <div class="prose">
-<h3>Redo log và lúc nào commit là bền</h3>
-<p>Mỗi thay đổi lên page (cả page data, index lẫn undo) sinh redo record vào log buffer trong RAM (<code>innodb_log_buffer_size</code>, 64MB trên 8.4). Ba thời điểm khác nhau:</p>
+<h3>Redo log: từ lúc nào commit không thể mất</h3>
+<p>Ý chính: dữ liệu an toàn trước mất điện chỉ khi redo log đã được fsync. Biến <code>innodb_flush_log_at_trx_commit</code> quyết định việc đó xảy ra trước hay sau khi trả OK cho ứng dụng.</p>
+<p>Mỗi thay đổi trên page đều sinh một dòng redo, ghi tạm vào một vùng đệm trong RAM (log buffer, 64MB trên 8.4). Từ đó, dòng redo đi qua ba mốc:</p>
+<ol class="list">
+<li><strong>write:</strong> chép từ log buffer sang file redo. Thực ra dữ liệu mới nằm trong bộ đệm của hệ điều hành. Nếu chỉ mysqld sập thì không mất, nhưng nếu cả máy mất điện thì mất.</li>
+<li><strong>fsync:</strong> buộc hệ điều hành ghi hẳn xuống thiết bị. Từ đây mất điện cũng không mất.</li>
+<li><strong>Trả OK:</strong> lúc ứng dụng tin rằng dữ liệu đã an toàn.</li>
+</ol>
+<p>Ba giá trị của <code>innodb_flush_log_at_trx_commit</code>:</p>
 <ul>
-<li><strong>write</strong>: chép log buffer vào file redo, tức vào page cache của hệ điều hành. Sống sót nếu mysqld sập, không sống sót nếu máy mất điện.</li>
-<li><strong>fsync</strong>: ép hệ điều hành ghi xuống thiết bị. Sống sót cả khi mất điện.</li>
-<li><strong>trả OK cho client</strong>: thời điểm ứng dụng tin rằng dữ liệu đã an toàn.</li>
+<li><code>1</code> (mặc định): mỗi commit làm cả write và fsync rồi mới trả OK.</li>
+<li><code>2</code>: mỗi commit chỉ write; fsync mỗi giây một lần.</li>
+<li><code>0</code>: cả write và fsync đều chỉ làm mỗi giây một lần.</li>
 </ul>
-<p><code>innodb_flush_log_at_trx_commit</code> quyết định hai việc đầu xảy ra lúc nào so với việc thứ ba. Với <code>1</code> (mặc định), mỗi commit write và fsync trước khi trả OK. Với <code>2</code>, mỗi commit chỉ write; fsync mỗi giây một lần. Với <code>0</code>, cả write và fsync đều làm mỗi giây (<code>innodb_flush_log_at_timeout</code>). Nhiều commit đến cùng lúc được gom vào một lần fsync (group commit), nên giá trị 1 không có nghĩa là mỗi giây chỉ làm được số commit bằng số fsync của disk.</p>
-<p><strong>Luật WAL</strong>: một page bẩn có page LSN = X chỉ được ghi xuống disk sau khi redo đã fsync tới ít nhất X. Nếu không, sau khi sập, disk có thể chứa thay đổi mà redo không biết, và rollback không làm được.</p>
+<p>Khi nhiều commit đến cùng lúc, InnoDB gom chúng vào chung một lần fsync (group commit). Vì vậy giá trị 1 không giới hạn số commit mỗi giây bằng số lần fsync mà disk làm được.</p>
+<p>Có một luật bắt buộc, gọi là luật WAL (ghi log trước): một page chỉ được ghi xuống disk sau khi mọi dòng redo mô tả thay đổi của nó đã được fsync. Nếu làm ngược lại, sau khi sập disk có thể chứa thay đổi mà redo log không hề biết, và InnoDB không còn cách nào gỡ nó ra.</p>
 </div>
 
 <div class="frame" id="dur">
@@ -341,29 +355,32 @@ details.answer summary{font-weight:500;color:var(--struct)}
     </div>
     <div class="verdict" id="durOut"></div>
     <div class="desc" aria-live="polite" id="durDesc"></div>
-    <p class="fine">Theo manual 8.4 (innodb_flush_log_at_trx_commit). "Khoảng 1 giây" là theo <code>innodb_flush_log_at_timeout</code> mặc định; manual nói việc flush mỗi giây không được đảm bảo tuyệt đối do lịch của thread. Có binlog thì còn <code>sync_binlog</code>, xem phần 06.</p>
+    <p class="fine">Theo manual 8.4. "Khoảng 1 giây" là giá trị mặc định của <code>innodb_flush_log_at_timeout</code>; manual lưu ý mốc 1 giây không được đảm bảo tuyệt đối. Nếu bật binlog thì còn phải xét <code>sync_binlog</code>, xem phần 06.</p>
   </div>
 </div>
 
 <div class="prose">
-<h3>Doublewrite buffer</h3>
-<p>Page InnoDB 16KB, nhưng disk và hệ điều hành thường chỉ đảm bảo ghi nguyên vẹn 4KB. Mất điện giữa lúc ghi page có thể để lại một page nửa cũ nửa mới (torn page). Redo không cứu được trường hợp này: redo record mô tả thay đổi so với một page nguyên vẹn, không dựng lại được cả page.</p>
-<p>Vì vậy page cleaner ghi mỗi lô page bẩn hai lần: trước tiên ghi tuần tự vào vùng doublewrite (file <code>#ib_16384_0.dblwr</code> và tương tự), fsync, rồi mới ghi từng page về đúng vị trí. Khi recovery gặp page hỏng checksum, InnoDB lấy bản nguyên vẹn trong doublewrite, rồi mới áp redo. <code>innodb_doublewrite = ON</code> là mặc định; chỉ tắt khi hệ thống lưu trữ đảm bảo ghi nguyên tử 16KB.</p>
+<h3>Doublewrite: chống page bị ghi dở</h3>
+<p>Ý chính: mỗi page được ghi hai lần, để nếu mất điện giữa chừng vẫn còn một bản nguyên vẹn.</p>
+<p>Page của InnoDB rộng 16KB, nhưng disk và hệ điều hành thường chỉ đảm bảo ghi trọn vẹn từng khối 4KB. Mất điện đúng lúc đang ghi một page có thể để lại page nửa cũ nửa mới (torn page). Redo log không sửa được trường hợp này, vì mỗi dòng redo chỉ mô tả một thay đổi nhỏ trên một page còn nguyên vẹn.</p>
+<p>Vì vậy page cleaner ghi mỗi lô page hai lần. Lần đầu ghi liên tiếp vào một file riêng (file doublewrite, ví dụ <code>#ib_16384_0.dblwr</code>) rồi fsync. Lần sau mới ghi từng page về đúng chỗ trong file dữ liệu. Khi khôi phục, nếu gặp page hỏng, InnoDB lấy bản nguyên vẹn từ file doublewrite rồi mới áp redo. <code>innodb_doublewrite = ON</code> là mặc định; chỉ nên tắt khi hệ thống lưu trữ đảm bảo ghi trọn 16KB một lần.</p>
 
-<h3>Undo log</h3>
-<p>Trước khi sửa một row, InnoDB ghi bản cũ của những cột bị sửa vào một undo record, và cho row trỏ tới record đó qua cột ẩn <code>DB_ROLL_PTR</code>. Cột ẩn <code>DB_TRX_ID</code> ghi transaction nào sửa row lần cuối. Undo record của cùng một row nối thành chuỗi, từ phiên bản mới nhất về cũ dần.</p>
+<h3>Undo log: giữ bản cũ của row</h3>
+<p>Ý chính: trước khi sửa một row, InnoDB cất bản cũ vào undo log. Bản cũ đó dùng để rollback, và để các câu đọc khác vẫn thấy dữ liệu cũ khi cần.</p>
+<p>Mỗi row có hai cột ẩn. <code>DB_TRX_ID</code> ghi transaction nào sửa row lần cuối. <code>DB_ROLL_PTR</code> trỏ tới undo record chứa bản ngay trước đó. Undo record đó lại trỏ tới bản trước nữa, nên các bản cũ nối thành một chuỗi, từ mới về cũ. Chuỗi này được dùng vào ba việc:</p>
 <ul>
-<li><strong>Rollback</strong> đi theo chuỗi undo của transaction và áp ngược từng record.</li>
-<li><strong>MVCC</strong> dùng cùng chuỗi đó để dựng lại phiên bản cũ của row cho một read view cũ hơn (trang <a href="../mvcc-read-view/index.html">MVCC và read view</a>).</li>
-<li><strong>Purge</strong> là thread nền xoá undo record khi không còn read view nào cần, và xoá thật các row và entry đã delete-mark. Số transaction đã commit mà purge chưa dọn là <strong>history list length</strong>.</li>
+<li><strong>Rollback:</strong> đi ngược chuỗi của transaction và trả từng row về như cũ.</li>
+<li><strong>Đọc dữ liệu cũ (MVCC):</strong> câu đọc của một transaction khác có thể cần thấy row như lúc trước khi bị sửa. Trang <a href="../mvcc-read-view/index.html">MVCC và read view</a> nói về việc này.</li>
+<li><strong>Dọn dẹp (purge):</strong> purge là thread nền xoá các bản cũ khi không còn ai cần, và xoá thật những row đã đánh dấu xoá. Số transaction đã commit mà purge chưa dọn xong gọi là <strong>history list length</strong>.</li>
 </ul>
-<p>Undo page cũng là page trong buffer pool, cũng được bảo vệ bằng redo. Undo nằm trong undo tablespace riêng (mặc định hai file <code>undo_001</code>, <code>undo_002</code>), được cắt bớt tự động khi vượt <code>innodb_max_undo_log_size</code> nếu <code>innodb_undo_log_truncate</code> bật (mặc định bật).</p>
+<p>Page của undo log cũng nằm trong buffer pool và cũng được redo bảo vệ. Undo log nằm trong file riêng (mặc định hai file <code>undo_001</code> và <code>undo_002</code>). Khi file to quá <code>innodb_max_undo_log_size</code>, InnoDB tự cắt bớt, vì <code>innodb_undo_log_truncate</code> mặc định bật.</p>
 </div>
-<div class="note"><strong>Lỗi hay gặp:</strong> nghĩ rằng một transaction chỉ đọc thì không tốn gì. Một transaction <code>REPEATABLE READ</code> mở rồi để đó (một session quên commit, một job phân tích chạy 3 giờ) giữ read view cũ, nên purge không được xoá bất kỳ undo nào mới hơn read view đó, của mọi bảng. History list length tăng, undo tablespace phình, và câu đọc khác phải đi chuỗi undo dài hơn. Quy tắc: theo dõi transaction lâu nhất, không chỉ transaction đang ghi.</div>
+<div class="note"><strong>Lỗi hay gặp:</strong> nghĩ rằng transaction chỉ đọc thì vô hại. Một transaction mở rồi bỏ đó (session quên commit, job báo cáo chạy 3 giờ) vẫn có thể cần thấy dữ liệu như lúc nó bắt đầu. Vì vậy purge không được xoá bản cũ nào kể từ thời điểm đó, ở mọi bảng. Kết quả: history list length tăng, undo log phình to, và các câu đọc khác phải đi qua chuỗi bản cũ dài hơn. Quy tắc: theo dõi transaction mở lâu nhất, không chỉ transaction đang ghi.</div>
 
 <div class="prose">
-<h3>Crash recovery</h3>
-<p>Ghép mọi thứ lại, khi khởi động sau một lần sập InnoDB làm theo thứ tự dưới. Trong ví dụ, transaction A đã commit, transaction B đang chạy dở và redo của B đã kịp được ghi một phần (log buffer được ghi xuống mỗi giây và mỗi khi transaction khác commit).</p>
+<h3>Khôi phục sau sự cố</h3>
+<p>Ý chính: InnoDB làm lại mọi thứ có trong redo log, kể cả phần của transaction chưa commit, rồi dùng undo để gỡ phần chưa commit ra.</p>
+<p>Ví dụ dưới có hai transaction lúc server sập. A đã commit. B đang chạy dở, và một phần redo của B đã kịp ghi xuống. Điều này xảy ra vì log buffer được ghi xuống mỗi giây, và cả mỗi khi một transaction khác commit.</p>
 </div>
 <div class="frame" id="recov"></div>
 </section>
@@ -372,10 +389,10 @@ details.answer summary{font-weight:500;color:var(--struct)}
 <section id="s3">
 <header><span class="num">03</span><h2>Vì sao thiết kế như vậy</h2></header>
 <div class="prose">
-<p><strong>No-force, steal.</strong> InnoDB không ép page xuống disk lúc commit (no-force), và cho phép ghi page bẩn của transaction chưa commit xuống disk (steal). No-force cần redo để làm lại thay đổi đã commit; steal cần undo để gỡ thay đổi chưa commit. Đây là thiết kế kinh điển của ARIES; đổi lại, commit chỉ tốn một lần ghi tuần tự, và buffer pool không bị kẹt bởi page của transaction dài.</p>
-<p><strong>Redo vật lý theo page, undo logic theo row.</strong> Redo mô tả thay đổi trên page cụ thể, nên áp lại nhanh và không cần hiểu bảng. Undo mô tả bản cũ của row, nên dùng được cho cả rollback lẫn MVCC.</p>
-<p><strong>Midpoint LRU</strong> vì workload OLTP có một tập page nóng nhỏ, và một lần quét (backup logic, báo cáo, <code>ALTER</code>) không được phép xoá sạch tập đó.</p>
-<p><strong>Dung lượng redo cố định</strong> để thời gian recovery có giới hạn: redo dài thì chịu được đợt ghi lớn hơn, nhưng khởi động lại sau sự cố lâu hơn.</p>
+<p><strong>Vì sao cần cả redo lẫn undo?</strong> InnoDB chọn hai điều để chạy nhanh. Thứ nhất, lúc commit nó không bắt ghi page xuống disk; vì vậy cần redo để làm lại những thay đổi đã commit mà chưa kịp ghi. Thứ hai, nó cho phép ghi xuống disk cả page của transaction chưa commit, để RAM không bị chiếm mãi bởi transaction dài; vì vậy cần undo để gỡ những thay đổi đó nếu transaction không commit. Đây là thiết kế kinh điển, gọi là ARIES. Cái được: mỗi commit chỉ tốn một lần ghi nối thêm vào log.</p>
+<p><strong>Vì sao redo theo page, còn undo theo row?</strong> Redo mô tả thay đổi trên một page cụ thể, nên làm lại rất nhanh mà không cần hiểu bảng hay row. Undo giữ bản cũ của cả row, nên dùng được cho cả rollback lẫn việc cho câu đọc khác thấy dữ liệu cũ.</p>
+<p><strong>Vì sao chia vùng new và old?</strong> Hệ thống giao dịch thường có một nhóm nhỏ page được dùng liên tục. Một lần quét (backup, báo cáo, <code>ALTER TABLE</code>) không được phép xoá sạch nhóm đó khỏi RAM.</p>
+<p><strong>Vì sao redo log có dung lượng cố định?</strong> Để thời gian khôi phục có giới hạn. Redo lớn chịu được đợt ghi lớn hơn, nhưng khởi động lại sau sự cố sẽ lâu hơn.</p>
 </div>
 <div class="tablewrap"><table>
 <thead><tr><th></th><th>InnoDB</th><th>PostgreSQL</th></tr></thead>
@@ -456,16 +473,16 @@ WHERE name = 'trx_rseg_history_len';</code></pre>
 <div class="prose">
 <h3>Chọn cấu hình</h3>
 <ul>
-<li><strong>Buffer pool:</strong> đủ chứa tập page nóng (index và data hay dùng). Trên máy chỉ chạy MySQL thường là 50–75% RAM; chừa chỗ cho connection, sort buffer, temp table.</li>
-<li><strong>innodb_flush_log_at_trx_commit = 1</strong> cho dữ liệu không được mất (tiền, đơn hàng). <code>2</code> chỉ khi chấp nhận mất khoảng 1 giây giao dịch nếu máy mất điện, ví dụ bảng log có thể dựng lại. Trên replica thường dùng <code>2</code> vì có thể dựng lại từ primary.</li>
-<li><strong>Có binlog</strong> (replication, point-in-time recovery): cần cả <code>sync_binlog = 1</code>, nếu không binlog và redo có thể lệch nhau sau sự cố, replica nhận transaction mà primary không có.</li>
-<li><strong>Redo capacity:</strong> 100MB mặc định nhỏ với workload ghi nhiều. Đặt sao cho chứa được khoảng một giờ redo ở giờ cao điểm là cách làm phổ biến, cân với thời gian recovery chấp nhận được.</li>
+<li><strong>Buffer pool:</strong> đủ chứa nhóm page hay dùng (index và dữ liệu thường được đọc). Trên máy chỉ chạy MySQL, thường đặt 50–75% RAM, chừa phần còn lại cho connection, sort buffer, bảng tạm.</li>
+<li><strong>innodb_flush_log_at_trx_commit = 1</strong> cho dữ liệu không được phép mất (tiền, đơn hàng). Chỉ dùng <code>2</code> khi chấp nhận mất khoảng 1 giây giao dịch nếu máy mất điện, ví dụ bảng log dựng lại được. Replica thường dùng <code>2</code> vì có thể dựng lại từ primary.</li>
+<li><strong>Nếu bật binlog</strong> (cho replication hoặc khôi phục tới một thời điểm): cần thêm <code>sync_binlog = 1</code>. Nếu không, sau sự cố binlog và redo có thể lệch nhau, và replica có thể nhận transaction mà primary không có.</li>
+<li><strong>Dung lượng redo log:</strong> 100MB mặc định là nhỏ với hệ thống ghi nhiều. Cách làm phổ biến là đặt đủ chứa khoảng một giờ redo lúc cao điểm, rồi cân lại với thời gian khôi phục chấp nhận được.</li>
 </ul>
 <h3>Cái giá</h3>
 <ul>
-<li>Fsync mỗi commit: độ trễ commit bằng độ trễ fsync của disk (micro giây trên NVMe có cache có pin, mili giây trên cloud disk).</li>
-<li>Doublewrite: gấp đôi số byte ghi page, nhưng phần thêm là ghi tuần tự.</li>
-<li>Undo: transaction dài làm phình undo và làm chậm mọi câu đọc phải đi chuỗi phiên bản.</li>
+<li>Fsync mỗi commit: mỗi commit chậm bằng một lần fsync của disk. Đó là vài micro giây trên ổ NVMe có cache được pin bảo vệ, nhưng có thể là vài mili giây trên disk của cloud.</li>
+<li>Doublewrite: lượng ghi page gấp đôi, nhưng phần ghi thêm là ghi liên tiếp nên rẻ.</li>
+<li>Undo: transaction mở lâu làm undo log phình to và làm chậm mọi câu đọc phải đi qua chuỗi bản cũ.</li>
 </ul>
 <h3>Nhận ra trên production bằng gì</h3>
 </div>
@@ -478,7 +495,7 @@ WHERE name = 'trx_rseg_history_len';</code></pre>
 <tr><td>Undo phình, câu đọc chậm dần</td><td><code>trx_rseg_history_len</code>; transaction cũ nhất trong <code>INNODB_TRX</code></td></tr>
 <tr><td>Câu phải đợi page trống</td><td><code>Innodb_buffer_pool_wait_free</code> khác 0</td></tr>
 </tbody></table></div>
-<div class="senior"><h4>Góc nhìn senior: "bền" là một hợp đồng giữa ba lớp</h4><p>Ứng dụng nhận OK, MySQL tin redo đã fsync, disk báo đã ghi. Hợp đồng gãy ở lớp nào thì dữ liệu mất ở lớp đó: <code>innodb_flush_log_at_trx_commit = 2</code>, <code>sync_binlog = 0</code>, hoặc một disk ảo báo fsync xong khi dữ liệu mới nằm trong cache không có pin. Khi review một hệ thống tài chính, hỏi đủ cả ba.</p></div>
+<div class="senior"><h4>Góc nhìn senior: "không mất dữ liệu" là lời hứa của ba lớp</h4><p>Ứng dụng nhận OK vì tin MySQL. MySQL trả OK vì tin redo đã fsync. Fsync xong vì disk báo đã ghi. Lớp nào nói sai thì dữ liệu mất ở lớp đó: <code>innodb_flush_log_at_trx_commit = 2</code>, <code>sync_binlog = 0</code>, hoặc một disk ảo báo đã ghi trong khi dữ liệu mới nằm trong cache không có pin. Khi review một hệ thống tài chính, hỏi đủ cả ba lớp.</p></div>
 <div class="prose">
 <h3>Checklist khi review cấu hình hoặc một job dài</h3>
 <ul>
@@ -495,12 +512,12 @@ WHERE name = 'trx_rseg_history_len';</code></pre>
 <section id="s7">
 <header><span class="num">07</span><h2>Hiểu lầm thường gặp</h2></header>
 <div class="prose"><ul>
-<li><strong>Hiểu lầm:</strong> COMMIT ghi dữ liệu xuống file bảng. <strong>Vì sao sai:</strong> commit chỉ fsync redo; page được ghi sau bởi page cleaner. <strong>Quy tắc:</strong> độ bền đến từ redo, không từ file <code>.ibd</code>.</li>
-<li><strong>Hiểu lầm:</strong> hit rate 99% là buffer pool đủ lớn. <strong>Vì sao sai:</strong> 1% của một lượng lớn vẫn là nhiều lần đọc disk mỗi giây. <strong>Quy tắc:</strong> nhìn số đọc disk tuyệt đối (<a href="#s2">phần 02</a>).</li>
-<li><strong>Hiểu lầm:</strong> quét bảng lớn sẽ xoá sạch cache. <strong>Vì sao sai:</strong> midpoint insertion giữ page quét ở old sublist khi <code>innodb_old_blocks_time</code> khác 0. <strong>Quy tắc:</strong> page quét chỉ chiếm phần old; kiểm tra bằng "made young".</li>
-<li><strong>Hiểu lầm:</strong> <code>innodb_flush_log_at_trx_commit = 2</code> mất dữ liệu cả khi mysqld sập. <strong>Vì sao sai:</strong> redo đã nằm trong page cache của hệ điều hành; chỉ mất khi cả hệ điều hành hoặc máy sập. <strong>Quy tắc:</strong> phân biệt sập process và sập máy.</li>
-<li><strong>Hiểu lầm:</strong> transaction chỉ đọc thì vô hại. <strong>Vì sao sai:</strong> nó giữ read view, chặn purge cho mọi bảng. <strong>Quy tắc:</strong> theo dõi transaction lâu nhất.</li>
-<li><strong>Hiểu lầm:</strong> redo đủ để sửa mọi page hỏng. <strong>Vì sao sai:</strong> redo cần page gốc nguyên vẹn; torn page cần doublewrite. <strong>Quy tắc:</strong> không tắt doublewrite nếu disk không đảm bảo ghi nguyên tử 16KB.</li>
+<li><strong>Hiểu lầm:</strong> COMMIT ghi dữ liệu vào file của bảng. <strong>Vì sao sai:</strong> commit chỉ fsync redo log; page được page cleaner ghi xuống sau. <strong>Quy tắc:</strong> dữ liệu an toàn là nhờ redo log, không nhờ file <code>.ibd</code>.</li>
+<li><strong>Hiểu lầm:</strong> đọc trúng RAM 99% là buffer pool đủ lớn. <strong>Vì sao sai:</strong> 1% của một con số lớn vẫn là rất nhiều lần đọc disk mỗi giây. <strong>Quy tắc:</strong> nhìn số lần đọc disk thật (<a href="#s2">phần 02</a>).</li>
+<li><strong>Hiểu lầm:</strong> quét một bảng lớn sẽ đẩy hết dữ liệu hay dùng ra khỏi RAM. <strong>Vì sao sai:</strong> page của lần quét chỉ nằm ở vùng old và không qua được thời gian thử việc. <strong>Quy tắc:</strong> chỉ đúng khi <code>innodb_old_blocks_time = 0</code>; kiểm tra bằng dòng "Pages made young".</li>
+<li><strong>Hiểu lầm:</strong> với <code>innodb_flush_log_at_trx_commit = 2</code>, chỉ cần mysqld sập là mất dữ liệu. <strong>Vì sao sai:</strong> redo đã nằm trong bộ đệm của hệ điều hành; chỉ mất khi hệ điều hành hoặc cả máy sập. <strong>Quy tắc:</strong> phân biệt sập process và sập máy.</li>
+<li><strong>Hiểu lầm:</strong> transaction chỉ đọc thì vô hại. <strong>Vì sao sai:</strong> nó vẫn có thể cần thấy dữ liệu cũ, nên chặn purge dọn dẹp ở mọi bảng. <strong>Quy tắc:</strong> theo dõi transaction mở lâu nhất.</li>
+<li><strong>Hiểu lầm:</strong> redo log sửa được mọi page hỏng. <strong>Vì sao sai:</strong> redo cần một page gốc còn nguyên vẹn; page bị ghi dở phải lấy lại từ doublewrite. <strong>Quy tắc:</strong> đừng tắt doublewrite nếu disk không đảm bảo ghi trọn 16KB.</li>
 </ul></div>
 </section>
 
@@ -510,22 +527,22 @@ WHERE name = 'trx_rseg_history_len';</code></pre>
 <p class="prose">Viết ngày 2026-10-19.</p>
 <details><summary><span class="tag">Giải thích</span>Thứ tự của một commit</summary>
 <p>Kể theo thứ tự những gì InnoDB làm cho <code>UPDATE orders SET status = 'shipped' WHERE id = 1001; COMMIT;</code> khi page chưa có trong buffer pool, và chỉ ra bước nào là lúc dữ liệu thành bền.</p>
-<details class="answer"><summary>Xem đáp án</summary><p>Đọc page vào buffer pool; ghi undo record (bản cũ của <code>status</code>) và sinh redo cho undo page; sửa row trên page, cập nhật <code>DB_TRX_ID</code>, <code>DB_ROLL_PTR</code>, sinh redo; sửa các index chứa <code>status</code>; khi COMMIT, ghi commit vào redo, write và fsync redo tới LSN của commit (với giá trị 1), rồi trả OK. Bền ở lúc fsync redo xong. Page được ghi xuống sau, qua doublewrite, bởi page cleaner.</p></details></details>
+<details class="answer"><summary>Xem đáp án</summary><ol class="list"><li>Đọc page chứa row vào RAM.</li><li>Cất bản cũ của <code>status</code> vào undo log, ghi redo cho việc đó.</li><li>Sửa row trên page, cập nhật hai cột ẩn <code>DB_TRX_ID</code> và <code>DB_ROLL_PTR</code>, ghi redo.</li><li>Sửa các index có chứa <code>status</code>.</li><li>Khi COMMIT: ghi dòng commit vào redo, write và fsync redo (với giá trị 1), rồi trả OK.</li></ol><p>Dữ liệu an toàn từ lúc fsync redo xong. Page được page cleaner ghi xuống sau, qua doublewrite.</p></details></details>
 <details><summary><span class="tag">Dự đoán</span>Mất gì khi mất điện</summary>
 <p>Server với <code>innodb_flush_log_at_trx_commit = 2</code> nhận 3.000 commit mỗi giây. Máy mất điện. Tối đa mất khoảng bao nhiêu transaction? Nếu chỉ mysqld bị kill -9 thì sao?</p>
-<details class="answer"><summary>Xem đáp án</summary><p>Mất điện: tới khoảng 1 giây cuối, tức khoảng 3.000 transaction đã được báo OK. Kill -9 mysqld: không mất, vì redo đã được write vào page cache của hệ điều hành và hệ điều hành vẫn ghi nó xuống.</p></details></details>
+<details class="answer"><summary>Xem đáp án</summary><p>Mất điện: mất tới khoảng 1 giây cuối, tức chừng 3.000 transaction đã báo OK. Kill -9 mysqld: không mất gì, vì redo đã nằm trong bộ đệm của hệ điều hành và hệ điều hành vẫn ghi nó xuống disk.</p></details></details>
 <details><summary><span class="tag">Giải thích</span>Midpoint insertion</summary>
 <p>Vì sao một <code>mysqldump</code> chạy lúc 2 giờ sáng không làm sáng hôm sau mọi query chậm, và giá trị nào của biến nào sẽ làm nó gây hại?</p>
-<details class="answer"><summary>Xem đáp án</summary><p>Page mới đọc vào được chèn ở đầu old sublist (3/8 cuối LRU). Mỗi page của lần quét bị truy cập vài lần liên tiếp trong vòng 1000 ms đầu, nên không được made young và trôi ra ngoài; new sublist giữ page nóng. Đặt <code>innodb_old_blocks_time = 0</code> thì lần truy cập thứ hai đã made young, lần quét đẩy hết page nóng ra.</p></details></details>
+<details class="answer"><summary>Xem đáp án</summary><p>Page mới đọc vào chỉ được đặt ở vùng old. Page của lần dump bị đọc vài lần liên tiếp trong 1 giây đầu rồi thôi, nên không qua được thời gian thử việc và bị loại dần. Vùng new vẫn giữ page hay dùng. Nếu đặt <code>innodb_old_blocks_time = 0</code>, lần đọc thứ hai đã đủ để chuyển page lên vùng new, và lần dump sẽ đẩy hết page hay dùng ra.</p></details></details>
 <details><summary><span class="tag">Chẩn đoán</span>Ghi bị khựng mỗi vài chục giây</summary>
 <p>Một job import ghi đều, nhưng cứ khoảng 40 giây lại khựng 2–3 giây. CPU thấp, không có lock wait. Nghi gì, đo gì, sửa gì?</p>
-<details class="answer"><summary>Xem đáp án</summary><p>Checkpoint age chạm giới hạn redo: page cleaner không kéo checkpoint theo kịp, InnoDB buộc flush gấp và câu ghi phải đợi. Đo <code>Innodb_redo_log_current_lsn − Innodb_redo_log_checkpoint_lsn</code> theo thời gian so với <code>innodb_redo_log_capacity</code>, và <code>Innodb_buffer_pool_pages_dirty</code>. Sửa: tăng <code>innodb_redo_log_capacity</code> (dynamic trên 8.4), xem lại <code>innodb_io_capacity</code>, hoặc giảm tốc độ import.</p></details></details>
+<details class="answer"><summary>Xem đáp án</summary><p>Nghi redo log bị đầy: page cleaner ghi page xuống không kịp, checkpoint age chạm giới hạn, InnoDB phải ghi gấp và câu ghi phải chờ. Đo <code>Innodb_redo_log_current_lsn − Innodb_redo_log_checkpoint_lsn</code> theo thời gian, so với <code>innodb_redo_log_capacity</code>; xem thêm <code>Innodb_buffer_pool_pages_dirty</code>. Cách sửa: tăng <code>innodb_redo_log_capacity</code> (đổi được khi đang chạy trên 8.4), xem lại <code>innodb_io_capacity</code>, hoặc cho job import chạy chậm lại.</p></details></details>
 <details><summary><span class="tag">Chẩn đoán</span>Undo phình</summary>
 <p>Undo tablespace tăng từ 1GB lên 40GB trong một ngày, history list length 30 triệu. Bảng không có gì bất thường. Tìm nguyên nhân thế nào?</p>
-<details class="answer"><summary>Xem đáp án</summary><p>Purge bị chặn bởi một read view cũ. Tìm transaction cũ nhất trong <code>INNODB_TRX</code> (theo <code>trx_started</code>), lấy <code>trx_mysql_thread_id</code> để biết session và câu lệnh. Thường là một session quên commit, một job báo cáo dài, hoặc một connection pool giữ transaction mở. Commit hoặc kill nó, purge sẽ dọn dần và <code>innodb_undo_log_truncate</code> cắt file.</p></details></details>
+<details class="answer"><summary>Xem đáp án</summary><p>Purge đang bị chặn bởi một transaction mở từ lâu. Tìm transaction cũ nhất trong <code>INNODB_TRX</code> (sắp theo <code>trx_started</code>), rồi dùng <code>trx_mysql_thread_id</code> để biết session nào, đang chạy câu gì. Thường đó là session quên commit, job báo cáo chạy dài, hoặc connection pool giữ transaction mở. Commit hoặc kill nó; purge sẽ dọn dần và InnoDB tự cắt nhỏ file undo.</p></details></details>
 <details><summary><span class="tag">Giải thích</span>Vì sao cần cả redo lẫn undo</summary>
 <p>Vì sao InnoDB không thể chỉ có redo, hoặc chỉ có undo?</p>
-<details class="answer"><summary>Xem đáp án</summary><p>Vì nó không ép page xuống lúc commit (cần redo để làm lại thay đổi đã commit nhưng page chưa kịp ghi) và cho phép ghi page của transaction chưa commit xuống disk (cần undo để gỡ chúng sau khi sập). Undo còn phục vụ MVCC.</p></details></details>
+<details class="answer"><summary>Xem đáp án</summary><p>Lúc commit, InnoDB không bắt ghi page xuống disk, nên cần redo để làm lại những thay đổi đã commit mà page chưa kịp ghi. InnoDB lại cho phép ghi xuống disk cả page của transaction chưa commit, nên cần undo để gỡ những thay đổi đó sau khi sập. Ngoài ra, undo còn giúp các câu đọc khác thấy được dữ liệu cũ.</p></details></details>
 </section>
 
 <!-- 9 -->
@@ -605,25 +622,25 @@ function stepper(id,{title,vb,steps,draw}){
 /* ---------- 01: life of an UPDATE + COMMIT ---------- */
 // st: state of each box; lsn: [checkpoint, flushed, current]; pg: page LSN on disk / in RAM
 const LIFE=[
- {t:'Trạng thái ban đầu',d:'Checkpoint ở LSN 9.000: mọi thay đổi trước đó đã nằm trên page trên disk. Redo đã fsync tới 10.000, cũng là LSN hiện tại. Page 4127 của PRIMARY, chứa row id = 1001, chỉ có trên disk, với page LSN 8.200.',
+ {t:'Lúc đầu',d:'Checkpoint đang ở LSN 9.000: mọi thay đổi trước mốc này đã có trong file dữ liệu. Redo đã fsync tới 10.000, cũng là vị trí ghi hiện tại. Page 4127 của PRIMARY, chứa row id = 1001, lúc này chỉ có trên disk. Page này ghi nhận thay đổi gần nhất của nó ở LSN 8.200.',
   st:{data:'dim',undo:'dim',sec:'dim',lb:'dim',redo:'struct',disk:'struct',dw:'dim'},lsn:[9000,10000,10000],ram:'–',dsk:'8.200',dirty:0,ok:false},
- {t:'Đọc page vào buffer pool',d:'UPDATE orders SET status = \'shipped\' WHERE id = 1001. InnoDB đi cây PRIMARY, page 4127 không có trong buffer pool nên đọc từ disk (một lần đọc 16KB). Page vào ở midpoint của LRU rồi được made young vì được dùng ngay.',
+ {t:'Đọc page vào buffer pool',d:'Câu lệnh: UPDATE orders SET status = \'shipped\' WHERE id = 1001. InnoDB tìm row trong cây PRIMARY. Page 4127 chưa có trong RAM, nên InnoDB đọc nó từ disk (một lần đọc 16KB).',
   st:{data:'ram',undo:'dim',sec:'dim',lb:'dim',redo:'struct',disk:'miss',dw:'dim'},lsn:[9000,10000,10000],ram:'8.200',dsk:'8.200',dirty:0,ok:false,a:'read'},
- {t:'Ghi undo record trước',d:'Transaction 4711 khoá row, rồi ghi bản cũ của cột bị sửa (status = \'paid\') cùng DB_TRX_ID và DB_ROLL_PTR cũ vào một undo record trên undo page. Undo page bị sửa, nên cũng sinh redo: LSN hiện tại 10.000 → 10.060.',
+ {t:'Cất bản cũ vào undo log trước',d:'Transaction 4711 khoá row. Trước khi sửa, nó cất bản cũ (status = \'paid\') vào undo log. Việc ghi vào undo log cũng là sửa một page, nên cũng sinh redo: vị trí ghi tăng từ 10.000 lên 10.060.',
   st:{data:'ram',undo:'key',sec:'dim',lb:'hot',redo:'struct',disk:'struct',dw:'dim'},lsn:[9000,10000,10060],ram:'8.200',dsk:'8.200',dirty:1,ok:false},
- {t:'Sửa row trên page',d:'Row trên page 4127 được sửa tại chỗ: status = \'shipped\', DB_TRX_ID = 4711, DB_ROLL_PTR trỏ tới undo record vừa ghi. Redo cho thay đổi này: 10.060 → 10.140. Page LSN trong RAM thành 10.140, page bẩn. Trên disk page vẫn là bản cũ.',
+ {t:'Sửa row trên page',d:'InnoDB sửa row ngay trên page 4127: status = \'shipped\', ghi DB_TRX_ID = 4711, và trỏ DB_ROLL_PTR tới bản cũ vừa cất. Redo cho thay đổi này: 10.060 → 10.140. Bản trong RAM giờ khác bản trên disk; bản trên disk vẫn là dữ liệu cũ.',
   st:{data:'hot',undo:'key',sec:'dim',lb:'hot',redo:'struct',disk:'struct',dw:'dim'},lsn:[9000,10000,10140],ram:'10.140',dsk:'8.200',dirty:2,ok:false},
- {t:'Sửa secondary index',d:'idx_status chứa status: delete-mark entry (\'paid\', 1001) và chèn (\'shipped\', 1001), hai leaf khác nhau. Redo 10.140 → 10.260. Tổng cộng 4 page bẩn: undo page, page 4127, hai leaf của idx_status. Tất cả mới nằm trong RAM và log buffer.',
+ {t:'Sửa index idx_status',d:'Index idx_status có chứa status, nên InnoDB đánh dấu xoá entry (\'paid\', 1001) và chèn entry (\'shipped\', 1001), ở hai page khác nhau. Redo: 10.140 → 10.260. Giờ có 4 page đã sửa mà chưa ghi xuống: page undo, page 4127, hai page của idx_status. Tất cả mới chỉ nằm trong RAM.',
   st:{data:'hot',undo:'key',sec:'hot',lb:'hot',redo:'struct',disk:'struct',dw:'dim'},lsn:[9000,10000,10260],ram:'10.140',dsk:'8.200',dirty:4,ok:false},
- {t:'COMMIT: write và fsync redo',d:'COMMIT ghi bản ghi commit vào redo (10.260 → 10.280). Với innodb_flush_log_at_trx_commit = 1, log buffer được write vào file redo rồi fsync, tới LSN 10.280. Đây là một lần ghi tuần tự vài trăm byte. Không page dữ liệu nào được ghi.',
+ {t:'COMMIT: write và fsync redo',d:'COMMIT thêm một dòng "đã commit" vào redo (10.260 → 10.280). Với innodb_flush_log_at_trx_commit = 1, InnoDB chép redo từ RAM ra file rồi fsync, tới LSN 10.280. Chỉ là một lần ghi nối thêm vài trăm byte. Chưa có page dữ liệu nào được ghi.',
   st:{data:'hot',undo:'key',sec:'hot',lb:'row',redo:'row',disk:'struct',dw:'dim'},lsn:[9000,10280,10280],ram:'10.140',dsk:'8.200',dirty:4,ok:false,a:'fsync'},
- {t:'Trả OK cho client',d:'Client nhận OK. Transaction đã bền: nếu server sập ngay lúc này, redo từ checkpoint 9.000 tới 10.280 đủ để dựng lại cả bốn page. Page 4127 trên disk vẫn mang LSN 8.200 và status = \'paid\'.',
+ {t:'Trả OK cho client',d:'Client nhận OK. Từ giờ dữ liệu không thể mất: nếu server sập ngay lúc này, redo từ checkpoint 9.000 tới 10.280 đủ để dựng lại cả bốn page. Trong khi đó, trên disk page 4127 vẫn ghi status = \'paid\'.',
   st:{data:'hot',undo:'key',sec:'hot',lb:'dim',redo:'row',disk:'struct',dw:'dim'},lsn:[9000,10280,10280],ram:'10.140',dsk:'8.200',dirty:4,ok:true},
- {t:'Page cleaner ghi vào doublewrite',d:'Vài giây sau, page cleaner lấy page bẩn theo thứ tự LSN sửa đầu tiên. Luật WAL: page 4127 có LSN 10.140, redo đã fsync tới 10.280 ≥ 10.140, nên được phép ghi. Lô page được ghi tuần tự vào file doublewrite và fsync trước.',
+ {t:'Page cleaner ghi trước vào doublewrite',d:'Vài giây sau, page cleaner bắt đầu ghi các page đã sửa xuống disk, page nào sửa sớm nhất thì ghi trước. Nó được phép ghi page 4127 vì redo mô tả thay đổi của page này (tới 10.140) đã fsync rồi (tới 10.280). Trước hết, cả lô page được ghi vào file doublewrite và fsync.',
   st:{data:'hot',undo:'key',sec:'hot',lb:'dim',redo:'row',disk:'struct',dw:'miss'},lsn:[9000,10280,10280],ram:'10.140',dsk:'8.200',dirty:4,ok:true,a:'dw'},
- {t:'Ghi page về đúng chỗ',d:'Rồi từng page được ghi về vị trí của nó trong tablespace. Page 4127 trên disk giờ có LSN 10.140 và status = \'shipped\'. Bốn page thành sạch, vẫn ở trong buffer pool cho lần đọc sau.',
+ {t:'Ghi page về đúng chỗ',d:'Sau đó từng page được ghi về đúng chỗ của nó trong file dữ liệu. Page 4127 trên disk giờ đã có status = \'shipped\'. Bản trong RAM và bản trên disk lại khớp nhau; page vẫn ở lại RAM cho lần đọc sau.',
   st:{data:'ram',undo:'ram',sec:'ram',lb:'dim',redo:'row',disk:'miss',dw:'dim'},lsn:[9000,10280,10280],ram:'10.140',dsk:'10.140',dirty:0,ok:true,a:'write'},
- {t:'Checkpoint tiến lên',d:'Không còn page bẩn nào có LSN sửa đầu tiên nhỏ hơn 10.280, nên checkpoint tiến lên 10.280. Vùng redo từ 9.000 tới 10.280 không còn cần cho recovery và được dùng lại. Checkpoint age về 0.',
+ {t:'Checkpoint dời lên',d:'Mọi thay đổi trước LSN 10.280 giờ đã nằm trong file dữ liệu, nên checkpoint dời lên 10.280. Phần redo từ 9.000 tới 10.280 không còn cần cho việc khôi phục và sẽ được ghi đè. Checkpoint age về 0.',
   st:{data:'ram',undo:'ram',sec:'ram',lb:'dim',redo:'struct',disk:'struct',dw:'dim'},lsn:[10280,10280,10280],ram:'10.140',dsk:'10.140',dirty:0,ok:true}
 ];
 const LMIN=8800,LMAX=10400;
@@ -640,13 +657,13 @@ function lsnBar(y,l){
 }
 stepper('life',{title:'Đời của một UPDATE rồi COMMIT',vb:'0 0 680 285',steps:LIFE,draw:(s)=>{
   const z=s.st;let g='';
-  g+=`<rect class="zone" x="10" y="10" width="420" height="190" rx="8"/>`+T(22,30,'RAM: buffer pool và log buffer','start','tb');
+  g+=`<rect class="zone" x="10" y="10" width="420" height="190" rx="8"/>`+T(22,30,'RAM','start','tb');
   g+=`<rect class="zone" x="450" y="10" width="220" height="190" rx="8"/>`+T(462,30,'Disk','start','tb');
   g+=B(26,44,190,50,z.data,'PRIMARY page 4127','page LSN '+s.ram);
   g+=B(226,44,190,50,z.undo,'Undo page',z.undo==='dim'?'chưa dùng':'bản cũ: status = \'paid\'');
   g+=B(26,104,190,50,z.sec,'idx_status, 2 leaf',z.sec==='dim'?'chưa chạm':'delete-mark + chèn');
-  g+=B(226,104,190,50,z.lb,'Log buffer',z.lb==='dim'?'trống':(z.lb==='row'?'đã write + fsync':'redo chưa fsync'));
-  g+=T(26,180,`Page bẩn: ${s.dirty}`,'start','tb');
+  g+=B(226,104,190,50,z.lb,'Log buffer',z.lb==='dim'?'trống':(z.lb==='row'?'đã ghi chắc xuống disk':'redo chưa fsync'));
+  g+=T(26,180,`Page chưa ghi xuống: ${s.dirty}`,'start','tb');
   g+=T(416,180,s.ok?'Client đã nhận OK':'Client đang đợi','end',s.ok?'tb':'lbl');
   g+=B(466,44,188,42,z.disk,'Tablespace orders','page 4127 LSN '+s.dsk);
   g+=B(466,96,188,42,z.dw,'Doublewrite file','');
@@ -664,7 +681,7 @@ let lru,clock,reads,hits,evicted,lruLog;
 function lruInit(){
   // start: hot pages in new sublist, cold pages C1..C3 in old sublist
   lru=['H1','H2','H3','H4','H5','C1','C2','C3'].map(p=>({p,first:-1e9}));
-  clock=0;reads=0;hits=0;evicted=null;lruLog=['Bắt đầu: 5 page nóng ở new sublist, 3 page nguội ở old sublist.'];
+  clock=0;reads=0;hits=0;evicted=null;lruLog=['Lúc đầu: 5 page hay dùng ở vùng new, 3 page ít dùng ở vùng old.'];
   lruDraw();
 }
 function access(p,tag){
@@ -674,20 +691,20 @@ function access(p,tag){
     hits++;
     if(i>=NEWN){ // in old sublist
       const e=lru[i];
-      if(clock-e.first>=ot){lru.splice(i,1);lru.unshift(e);return `${p}: hit ở old sublist, đã ở đó ${clock-e.first} ms ≥ ${ot} ms nên made young`;}
-      return `${p}: hit ở old sublist, mới ${clock-e.first} ms < ${ot} ms, giữ nguyên`;
+      if(clock-e.first>=ot){lru.splice(i,1);lru.unshift(e);return `${p}: có trong RAM (vùng old), đã nằm đó ${clock-e.first} ms ≥ ${ot} ms nên được chuyển lên vùng new`;}
+      return `${p}: có trong RAM (vùng old), mới ${clock-e.first} ms < ${ot} ms, chưa qua thử việc nên giữ nguyên`;
     }
-    return `${p}: hit ở new sublist`;
+    return `${p}: có trong RAM (vùng new)`;
   }
   reads++;
   const ev=lru.pop();evicted=ev.p;
   lru.splice(NEWN,0,{p,first:clock}); // midpoint = head of old sublist
-  return `${p}: đọc từ disk, chèn ở đầu old sublist, loại ${ev.p}`+(ev.p.startsWith('H')?' (page nóng)':'');
+  return `${p}: đọc từ disk, đặt ở đầu vùng old, loại ${ev.p} khỏi RAM`+(ev.p.startsWith('H')?' (page hay dùng!)':'');
 }
 function lruDraw(){
   $('lruBox').innerHTML=lru.map((e,i)=>{
     const cls=e.p.startsWith('H')?'young':(e.p.startsWith('S')?'scan':'old');
-    return `<div class="f ${cls}">${e.p}<small>${i<NEWN?'new':'old'}</small></div>`;}).join('');
+    return `<div class="f ${cls}">${e.p}<small>${i<NEWN?'vùng new':'vùng old'}</small></div>`;}).join('');
   $('lruReads').textContent=reads;$('lruHits').textContent=hits;
   const left=lru.filter(e=>e.p.startsWith('H')).length;$('lruHotLeft').textContent=`${left} / 5`;
   $('lruMeta').textContent=`đồng hồ ${fmt(clock)} ms`;
@@ -716,17 +733,17 @@ function ck(){
   g+=`<polyline points="${pts.join(' ')}" class="edge path" />`;
   g+=T(10,y0+10,'Checkpoint age','start','tb')+T(10,y0+28,'giới hạn = capacity','start','ts')+T(x0,y0+H+18,'0 s','start','ts')+T(x0+W,y0+H+18,'60 s','end','ts');
   $('kSvg').innerHTML=g;
-  $('kDesc').textContent=grow<=0?'Page cleaner theo kịp: checkpoint tiến cùng tốc độ redo sinh ra, checkpoint age không tăng.'
-    :(t<60?`Với ${cap} MB redo, checkpoint age chạm giới hạn sau khoảng ${Math.round(t)} giây. Trước đó InnoDB đã flush ngày càng gắt; sát giới hạn, câu ghi phải đợi. Đây là kiểu khựng theo chu kỳ.`
-      :`Checkpoint age tăng ${grow} MB mỗi giây, còn khoảng ${(t/60).toFixed(1).replace('.',',')} phút trước khi chạm giới hạn. Đợt ghi ngắn hơn thế sẽ không bị khựng; recovery sau sự cố có thể phải đọc tới ${cap>=1024?(cap/1024)+' GB':cap+' MB'} redo.`);
+  $('kDesc').textContent=grow<=0?'Page cleaner theo kịp: checkpoint dời lên nhanh bằng tốc độ redo sinh ra, nên checkpoint age không tăng.'
+    :(t<60?`Với ${cap} MB redo, checkpoint age chạm giới hạn sau khoảng ${Math.round(t)} giây. Trước đó InnoDB đã ghi page xuống ngày càng gắt; tới sát giới hạn thì câu ghi phải chờ. Đây chính là kiểu khựng theo chu kỳ.`
+      :`Checkpoint age tăng ${grow} MB mỗi giây, còn khoảng ${(t/60).toFixed(1).replace('.',',')} phút mới chạm giới hạn. Đợt ghi ngắn hơn thế sẽ không bị khựng. Đổi lại, nếu sập, việc khôi phục có thể phải đọc tới ${cap>=1024?(cap/1024)+' GB':cap+' MB'} redo.`);
 }
 ['kCap','kGen','kFl'].forEach(i=>$(i).oninput=ck);ck();
 
 /* ---------- 02: durability matrix ---------- */
 const DUR={
- '1':{a:['ok','Không mất'],b:['ok','Không mất'],c:'fsync mỗi commit (gom bởi group commit)',d:'Mỗi commit write và fsync redo trước khi trả OK. Mọi transaction đã nhận OK đều sống sót cả khi mysqld bị kill lẫn khi máy mất điện, miễn là disk không nói dối về fsync.'},
- '2':{a:['ok','Không mất'],b:['mid','Mất tới khoảng 1 giây cuối'],c:'write mỗi commit, fsync mỗi giây',d:'Mỗi commit chỉ write redo vào page cache của hệ điều hành. Kill mysqld: hệ điều hành vẫn còn dữ liệu và ghi xuống, không mất gì. Máy mất điện hoặc kernel panic: mất những commit chưa được fsync, khoảng 1 giây cuối.'},
- '0':{a:['bad','Mất tới khoảng 1 giây cuối'],b:['bad','Mất tới khoảng 1 giây cuối'],c:'không write, không fsync lúc commit',d:'Redo chỉ được write và fsync mỗi giây. Kể cả khi chỉ mysqld sập, log buffer trong RAM của nó mất theo, nên mất tới khoảng 1 giây commit đã nhận OK.'}
+ '1':{a:['ok','Không mất'],b:['ok','Không mất'],c:'fsync ở mỗi commit (nhiều commit có thể chung một lần)',d:'Mỗi commit ghi redo ra file và fsync rồi mới trả OK. Transaction nào đã nhận OK thì không mất, dù mysqld bị kill hay máy mất điện, miễn là disk báo thật về việc đã ghi.'},
+ '2':{a:['ok','Không mất'],b:['mid','Mất tới khoảng 1 giây cuối'],c:'ghi ra file ở mỗi commit, fsync mỗi giây',d:'Mỗi commit chỉ ghi redo vào bộ đệm của hệ điều hành. Nếu mysqld bị kill, hệ điều hành vẫn giữ dữ liệu và ghi xuống, nên không mất gì. Nếu máy mất điện hoặc kernel lỗi, mất các commit chưa được fsync, tức khoảng 1 giây cuối.'},
+ '0':{a:['bad','Mất tới khoảng 1 giây cuối'],b:['bad','Mất tới khoảng 1 giây cuối'],c:'không ghi gì lúc commit',d:'Redo chỉ được ghi ra file và fsync mỗi giây một lần. Chỉ cần mysqld sập là phần redo còn trong RAM của nó mất theo, nên mất tới khoảng 1 giây commit đã báo OK.'}
 };
 function dur(v){
   const r=DUR[v];
@@ -738,20 +755,20 @@ document.querySelectorAll('#dur [data-v]').forEach(b=>b.onclick=()=>dur(b.datase
 
 /* ---------- 02: crash recovery ---------- */
 const REC=[
- {t:'Trước khi sập',d:'Transaction A (đổi status của id 1001) đã commit, redo tới 10.280. Transaction B đang sửa note của id 2002, chưa commit; redo của B tới 10.420 đã được write xuống cùng lần fsync nền gần nhất. Page cleaner đã kịp ghi page 2002 của B xuống disk (steal), nhưng chưa ghi page 4127 của A.',
+ {t:'Trước khi sập',d:'Transaction A (đổi status của id 1001) đã commit; redo của A tới 10.280. Transaction B đang sửa note của id 2002, chưa commit; redo của B tới 10.420 cũng đã được ghi xuống trong lần fsync nền gần nhất. Page cleaner đã kịp ghi page của B xuống disk, nhưng chưa ghi page 4127 của A.',
   st:['hot','hot','dim','struct'],lab:['A: commit','B: chưa commit','',''],c:''},
- {t:'Sập, khởi động lại',d:'Mất điện. Buffer pool mất hết. Trên disk: page 4127 vẫn là bản trước A, page của B đã chứa thay đổi chưa commit. InnoDB đọc header redo, tìm checkpoint LSN 9.000.',
+ {t:'Sập, khởi động lại',d:'Mất điện, mọi thứ trong RAM mất hết. Trên disk lúc này: page 4127 vẫn là bản trước khi A sửa, còn page của B lại chứa thay đổi chưa commit. Khi khởi động lại, InnoDB tìm checkpoint gần nhất: LSN 9.000.',
   st:['miss','miss','dim','struct'],lab:['page 4127: bản cũ','page của B: bản dở','',''],c:''},
- {t:'Kiểm tra doublewrite',d:'Page nào hỏng checksum (ghi dở lúc mất điện) được thay bằng bản nguyên vẹn trong file doublewrite. Ví dụ này không có torn page.',
+ {t:'Kiểm tra doublewrite',d:'Page nào bị ghi dở lúc mất điện sẽ được thay bằng bản nguyên vẹn trong file doublewrite. Ví dụ này không có page nào bị ghi dở.',
   st:['miss','miss','dim','ram'],lab:['page 4127: bản cũ','page của B: bản dở','','doublewrite: không cần'],c:''},
- {t:'Áp redo từ checkpoint',d:'Đọc redo từ 9.000 tới 10.420. Với mỗi record, nếu page LSN trên disk nhỏ hơn LSN của record thì áp. Page 4127 có LSN 8.200 < 10.140: áp, giờ status = \'shipped\'. Undo page của B cũng được dựng lại từ redo. Redo không phân biệt transaction đã commit hay chưa.',
+ {t:'Làm lại theo redo từ checkpoint',d:'InnoDB đọc redo từ 9.000 tới 10.420 và làm lại mọi thay đổi mà page trên disk còn thiếu. Page 4127 chưa có thay đổi của A, nên được làm lại: giờ status = \'shipped\'. Page undo của B cũng được dựng lại. Ở bước này, InnoDB làm lại tất cả, không phân biệt đã commit hay chưa.',
   st:['row','hot','key','struct'],lab:['page 4127: có thay đổi của A','page của B: bản dở','undo của B: dựng lại',''],c:''},
- {t:'Rollback transaction chưa commit',d:'Sau redo, mọi page đúng như lúc sập, gồm cả thay đổi của B. InnoDB tìm các transaction đang active trong undo, đi chuỗi undo record của B và áp ngược: note của id 2002 trở về bản cũ. Rollback chạy nền, server mở cho client trước khi nó xong.',
+ {t:'Gỡ transaction chưa commit',d:'Sau bước trước, mọi page giống hệt lúc sập, kể cả thay đổi dở dang của B. InnoDB tìm những transaction chưa commit, rồi dùng undo log để trả row của B về như cũ: note của id 2002 về giá trị cũ. Việc gỡ này chạy nền; server mở cho client trước khi nó xong.',
   st:['row','row','key','struct'],lab:['A: còn','B: đã gỡ','undo của B: đã dùng',''],c:''},
- {t:'Mở cho client',d:'Kết quả giống hệt như A commit và B chưa từng chạy. Purge sẽ dọn undo của A và B sau. Thời gian các bước trước phụ thuộc vào lượng redo từ checkpoint, tức checkpoint age lúc sập.',
+ {t:'Mở cho client',d:'Kết quả: như thể A đã commit và B chưa từng chạy. Purge sẽ dọn undo của A và B sau. Khôi phục mất bao lâu phụ thuộc vào lượng redo phải đọc lại, tức checkpoint age lúc sập.',
   st:['row','row','dim','struct'],lab:['A: còn','B: không còn','',''],c:''}
 ];
-stepper('recov',{title:'Crash recovery',vb:'0 0 680 150',steps:REC,draw:(s)=>{
+stepper('recov',{title:'Khôi phục sau sự cố',vb:'0 0 680 150',steps:REC,draw:(s)=>{
   const n=['PRIMARY page 4127','Page của B','Undo của B','Doublewrite'];
   let g='';
   s.st.forEach((c,i)=>{g+=B(10+i*168,20,156,64,c,n[i],s.lab[i]||' ');});
