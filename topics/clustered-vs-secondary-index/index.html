@@ -1,0 +1,630 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Clustered index và secondary index: InnoDB so với PostgreSQL</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600..800&family=Be+Vietnam+Pro:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Layout: một cột đọc, widget rộng hơn prose; mỗi widget là một "page" có header strip. Hai engine luôn đặt cạnh nhau: InnoDB trước, PostgreSQL sau. */
+:root{
+  --bg:#EDF1F3; --surface:#FFFFFF; --ink:#132029; --ink-2:#4F5E6B; --ink-3:#86939E;
+  --rule:#CBD4DA; --rule-strong:#8A99A5;
+  --struct:#2F558F; --struct-bg:#E3EBF7;   /* cấu trúc index */
+  --row:#1C7650;    --row-bg:#DCF1E6;      /* dữ liệu row thật */
+  --key:#9A5B00;    --key-bg:#FBEBCC;      /* con trỏ: giá trị PK hoặc TID */
+  --path:#1F5FE0;   --path-bg:#DCE7FD;     /* đường đi hiện tại */
+  --hot:#B03A73;    --hot-bg:#F8E0EB;      /* bị ghi */
+  --miss:#B8322A;   --miss-bg:#FADFDC;     /* đọc từ disk */
+  --ram:#5B4BB0;    --ram-bg:#E7E3FA;      /* hit trong buffer pool */
+  --display:"Bricolage Grotesque","Be Vietnam Pro",system-ui,sans-serif;
+  --body:"Be Vietnam Pro",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0E151B; --surface:#16212A; --ink:#E3EAEF; --ink-2:#A3B1BC; --ink-3:#6C7C88;
+  --rule:#283844; --rule-strong:#4F6170;
+  --struct:#8FB2EE; --struct-bg:#1C2E4A; --row:#6FD3A3; --row-bg:#133A2A;
+  --key:#F0BE62; --key-bg:#3A2B0C; --path:#7FA8FF; --path-bg:#1A2B52;
+  --hot:#F28DBA; --hot-bg:#3E1A2C; --miss:#FF8F86; --miss-bg:#3F1B18; --ram:#B7A8FF; --ram-bg:#2A2350;
+  color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0E151B; --surface:#16212A; --ink:#E3EAEF; --ink-2:#A3B1BC; --ink-3:#6C7C88;
+  --rule:#283844; --rule-strong:#4F6170;
+  --struct:#8FB2EE; --struct-bg:#1C2E4A; --row:#6FD3A3; --row-bg:#133A2A;
+  --key:#F0BE62; --key-bg:#3A2B0C; --path:#7FA8FF; --path-bg:#1A2B52;
+  --hot:#F28DBA; --hot-bg:#3E1A2C; --miss:#FF8F86; --miss-bg:#3F1B18; --ram:#B7A8FF; --ram-bg:#2A2350;
+  color-scheme:dark}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important;animation:none!important}}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 16.5px/1.65 var(--body);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.shell{display:grid;grid-template-columns:220px minmax(0,1fr);gap:48px;max-width:1220px;margin:0 auto}
+main{min-width:0;max-width:960px;padding-block:48px 96px}
+nav.toc{position:sticky;top:0;align-self:start;max-height:100vh;padding-block:48px;overflow:auto}
+nav.toc p{font:700 15px var(--display);margin:0 0 12px}
+nav.toc ol,.mobile-toc ol{list-style:none;margin:0;padding:0;counter-reset:s}
+nav.toc li,.mobile-toc li{counter-increment:s;margin:0}
+nav.toc a,.mobile-toc a{display:grid;grid-template-columns:28px 1fr;padding:5px 0;color:var(--ink-2);text-decoration:none;font-size:14.5px;line-height:1.4}
+nav.toc a::before,.mobile-toc a::before{content:counter(s,decimal-leading-zero);font:500 12px/1.9 var(--mono);color:var(--ink-3)}
+nav.toc a:hover,nav.toc a.on{color:var(--struct)}
+nav.toc a.on{font-weight:600}
+.mobile-toc{display:none;max-width:none}
+@media (max-width:900px){.shell{grid-template-columns:1fr;gap:0}nav.toc{display:none}.mobile-toc{display:block;margin:0 0 20px}}
+a{color:var(--path)}
+:focus-visible{outline:2px solid var(--path);outline-offset:2px}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em;line-height:1.1;margin:0;text-wrap:balance}
+h1{font-size:clamp(2.2rem,5.5vw,3.6rem);font-weight:800;max-width:16ch;margin-bottom:16px}
+h2{font-size:clamp(1.5rem,3vw,2rem);font-weight:700}
+h3{font-size:1.15rem;font-weight:700;margin:28px 0 8px}
+p{margin:0 0 14px}
+.prose{max-width:68ch}
+.lede{font-size:18.5px;color:var(--ink-2);max-width:60ch;margin-bottom:24px}
+ul{margin:0 0 16px;padding-left:22px}li{margin:4px 0}
+code{font:.86em var(--mono);background:var(--struct-bg);padding:1px 5px;border-radius:3px}
+pre{font:13px/1.6 var(--mono);background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:4px;padding:12px 14px;overflow-x:auto;margin:0 0 16px}
+pre code{background:none;padding:0}
+section{padding-top:64px}
+section>header{display:flex;gap:14px;align-items:baseline;margin-bottom:14px}
+section>header .num{font:600 14px var(--mono);color:var(--struct);border:1.5px solid var(--struct);border-radius:4px;padding:1px 7px;transform:translateY(-3px)}
+.tablewrap{overflow-x:auto;margin:0 0 20px}
+table{border-collapse:collapse;width:100%;font-size:14.5px;background:var(--surface);min-width:560px}
+th,td{text-align:left;padding:8px 11px;border:1px solid var(--rule);vertical-align:top}
+th{background:var(--struct-bg);font-weight:600}
+
+.frame{background:var(--surface);border:1px solid var(--rule);border-radius:8px;margin:20px 0 26px;overflow:hidden}
+.frame>.ph{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:9px 16px;border-bottom:1px solid var(--rule);background:var(--struct-bg);font-size:14px}
+.frame>.ph strong{font-weight:600}
+.frame>.ph .meta{margin-left:auto;font:500 12.5px var(--mono);color:var(--ink-2)}
+.bd{padding:16px;min-width:0}
+.svgwrap{overflow-x:auto}
+.frame svg{display:block;width:100%;height:auto;min-width:520px}
+.st-t{font:600 16px var(--body);margin:0 0 8px}
+.desc{background:var(--bg);border-radius:4px;padding:12px 14px;margin-top:12px;min-height:84px;font-size:15px;color:var(--ink-2)}
+.desc pre{margin:10px 0 0;font-size:12.5px;border-left-color:var(--rule-strong)}
+.nav,.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px}
+.controls{margin:0 0 12px}
+.controls .sep{width:1px;height:24px;background:var(--rule);margin:0 4px}
+label{font-size:14px;color:var(--ink-2)}
+button,select{font:500 14px var(--body);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:4px;padding:6px 13px;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--path);color:var(--path)}
+button:disabled{opacity:.4;cursor:default}
+button.primary,button[aria-pressed="true"]{background:var(--struct);border-color:var(--struct);color:var(--surface)}
+button.primary:hover:not(:disabled),button[aria-pressed="true"]:hover{color:var(--surface);filter:brightness(1.1)}
+input[type=range]{accent-color:var(--struct)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:12px}
+.stat{background:var(--bg);border-radius:4px;padding:8px 12px}
+.stat span{display:block;font-size:13px;color:var(--ink-2)}
+.stat b{font:600 19px var(--body);font-variant-numeric:tabular-nums}
+.log{font:13px/1.7 var(--body);color:var(--ink-2);margin-top:12px}
+.log p{margin:0 0 6px}.log b{color:var(--ink)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;color:var(--ink-2);margin-top:12px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:14px;height:14px;border-radius:3px;border:2px solid;display:inline-block}
+
+/* svg vocabulary: mỗi class một trạng thái */
+.n rect{fill:var(--surface);stroke:var(--rule-strong);stroke-width:1}
+.n text{fill:var(--ink)}
+.n.struct rect{fill:var(--struct-bg);stroke:var(--struct)}.n.struct text{fill:var(--struct)}
+.n.row rect{fill:var(--row-bg);stroke:var(--row)}.n.row text{fill:var(--row)}
+.n.key rect{fill:var(--key-bg);stroke:var(--key)}.n.key text{fill:var(--key)}
+.n.path rect{fill:var(--path-bg);stroke:var(--path);stroke-width:2.4}.n.path text{fill:var(--path)}
+.n.hot rect{fill:var(--hot-bg);stroke:var(--hot);stroke-width:2}.n.hot text{fill:var(--hot)}
+.n.miss rect{fill:var(--miss-bg);stroke:var(--miss);stroke-width:2}.n.miss text{fill:var(--miss)}
+.n.ram rect{fill:var(--ram-bg);stroke:var(--ram);stroke-width:1.5}.n.ram text{fill:var(--ram)}
+.n.dim rect{fill:var(--bg);stroke:var(--rule)}.n.dim text{fill:var(--ink-3)}
+.n.cur rect{stroke-width:3.2}
+.box{fill:none;stroke:var(--rule-strong);stroke-width:1}
+.box.idx{fill:var(--struct-bg);fill-opacity:.35;stroke:var(--struct)}
+.box.data{fill:var(--row-bg);fill-opacity:.35;stroke:var(--row)}
+.tb{font:600 13.5px var(--body)}.t{font:400 13px var(--body)}.ts{font:400 12px var(--body)}.tm{font:500 12px var(--mono)}
+.lbl{fill:var(--ink-2);font:400 12.5px var(--body)}
+.lblb{fill:var(--ink);font:600 13px var(--body)}
+.edge{stroke:var(--rule-strong);stroke-width:1.2;fill:none}
+.edge.on{stroke:var(--path);stroke-width:2.6}
+.edge.hot{stroke:var(--hot);stroke-width:2.2}
+.edge.miss{stroke:var(--miss);stroke-width:2;stroke-dasharray:5 4}
+.edge.ptr{stroke:var(--key);stroke-dasharray:4 4}
+.dash{stroke:var(--rule-strong);stroke-dasharray:4 4;fill:none}
+
+/* update matrix */
+.mx{display:grid;grid-template-columns:minmax(110px,.8fr) 1fr 1fr;gap:6px;font-size:14px}
+.mx>div{padding:8px 10px;border-radius:4px;border:1px solid var(--rule);background:var(--surface);min-width:0}
+.mx .h{background:none;border:none;font-weight:600;padding-bottom:0}
+.mx .tree{background:var(--bg);font-family:var(--mono);font-size:12.5px;border:none}
+.mx .w{background:var(--hot-bg);border:2px solid var(--hot);color:var(--hot)}
+.mx .q{color:var(--ink-3)}
+.mx .tot{background:none;border:none;font-weight:600}
+@media (max-width:560px){.mx{grid-template-columns:1fr 1fr}.mx .tree{grid-column:1/-1}.mx .h:first-child,.mx .tot:first-of-type{display:none}}
+
+.note{border-left:3px solid var(--hot);background:var(--hot-bg);padding:12px 16px;border-radius:0 4px 4px 0;margin:18px 0;max-width:68ch}
+.note strong{color:var(--hot)}
+.senior{border:1.5px solid var(--struct);border-radius:8px;padding:14px 18px;margin:20px 0;max-width:68ch;background:var(--surface)}
+.senior h3{margin:0 0 6px;color:var(--struct);font-size:1.05rem}
+details{background:var(--surface);border:1px solid var(--rule);border-radius:4px;padding:10px 14px;margin:8px 0;max-width:68ch}
+details summary{cursor:pointer;font-weight:600}
+details[open] summary{margin-bottom:8px}
+</style>
+</head>
+<body>
+
+<div class="shell">
+<nav class="toc" aria-label="Mục lục">
+  <p>Clustered và secondary</p>
+  <ol>
+    <li><a href="#s1">Leaf chứa gì</a></li>
+    <li><a href="#s2">Đọc row qua secondary index</a></li>
+    <li><a href="#s3">UPDATE chạm vào cây nào</a></li>
+    <li><a href="#s4">Split và con trỏ bằng PK</a></li>
+    <li><a href="#s5">Tổng kết và các engine khác</a></li>
+    <li><a href="#s6">Bài tập và câu hỏi kiểm tra</a></li>
+  </ol>
+</nav>
+
+<main>
+<h1>Clustered index và secondary index</h1>
+<p class="lede">Cùng một bảng <code>orders</code>, cùng một index trên <code>user_id</code>, nhưng InnoDB và PostgreSQL cất row ở hai nơi khác hẳn nhau. Bấm vào từng entry để thấy DB phải đi qua những page nào để lấy được row.</p>
+<details class="mobile-toc"><summary>Mục lục</summary><ol><li><a href="#s1">Leaf chứa gì</a></li><li><a href="#s2">Đọc row qua secondary index</a></li><li><a href="#s3">UPDATE chạm vào cây nào</a></li><li><a href="#s4">Split và con trỏ bằng PK</a></li><li><a href="#s5">Tổng kết và các engine khác</a></li><li><a href="#s6">Bài tập và câu hỏi kiểm tra</a></li></ol></details>
+
+<div class="frame" id="explore">
+  <div class="ph"><strong>Từ entry của index tới row thật</strong><span class="meta" id="ex-meta"></span></div>
+  <div class="bd">
+    <div class="controls">
+      <div role="group" aria-label="Engine" style="display:flex;gap:6px">
+        <button id="ex-inno" aria-pressed="true">MySQL InnoDB</button>
+        <button id="ex-pg" aria-pressed="false">PostgreSQL</button>
+      </div>
+      <span class="sep" aria-hidden="true"></span>
+      <span class="ts" style="color:var(--ink-2)">Đi theo row:</span>
+      <div role="group" aria-label="Chọn row" style="display:flex;gap:6px;flex-wrap:wrap" id="ex-rows"></div>
+    </div>
+    <div class="svgwrap"><svg id="ex-svg" viewBox="0 0 680 336" role="img" aria-label="Cấu trúc index và nơi lưu row"></svg></div>
+    <div class="stats">
+      <div class="stat"><span>Page của idx_user_id</span><b id="ex-a">2</b></div>
+      <div class="stat"><span>Page để lấy row</span><b id="ex-b">2</b></div>
+      <div class="stat"><span>Tổng page đi qua</span><b id="ex-c">4</b></div>
+    </div>
+    <div class="log" id="ex-log" aria-live="polite"></div>
+    <div class="legend" aria-label="Chú thích màu">
+      <span><i style="background:var(--struct-bg);border-color:var(--struct)"></i>cấu trúc index</span>
+      <span><i style="background:var(--row-bg);border-color:var(--row)"></i>dữ liệu row</span>
+      <span><i style="background:var(--key-bg);border-color:var(--key)"></i>con trỏ (PK hoặc TID)</span>
+      <span><i style="background:var(--path-bg);border-color:var(--path)"></i>đường đi hiện tại</span>
+      <span><i style="background:var(--hot-bg);border-color:var(--hot)"></i>page bị ghi</span>
+      <span><i style="background:var(--ram-bg);border-color:var(--ram)"></i>hit trong RAM</span>
+      <span><i style="background:var(--miss-bg);border-color:var(--miss)"></i>đọc từ disk</span>
+    </div>
+  </div>
+</div>
+<p class="prose ts" style="color:var(--ink-2)">Cây vẽ 2 tầng cho gọn. Index thật thường cao 3 đến 4 tầng, nên mỗi lần duyệt cây tốn 3 đến 4 page thay vì 2.</p>
+
+
+<!-- 1 -->
+<section id="s1">
+<header><span class="num">01</span><h2>Leaf chứa gì</h2></header>
+<div class="prose">
+<p>Mọi B+tree đều giống nhau ở tầng trên. Khác biệt nằm ở <strong>leaf entry</strong>:</p>
+<ul>
+<li><strong>InnoDB clustered index (PRIMARY):</strong> leaf chứa nguyên row, kèm <code>DB_TRX_ID</code> 6 byte và <code>DB_ROLL_PTR</code> 7 byte cho MVCC. Bảng không tồn tại ở đâu khác.</li>
+<li><strong>InnoDB secondary index:</strong> leaf chứa cột của index và <strong>giá trị PK</strong>. Key thật sự của cây là <code>(user_id, id)</code>.</li>
+<li><strong>PostgreSQL, mọi index kể cả PK:</strong> leaf chứa cột của index và <strong>TID</strong> 6 byte <code>(block, slot)</code> trỏ vào heap.</li>
+</ul>
+<p>Vì PK nằm trong mọi secondary index của InnoDB, chọn kiểu PK là chọn kích thước của mọi index trên bảng. Thử đổi kiểu PK:</p>
+</div>
+<div class="frame" id="calc">
+  <div class="ph"><strong>Kích thước leaf entry của secondary index</strong><span class="meta">ước tính</span></div>
+  <div class="bd">
+    <div class="controls">
+      <label for="c-pk">Kiểu PK</label>
+      <select id="c-pk">
+        <option value="4">INT (4 byte)</option>
+        <option value="8" selected>BIGINT (8 byte)</option>
+        <option value="16">BINARY(16) UUID</option>
+        <option value="37">CHAR(36) UUID</option>
+      </select>
+      <label for="c-key">Cột index</label>
+      <select id="c-key">
+        <option value="4" selected>user_id INT</option>
+        <option value="8">user_id BIGINT</option>
+        <option value="26">email ~25 ký tự</option>
+      </select>
+      <label for="c-n">Số secondary index</label>
+      <input id="c-n" type="range" min="1" max="8" value="4" aria-describedby="c-nv"><b id="c-nv"></b>
+      <label for="c-rows">Số row</label>
+      <select id="c-rows"><option value="1e7">10 triệu</option><option value="1e8" selected>100 triệu</option><option value="1e9">1 tỷ</option></select>
+    </div>
+    <div class="svgwrap"><svg id="c-svg" viewBox="0 0 680 170" role="img" aria-label="Các thành phần byte của một leaf entry"></svg></div>
+    <div class="stats">
+      <div class="stat"><span>InnoDB, 1 index</span><b id="c-i1"></b></div>
+      <div class="stat"><span>InnoDB, tất cả secondary</span><b id="c-in"></b></div>
+      <div class="stat"><span>So với PK BIGINT</span><b id="c-diff"></b></div>
+      <div class="stat"><span>PostgreSQL, tất cả index đó</span><b id="c-pg"></b></div>
+    </div>
+    <p class="ts" style="color:var(--ink-2);margin:10px 0 0">Giả định leaf đầy khoảng 69% vì <code>user_id</code> được chèn theo thứ tự ngẫu nhiên. InnoDB: page 16KB, header record 5 byte, cột độ dài thay đổi thêm 1 byte. PostgreSQL: page 8KB, tuple header 8 byte (đã chứa TID), căn lề 8 byte, line pointer 4 byte.</p>
+  </div>
+</div>
+<p class="prose">Ở PostgreSQL, kiểu PK không ảnh hưởng tới index khác vì con trỏ luôn là TID 6 byte. Ở InnoDB, PK <code>CHAR(36)</code> làm mỗi secondary index to gần gấp ba so với <code>BIGINT</code>.</p>
+</section>
+
+<!-- 2 -->
+<section id="s2">
+<header><span class="num">02</span><h2>Đọc row qua secondary index</h2></header>
+<div class="prose">
+<p>Bảng <code>orders</code> 50 triệu row, index <code>idx_user_id</code> cao 3 tầng, PRIMARY của InnoDB cũng cao 3 tầng. Root và internal nằm sẵn trong RAM, leaf và page chứa row thì chưa. Query:</p>
+</div>
+<pre><code>SELECT * FROM orders WHERE user_id = 42;   -- user 42 có 3 đơn: 9001, 9105, 12007</code></pre>
+<div class="frame" id="trace"></div>
+<p class="prose ts" style="color:var(--ink-2)">Số page trong trace là mô hình suy từ cấu trúc cây, chưa đo trên bảng thật. Bài tập E6 ở cuối trang đo lại các con số này.</p>
+<div class="prose">
+<p>Số lần đọc disk bằng nhau: mỗi row tốn đúng một page chưa có trong RAM. InnoDB tốn thêm 6 lần truy cập page nhưng đều là hit, chi phí là CPU cho binary search và latch, không phải I/O. Khi chỉ cần cột có sẵn trong index, InnoDB thắng ngay vì PK đã nằm trong leaf.</p>
+</div>
+<div class="note"><strong>Lỗi hay gặp:</strong> nghĩ secondary index của InnoDB trỏ thẳng tới row. Nó chỉ chứa giá trị PK, nên mỗi row phải duyệt lại cây PRIMARY từ root. MySQL gọi bước này là lookup ngược về bảng, SQL Server gọi là key lookup.</div>
+</section>
+
+<!-- 3 -->
+<section id="s3">
+<header><span class="num">03</span><h2>UPDATE chạm vào những cây nào</h2></header>
+<div class="prose">
+<p>Bảng có PK <code>id</code> và ba secondary index: <code>idx_user_id</code>, <code>idx_created_at</code>, <code>idx_status</code>. Chọn cột bị UPDATE để thấy cây nào phải ghi.</p>
+</div>
+<div class="frame" id="upd">
+  <div class="ph"><strong>UPDATE orders SET … WHERE id = 9001</strong><span class="meta" id="u-meta"></span></div>
+  <div class="bd">
+    <div class="controls">
+      <div role="group" aria-label="Cột bị UPDATE" style="display:flex;gap:6px;flex-wrap:wrap" id="u-cases"></div>
+      <span class="sep" aria-hidden="true"></span>
+      <label style="display:inline-flex;gap:6px;align-items:center"><input type="checkbox" id="u-room" checked> Heap page của row còn chỗ trống</label>
+    </div>
+    <div class="mx" id="u-mx" aria-live="polite"></div>
+    <div class="log" id="u-log"></div>
+  </div>
+</div>
+<div class="prose">
+<p>Mấu chốt: ở PostgreSQL, hễ row có TID mới thì <strong>mọi</strong> index phải thêm entry, kể cả index có cột không đổi. HOT update tránh được việc này khi không cột nào có index bị đổi và page còn chỗ. Ở InnoDB, chỉ index chứa cột bị đổi mới phải ghi, trừ khi đổi PK.</p>
+</div>
+</section>
+
+<!-- 4 -->
+<section id="s4">
+<header><span class="num">04</span><h2>Split và lý do InnoDB trỏ bằng PK</h2></header>
+<div class="prose">
+<p>Row trong clustered index không đứng yên. Khi leaf của PRIMARY đầy, một nửa số row chuyển sang page mới. Nếu secondary index lưu địa chỉ vật lý, mỗi lần split phải sửa entry trong mọi secondary index. Lưu PK thì địa chỉ logic không bao giờ đổi.</p>
+</div>
+<div class="frame" id="split"></div>
+</section>
+
+<!-- 5 -->
+<section id="s5">
+<header><span class="num">05</span><h2>Tổng kết và các engine khác</h2></header>
+<div class="tablewrap"><table>
+<tr><th></th><th>MySQL InnoDB</th><th>PostgreSQL</th></tr>
+<tr><td>Row nằm ở đâu</td><td>Leaf của PRIMARY, xếp theo PK</td><td>Heap, không sắp xếp</td></tr>
+<tr><td>Leaf secondary index chứa</td><td>Cột index + giá trị PK</td><td>Cột index + TID</td></tr>
+<tr><td>Lấy 1 row qua secondary index</td><td>Duyệt thêm cây PRIMARY (~3 page, phần lớn hit)</td><td>Đọc 1 heap page</td></tr>
+<tr><td>Range scan theo PK</td><td>Đọc leaf liền nhau, row có sẵn</td><td>Heap fetch, rải rác nếu heap đã bị xáo trộn</td></tr>
+<tr><td><code>SELECT id</code> qua index <code>(user_id)</code></td><td>Covering sẵn, không lookup</td><td>Cần <code>INCLUDE (id)</code> và visibility map</td></tr>
+<tr><td>UPDATE cột không có index</td><td>Sửa row tại chỗ, bản cũ vào undo log</td><td>HOT nếu page còn chỗ, nếu không mọi index thêm entry</td></tr>
+<tr><td>UPDATE cột có index</td><td>Chỉ index đó bị ghi</td><td>Mọi index thêm entry</td></tr>
+<tr><td>Kiểu PK ảnh hưởng</td><td>Mọi secondary index</td><td>Chỉ index của PK</td></tr>
+<tr><td>Split ở leaf chứa row</td><td>Row di chuyển, secondary index không đổi</td><td>Heap không split</td></tr>
+</table></div>
+<div class="tablewrap"><table>
+<tr><th>Engine</th><th>Mặc định</th><th>Ghi chú</th></tr>
+<tr><td>SQL Server</td><td>PK tạo clustered index</td><td>Clustered là tuỳ chọn. Bảng không có clustered index là heap, nonclustered index lưu RID</td></tr>
+<tr><td>Oracle</td><td>Heap, index lưu ROWID</td><td>Muốn bảng xếp theo PK thì dùng <code>ORGANIZATION INDEX</code> (IOT)</td></tr>
+<tr><td>SQLite</td><td>Clustered theo <code>rowid</code></td><td><code>WITHOUT ROWID</code> để clustered theo PK</td></tr>
+<tr><td>PostgreSQL <code>CLUSTER</code></td><td>Sắp xếp heap một lần</td><td>Không duy trì về sau, lấy lock <code>ACCESS EXCLUSIVE</code> khi chạy</td></tr>
+</table></div>
+<div class="note"><strong>Lỗi hay gặp:</strong> đồng nhất clustered index với primary key. Điều này chỉ đúng với InnoDB và mặc định của SQL Server. Trong PostgreSQL, PK là một B-tree như mọi index khác và không làm row được sắp xếp. Định nghĩa đúng: clustered index là index mà leaf chứa nguyên row. InnoDB chọn PK cho vai trò đó.</div>
+<div class="senior">
+<h3>Góc nhìn senior</h3>
+<ul style="margin:0">
+<li>InnoDB: PK ngắn và tăng dần (<code>BIGINT AUTO_INCREMENT</code>, UUIDv7, hoặc <code>UUID_TO_BIN(uuid, 1)</code>). PK ngẫu nhiên làm split rải rác ngay trong dữ liệu bảng, không chỉ trong index.</li>
+<li>InnoDB: index <code>(user_id)</code> đã là <code>(user_id, id)</code>. Khai báo <code>(user_id, id)</code> là thừa, và <code>ORDER BY id</code> sau <code>WHERE user_id = ?</code> không cần sort.</li>
+<li>PostgreSQL: bảng UPDATE nhiều thì giữ HOT. Ít index trên cột hay đổi, <code>fillfactor</code> 80 đến 90, theo dõi <code>n_tup_hot_upd</code> so với <code>n_tup_upd</code>.</li>
+<li>Đo, đừng đoán: <code>EXPLAIN (ANALYZE, BUFFERS)</code> ở PostgreSQL, <code>Innodb_buffer_pool_read_requests</code> và <code>Innodb_buffer_pool_reads</code> ở MySQL.</li>
+</ul>
+</div>
+</section>
+
+<!-- 6 -->
+<section id="s6">
+<header><span class="num">06</span><h2>Bài tập và câu hỏi kiểm tra</h2></header>
+<h3>Bài tập thực hành</h3>
+<p class="prose">Viết dự đoán ra trước khi chạy. Lab chính là MySQL 8.4, PostgreSQL chỉ để đối chiếu.</p>
+<details><summary>E5. Kiểu PK và kích thước secondary index</summary>
+<p>Tạo hai bảng <code>orders</code> 5 triệu row, mỗi bảng 4 secondary index giống nhau. Bảng thứ nhất có PK <code>BIGINT AUTO_INCREMENT</code>, bảng thứ hai có PK <code>CHAR(36)</code> chứa UUIDv4. Dùng calculator ở phần 01 để dự đoán kích thước từng index, rồi so với số đo thật:</p>
+<pre><code>ANALYZE TABLE orders_bigint, orders_uuid;
+SELECT table_name, index_name, stat_value * @@innodb_page_size / 1024 / 1024 AS mb
+FROM mysql.innodb_index_stats
+WHERE database_name = DATABASE() AND stat_name = 'size'
+ORDER BY table_name, index_name;</code></pre>
+<p>Chênh lệch giữa dự đoán và số đo đến từ đâu: fill factor thật, record header hay page directory?</p></details>
+<details><summary>E6. Đo lại trace của phần 02</summary>
+<p>Trên bảng 5 triệu row, chọn một <code>user_id</code> có đúng 3 đơn. Restart MySQL để buffer pool lạnh, đọc <code>Innodb_buffer_pool_read_requests</code> và <code>Innodb_buffer_pool_reads</code> trong <code>SHOW GLOBAL STATUS</code> trước và sau mỗi query, trên một server không có tải nào khác:</p>
+<pre><code>SELECT * FROM orders WHERE user_id = 42;
+SELECT id FROM orders WHERE user_id = 42;   -- EXPLAIN phải ghi "Using index"</code></pre>
+<p>So với con số 13 và 4 lần truy cập page trong trace. Làm lại trên PostgreSQL với <code>EXPLAIN (ANALYZE, BUFFERS)</code>, trước và sau khi tạo index <code>INCLUDE (id)</code> và chạy <code>VACUUM</code>.</p></details>
+<details><summary>E7. HOT update và write amplification</summary>
+<p>PostgreSQL: bảng 1 triệu row với 4 index. Chạy 1 triệu lệnh UPDATE cột <code>total</code> (không có index), một lần với <code>fillfactor = 100</code> và một lần với <code>fillfactor = 90</code>. So <code>n_tup_hot_upd</code> với <code>n_tup_upd</code> trong <code>pg_stat_user_tables</code>, và <code>pg_relation_size</code> của từng index trước và sau. Làm lại với cột <code>status</code> có index.</p>
+<p>MySQL: cùng hai loại UPDATE, đo kích thước index bằng truy vấn của E5. Index nào lớn lên?</p></details>
+<details><summary>E8. Split với PK tuần tự và PK ngẫu nhiên</summary>
+<p>Insert 1 triệu row vào hai bảng InnoDB: PK <code>BIGINT AUTO_INCREMENT</code> và PK UUIDv4 dạng <code>BINARY(16)</code>. Bật bộ đếm split trước khi chạy:</p>
+<pre><code>SET GLOBAL innodb_monitor_enable = 'index_page_splits';
+SELECT name, count FROM information_schema.INNODB_METRICS
+WHERE name = 'index_page_splits';</code></pre>
+<p>So số split, thời gian insert và kích thước PRIMARY. Thêm bảng thứ ba dùng <code>UUID_TO_BIN(uuid, 1)</code> với UUIDv1, hoặc UUIDv7 sinh từ ứng dụng.</p></details>
+<h3>Câu hỏi kiểm tra</h3>
+<details><summary>Đổi PK từ CHAR(36) sang BIGINT</summary><p>Bảng InnoDB có PK <code>CHAR(36)</code> UUIDv4 và 5 secondary index. Đổi sang <code>BIGINT AUTO_INCREMENT</code> thì PRIMARY và các secondary index thay đổi theo hai cách khác nhau nào?</p></details>
+<details><summary>Index (status) và ORDER BY id</summary><p><code>SELECT id FROM orders WHERE status = 'paid' ORDER BY id LIMIT 20</code> với index <code>(status)</code>: InnoDB có cần sort và lookup không? PostgreSQL thì sao?</p></details>
+<details><summary>Đổi lấy gì</summary><p>InnoDB chấp nhận lookup qua secondary index tốn thêm một lần duyệt cây. Nó nhận lại được gì khi row bị split hoặc bị UPDATE?</p></details>
+<details><summary>Đếm cây bị ghi</summary><p>Bảng PostgreSQL có 6 index. UPDATE một cột không có index nhưng heap page đã đầy. Có bao nhiêu cây bị ghi? Nếu là InnoDB thì sao?</p></details>
+<details><summary>Range scan theo PK sau nhiều UPDATE</summary><p><code>WHERE id BETWEEN 9001 AND 9040</code> trên bảng vừa nạp xong và trên bảng đã UPDATE ngẫu nhiên hàng triệu lần. Số page đọc ở mỗi engine thay đổi thế nào? Xem <code>pg_stats.correlation</code> ở đâu?</p></details>
+</section>
+</main>
+</div>
+
+<script>
+/* ---------- helpers ---------- */
+const DEFS=`<defs><marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>`;
+function B(x,y,w,h,cls,t,sub,start){
+  const tx=start?x+10:x+w/2, an=start?'start':'middle';
+  return `<g class="n ${cls||''}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="4"/>`+
+  `<text class="tb" x="${tx}" y="${y+(sub?h/2-8:h/2)}" text-anchor="${an}" dominant-baseline="central">${t}</text>`+
+  (sub?`<text class="ts" x="${tx}" y="${y+h/2+9}" text-anchor="${an}" dominant-baseline="central">${sub}</text>`:'')+`</g>`;
+}
+const E=(x,y,w,h,cls,t)=>`<g class="n ${cls||''}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="3"/><text class="t" x="${x+8}" y="${y+h/2}" dominant-baseline="central">${t}</text></g>`;
+const L=(x1,y1,x2,y2,cls)=>`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" class="edge ${cls||''}"/>`;
+const A=(d,cls)=>`<path d="${d}" class="edge ${cls||''}" marker-end="url(#arw)"/>`;
+const T=(x,y,t,anchor,cls)=>`<text class="${cls||'lbl'}" x="${x}" y="${y}" text-anchor="${anchor||'start'}">${t}</text>`;
+const BOX=(x,y,w,h,cls,title)=>`<rect class="box ${cls}" x="${x}" y="${y}" width="${w}" height="${h}" rx="6"/>`+T(x+8,y+17,title,'start','ts');
+
+function stepper(id,{title,vb,steps,draw,after,extra}){
+  const el=document.getElementById(id);
+  el.innerHTML=`<div class="ph"><strong>${title}</strong><span class="meta"></span></div><div class="bd">
+  <h3 class="st-t"></h3>${extra||''}
+  <div class="svgwrap"><svg viewBox="${vb}" role="img"></svg></div>
+  <div class="desc" aria-live="polite"><div class="st-d"></div><pre hidden></pre></div>
+  <div class="nav"><button data-d="-1">Trước</button><button data-d="1" class="primary">Tiếp</button></div></div>`;
+  const svg=el.querySelector('svg'),t=el.querySelector('.st-t'),d=el.querySelector('.st-d'),pre=el.querySelector('pre'),meta=el.querySelector('.meta');
+  const [pv,nx]=el.querySelectorAll('.nav button');let i=0;
+  function render(){const s=steps[i];svg.innerHTML=DEFS+draw(s,i);svg.setAttribute('aria-label',s.t);t.textContent=s.t;d.textContent=s.d;
+    pre.hidden=!s.c;pre.textContent=s.c||'';meta.textContent=`bước ${i+1} / ${steps.length}`;pv.disabled=i===0;nx.disabled=i===steps.length-1;after&&after(s,el,i);}
+  function go(k){i=Math.max(0,Math.min(steps.length-1,i+k));render();}
+  pv.onclick=()=>go(-1);nx.onclick=()=>go(1);
+  el.tabIndex=0;el.addEventListener('keydown',e=>{if(e.key==='ArrowRight')go(1);if(e.key==='ArrowLeft')go(-1);});
+  render();
+}
+
+/* ---------- explorer ---------- */
+(function(){
+  const R={9001:[42,'350k','paid'],9002:[12,'80k','paid'],9102:[77,'99k','new'],9105:[42,'120k','paid'],12007:[42,'560k','shipped'],12010:[91,'45k','new']};
+  const SEC={
+    inno:{root:'(42, 12007)',leaves:[{h:'leaf, page 812',e:[[12,9002],[42,9001],[42,9105]]},{h:'leaf, page 813',e:[[42,12007],[77,9102],[91,12010]]}]},
+    pg:{root:'42, (95002,1)',leaves:[{h:'leaf, block 1187',e:[[12,9002,'(88123,2)'],[42,9001,'(88123,7)'],[42,9105,'(90551,3)']]},{h:'leaf, block 1188',e:[[42,12007,'(95002,1)'],[77,9102,'(95002,4)'],[91,12010,'(90551,8)']]}]}};
+  const CL=[{h:'leaf, page 2201',ids:[9001,9002]},{h:'leaf, page 2240',ids:[9102,9105]},{h:'leaf, page 2968',ids:[12007,12010]}];
+  const HP=[{b:88123,s:[[2,9002],[7,9001]]},{b:90551,s:[[3,9105],[8,12010]]},{b:95002,s:[[1,12007],[4,9102]]}];
+  const LY=[46,206],RY=[26,136,246];
+  let eng='inno',sel=9001;
+  const rowsEl=document.getElementById('ex-rows');
+  [9001,9105,12007].forEach(id=>{const b=document.createElement('button');b.textContent='id '+id;b.dataset.id=id;b.onclick=()=>{sel=id;draw();};rowsEl.appendChild(b);});
+  document.getElementById('ex-inno').onclick=()=>{eng='inno';draw();};
+  document.getElementById('ex-pg').onclick=()=>{eng='pg';draw();};
+  function draw(){
+    document.getElementById('ex-inno').setAttribute('aria-pressed',eng==='inno');
+    document.getElementById('ex-pg').setAttribute('aria-pressed',eng==='pg');
+    rowsEl.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',+b.dataset.id===sel));
+    const S=SEC[eng];let o=T(16,18,'idx_user_id (secondary)','start','lblb');
+    let li=0,ei=0;S.leaves.forEach((l,a)=>l.e.forEach((e,b)=>{if(e[1]===sel){li=a;ei=b;}}));
+    // secondary tree
+    o+=B(16,163,120,40,'path',S.root,'root');
+    S.leaves.forEach((l,a)=>{o+=L(136,183,156,LY[a]+53,a===li?'on':'');});
+    o+=`<line x1="226" y1="${LY[0]+106}" x2="226" y2="${LY[1]}" class="dash"/>`;
+    S.leaves.forEach((l,a)=>{o+=BOX(156,LY[a],140,106,'idx',l.h);
+      l.e.forEach((e,b)=>{const lab=eng==='inno'?`(${e[0]}, ${e[1]})`:`${e[0]} → ${e[2]}`;
+        o+=E(164,LY[a]+28+b*26,124,22,(a===li&&b===ei)?'path':'key',lab);});});
+    const ey=LY[li]+28+ei*26+11;
+    if(eng==='inno'){
+      o+=T(318,18,'PRIMARY, chính là bảng orders','start','lblb');
+      const ci=CL.findIndex(c=>c.ids.includes(sel)),ri=CL[ci].ids.indexOf(sel);
+      o+=A(`M288 ${ey} C 304 ${ey}, 300 176, 316 176`,'on');
+      o+=B(318,156,104,40,'path','[9100 | 12000]','root');
+      CL.forEach((c,a)=>{o+=L(422,176,440,RY[a]+40,a===ci?'on':'');});
+      CL.forEach((c,a)=>{o+=BOX(440,RY[a],224,80,'data',c.h);
+        c.ids.forEach((id,b)=>{const r=R[id];o+=E(448,RY[a]+28+b*26,208,22,(a===ci&&b===ri)?'path':'row',`${id}, user ${r[0]}, ${r[1]}, ${r[2]}`);});});
+      const r=CL[ci];
+      setStats(2,2,`<p><b>InnoDB.</b> Duyệt idx_user_id: root → ${S.leaves[li].h} → entry (42, ${sel}). Entry chỉ có giá trị PK.</p><p>Lấy <b>id ${sel}</b>, duyệt lại PRIMARY từ root: [9100 | 12000] → ${r.h}, nơi chứa nguyên row. Hai lần duyệt cây cho một row.</p>`);
+    }else{
+      o+=T(360,18,'Heap của bảng orders, không sắp xếp','start','lblb');
+      const hi=HP.findIndex(h=>h.s.some(s=>s[1]===sel)),si=HP[hi].s.findIndex(s=>s[1]===sel),tid=`(${HP[hi].b},${HP[hi].s[si][0]})`;
+      const ty=RY[hi]+28+si*26+11;
+      o+=A(`M288 ${ey} C 330 ${ey}, 320 ${ty}, 358 ${ty}`,'on');
+      HP.forEach((h,a)=>{o+=BOX(360,RY[a],304,80,'',`heap page ${h.b}`);
+        h.s.forEach((s,b)=>{const r=R[s[1]];o+=E(368,RY[a]+28+b*26,288,22,(a===hi&&b===si)?'path':'row',`slot ${s[0]}: id ${s[1]}, user ${r[0]}, ${r[1]}, ${r[2]}`);});});
+      setStats(2,1,`<p><b>PostgreSQL.</b> Duyệt idx_user_id: root → ${S.leaves[li].h} → entry 42 → TID <b>${tid}</b>.</p><p>TID là địa chỉ vật lý, nên đọc thẳng heap page ${HP[hi].b}, slot ${HP[hi].s[si][0]}. Không có cây thứ hai, nhưng heap không xếp theo id hay user_id: ba đơn của user 42 nằm ở ba page khác nhau.</p>`);
+    }
+    document.getElementById('ex-svg').innerHTML=DEFS+o;
+    document.getElementById('ex-meta').textContent=eng==='inno'?'MySQL InnoDB':'PostgreSQL';
+  }
+  function setStats(a,b,log){document.getElementById('ex-a').textContent=a;document.getElementById('ex-b').textContent=b;document.getElementById('ex-c').textContent=a+b;document.getElementById('ex-log').innerHTML=log;}
+  draw();
+})();
+
+/* ---------- size calculator ---------- */
+(function(){
+  const pk=document.getElementById('c-pk'),key=document.getElementById('c-key'),n=document.getElementById('c-n'),rows=document.getElementById('c-rows');
+  const FILL=0.69;
+  const fmt=b=>b>=2**40?(b/2**40).toFixed(2)+' TB':b>=2**30?(b/2**30).toFixed(1)+' GB':(b/2**20).toFixed(0)+' MB';
+  const innoEntry=(k,p)=>5+k+(p===37?36:p)+((p===37?1:0)+(k===26?1:0));
+  const innoSize=(e,r)=>Math.ceil(r*e/(16234*FILL))*16384;
+  function upd(){
+    const p=+pk.value,k=+key.value,N=+n.value,r=+rows.value;
+    const ie=innoEntry(k,p),base=innoEntry(k,8);
+    const pgData=8+k, pgE=Math.ceil(pgData/8)*8+4;
+    const i1=innoSize(ie,r),pg1=Math.ceil(r*pgE/(8152*FILL))*8192;
+    document.getElementById('c-nv').textContent=N;
+    document.getElementById('c-i1').textContent=fmt(i1);
+    document.getElementById('c-in').textContent=fmt(i1*N);
+    const d=i1*N-innoSize(base,r)*N;
+    document.getElementById('c-diff').textContent=d===0?'bằng nhau':(d>0?'+':'−')+fmt(Math.abs(d));
+    document.getElementById('c-pg').textContent=fmt(pg1*N);
+    // byte bars
+    const S=5.4,X=150;let o='';
+    o+=T(16,30,'InnoDB','start','lblb')+T(16,46,`${ie} byte / entry`,'start','ts');
+    let x=X;const seg=(w,cls,lab,y)=>{const s=B(x,y,w*S,34,cls,w*S>40?lab:'',w*S>40?w+' B':'');x+=w*S+2;return s;};
+    o+=seg(5,'dim','header',18);
+    o+=seg(k+(k===26?1:0),'struct','user_id',18);
+    o+=seg((p===37?37:p),'key','PK '+(p===37?'CHAR(36)':p===16?'BINARY(16)':p===4?'INT':'BIGINT'),18);
+    o+=T(16,112,'PostgreSQL','start','lblb')+T(16,128,`${pgE} byte / entry`,'start','ts');
+    x=X;
+    o+=seg(8,'key','header + TID',100);
+    o+=seg(k,'struct','user_id',100);
+    const pad=Math.ceil(pgData/8)*8-pgData; if(pad)o+=seg(pad,'dim','pad',100);
+    o+=seg(4,'dim','line ptr',100);
+    o+=T(X,160,'PostgreSQL không chứa PK trong index: kiểu PK không đổi được dòng này.','start','ts');
+    document.getElementById('c-svg').innerHTML=o;
+  }
+  [pk,key,n,rows].forEach(e=>e.addEventListener('input',upd));upd();
+})();
+
+/* ---------- lookup trace (dual lane) ---------- */
+(function(){
+  // [label, page, hit?]
+  const I=[['root','p4',1],['int','p57',1],['leaf','p812',0],
+           ['root','p3',1],['int','p6',1],['leaf','p2201',0],
+           ['root','p3',1],['int','p6',1],['leaf','p2240',0],
+           ['leaf','p813',0],
+           ['root','p3',1],['int','p9',1],['leaf','p2968',0]];
+  const P=[['root','b412',1],['int','b3',1],['leaf','b1187',0],['heap','88123',0],['heap','90551',0],['leaf','b1188',0],['heap','95002',0]];
+  const GR=[{lab:'idx_user_id',n:3},{lab:'row 9001',n:3},{lab:'row 9105',n:3},{lab:'tiếp',n:1},{lab:'row 12007',n:3}];
+  const SW=40,SG=3,GG=12,X0=86;
+  const gx=[];let x=X0;GR.forEach(g=>{gx.push(x);x+=g.n*SW+(g.n-1)*SG+GG;});
+  const ix=[];GR.forEach((g,k)=>{for(let j=0;j<g.n;j++)ix.push(gx[k]+j*(SW+SG));});
+  const gw=k=>GR[k].n*SW+(GR[k].n-1)*SG;
+  const px=[ix[0],ix[1],ix[2],gx[1]+(gw(1)-SW)/2,gx[2]+(gw(2)-SW)/2,gx[3],gx[4]+(gw(4)-SW)/2];
+  const pgGroup=[0,0,0,1,2,3,4];
+  const rng=n=>[...Array(n).keys()];
+  const S=[
+  {t:'Planner chọn Index Scan trên idx_user_id',d:'Cả hai engine đều chọn idx_user_id vì user 42 chỉ có 3 đơn trong 50 triệu row. Các ô xám bên dưới là những page sẽ phải truy cập. Hàng trên là InnoDB, hàng dưới là PostgreSQL.',i:[],p:[],c:"SELECT * FROM orders WHERE user_id = 42;"},
+  {t:'Root của idx_user_id: hit',d:'InnoDB: root của secondary index nằm ở page 4 trong file orders.ibd (page 3 là root của PRIMARY). PostgreSQL: vị trí root đọc từ metapage block 0, đã cache. Cả hai đều có sẵn trong RAM.',i:rng(1),p:rng(1)},
+  {t:'Internal: hit',d:'Binary search trong internal page để tìm leaf chứa entry đầu tiên có user_id = 42. Tầng internal gần như luôn nằm trong RAM.',i:rng(2),p:rng(2)},
+  {t:'Leaf của idx_user_id: đọc từ disk',d:'Leaf chưa có trong buffer pool nên phải đọc lên. Từ đây hai engine bắt đầu khác nhau ở thứ nằm trong entry.',i:rng(3),p:rng(3),c:"InnoDB leaf p812:      (42, 9001)  (42, 9105)  ...\nPostgreSQL leaf b1187:  42 → (88123,7)   42 → (90551,3)  ..."},
+  {t:'Lấy row 9001',d:'InnoDB: entry chỉ cho biết id = 9001, nên duyệt PRIMARY từ root (page 3, hit) qua internal (hit) xuống leaf page 2201 (đọc disk) để lấy nguyên row. PostgreSQL: TID (88123,7) là địa chỉ thật, đọc thẳng heap page 88123 rồi kiểm tra xmin, xmax.',i:rng(6),p:rng(4)},
+  {t:'Lấy row 9105',d:'Entry kế tiếp nằm ngay trong cùng leaf, không quay lại root của idx_user_id. Nhưng InnoDB lại duyệt PRIMARY thêm một lần nữa: root, internal, leaf page 2240. PostgreSQL đọc heap page 90551.',i:rng(9),p:rng(5)},
+  {t:'Hết leaf, sang leaf kế tiếp',d:'Entry (42, 12007) nằm ở leaf bên phải. Cả hai đi theo sibling link sang leaf kế tiếp, không duyệt lại từ root. Leaf này chưa có trong RAM.',i:rng(10),p:rng(6)},
+  {t:'Lấy row 12007',d:'id 12007 thuộc nhánh khác của PRIMARY: internal page 9 thay vì page 6, rồi leaf page 2968. PostgreSQL đọc heap page 95002. Entry tiếp theo có user_id = 77, dừng.',i:rng(13),p:rng(7)},
+  {t:'Đọc con số',d:'InnoDB 13 lần truy cập page, PostgreSQL 7. Nhưng số lần đọc disk bằng nhau: 5. Phần InnoDB tốn thêm là 6 lần hit ở root và internal của PRIMARY, tức CPU và latch, không phải I/O.',i:rng(13),p:rng(7),cur:[],c:"-- MySQL: chênh lệch status counter sau query\nInnodb_buffer_pool_read_requests   +13\nInnodb_buffer_pool_reads           +5\n\n-- PostgreSQL: EXPLAIN (ANALYZE, BUFFERS)\nIndex Scan using idx_user_id on orders\n  Index Cond: (user_id = 42)\n  Buffers: shared hit=2 read=5"},
+  {t:'Đổi query: SELECT id thay vì SELECT *',d:'InnoDB: id đã nằm trong leaf của idx_user_id, nên không cần chạm vào PRIMARY. Chỉ còn 4 page. PostgreSQL: index (user_id) không chứa id, vẫn phải đọc heap cho từng row.',i:[0,1,2,9],p:rng(7),cur:[],cov:1,c:"-- MySQL EXPLAIN\ntype: ref   key: idx_user_id   Extra: Using index\n\n-- PostgreSQL\nIndex Scan using idx_user_id on orders\n  Buffers: shared hit=2 read=5"},
+  {t:'PostgreSQL với INCLUDE (id) sau VACUUM',d:'Thêm id vào index bằng INCLUDE và chạy VACUUM để visibility map đánh dấu các heap page là all-visible. Lúc đó PostgreSQL mới làm Index Only Scan, còn 4 page index như InnoDB, cộng một lần hit vào page của visibility map để kiểm tra all-visible. Ở InnoDB, điều này có sẵn mà không cần khai báo gì.',i:[0,1,2,9],p:[0,1,2,5],cur:[],cov:1,vm:1,c:"CREATE INDEX idx_user_id_incl ON orders (user_id) INCLUDE (id);\nVACUUM orders;\n\nIndex Only Scan using idx_user_id_incl on orders\n  Heap Fetches: 0\n  Buffers: shared hit=3 read=2"}];
+  S.forEach((s,k)=>{if(!s.cur){const prevI=k?S[k-1].i:[],prevP=k?S[k-1].p:[];s.cur={i:s.i.filter(v=>!prevI.includes(v)),p:s.p.filter(v=>!prevP.includes(v))};}else s.cur={i:[],p:[]};});
+  const cnt=(arr,set)=>{let h=0,r=0;set.forEach(j=>arr[j][2]?h++:r++);return[h,r];};
+  function lane(arr,xs,set,cur,y,groups,cov){let o='';
+    arr.forEach((a,j)=>{const on=set.includes(j);let cls='dim';if(on)cls=(a[2]?'ram':'miss')+(cur.includes(j)?' cur':'');
+      o+=B(xs[j],y,SW,44,cls,a[0],on||!cov?a[1]:'bỏ qua');});return o;}
+  function draw(s){let o='';
+    GR.forEach((g,k)=>{o+=T(gx[k],30,g.lab,'start','ts');});
+    o+=T(12,64,'InnoDB','start','lblb');
+    o+=lane(I,ix,s.i,s.cur.i,38,0,s.cov);
+    const [ih,ir]=cnt(I,s.i);o+=T(X0,104,`${s.i.length} lần truy cập page: ${ih} hit, ${ir} đọc disk`,'start','lbl');
+    o+=`<line x1="12" y1="122" x2="668" y2="122" class="dash"/>`;
+    GR.forEach((g,k)=>{const has=pgGroup.includes(k);if(has)o+=T(gx[k],146,k===0?'idx_user_id':k===3?'tiếp':'heap','start','ts');});
+    o+=T(12,180,'Postgres','start','lblb');
+    o+=lane(P,px,s.p,s.cur.p,154,0,s.cov);
+    const [ph,pr]=cnt(P,s.p);o+=T(X0,220,`${s.p.length+(s.vm?1:0)} lần truy cập page: ${ph+(s.vm?1:0)} hit, ${pr} đọc disk`+(s.vm?' (gồm 1 hit vào visibility map)':''),'start','lbl');
+    return o;}
+  const extra=`<div class="stats" style="margin:0 0 10px"><div class="stat"><span>InnoDB: hit / đọc disk</span><b class="tr-i">0 / 0</b></div><div class="stat"><span>PostgreSQL: hit / đọc disk</span><b class="tr-p">0 / 0</b></div></div>`;
+  stepper('trace',{title:'SELECT * FROM orders WHERE user_id = 42',vb:'0 0 680 232',steps:S,draw,extra,
+    after:(s,el)=>{const a=cnt(I,s.i),b=cnt(P,s.p);if(s.vm)b[0]++;el.querySelector('.tr-i').textContent=a.join(' / ');el.querySelector('.tr-p').textContent=b.join(' / ');}});
+})();
+
+/* ---------- update matrix ---------- */
+(function(){
+  const TREES=[['storage','PRIMARY (bảng)','heap'],['pk','(nằm ở trên)','orders_pkey'],['idx_user_id','idx_user_id','idx_user_id'],['idx_created_at','idx_created_at','idx_created_at'],['idx_status','idx_status','idx_status']];
+  const CASES=[{id:'total',lab:'SET total = 400000',col:null},{id:'status',lab:"SET status = 'shipped'",col:'idx_status'},{id:'id',lab:'SET id = 9999',col:'pk'}];
+  let cur='total';const room=document.getElementById('u-room'),wrap=document.getElementById('u-cases');
+  CASES.forEach(c=>{const b=document.createElement('button');b.textContent=c.lab;b.dataset.id=c.id;b.onclick=()=>{cur=c.id;draw();};wrap.appendChild(b);});
+  room.addEventListener('change',draw);
+  function inno(c,tree){
+    if(tree==='storage'){return c.id==='id'?['w','Delete-mark row ở vị trí 9001, chèn row mới ở vị trí 9999 (có thể sang leaf khác)']:['w','Sửa row tại chỗ trong leaf, bản cũ ghi vào undo log'];}
+    if(tree==='pk')return['q','PRIMARY chính là bảng, đã tính ở dòng trên'];
+    if(c.id==='id')return['w','Delete-mark (…, 9001), chèn (…, 9999): PK nằm trong mọi entry'];
+    if(tree===c.col)return['w',"Delete-mark ('paid', 9001), chèn ('shipped', 9001)"];
+    return['','Không đổi'];}
+  function pg(c,tree,hot){
+    if(tree==='storage'){if(hot)return['w','Phiên bản mới ở cùng page, nối HOT chain từ (88123,7)'];return['w','Phiên bản mới có TID mới, bản cũ chờ VACUUM'];}
+    if(hot)return['','Không đổi: vẫn trỏ (88123,7), đi theo HOT chain'];
+    return['w','Thêm entry trỏ TID mới, kể cả khi key không đổi'];}
+  function draw(){
+    wrap.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.id===cur));
+    const c=CASES.find(x=>x.id===cur);const hot=c.id==='total'&&room.checked;
+    let h=`<div class="h">Cây</div><div class="h">MySQL InnoDB</div><div class="h">PostgreSQL</div>`,wi=0,wp=0;
+    TREES.forEach(([k,ni,np])=>{const a=inno(c,k),b=pg(c,k,hot);if(a[0]==='w')wi++;if(b[0]==='w')wp++;
+      h+=`<div class="tree">${ni===np?ni:ni+' / '+np}</div><div class="${a[0]}">${a[1]}</div><div class="${b[0]}">${b[1]}</div>`;});
+    h+=`<div class="tot">Cây bị ghi</div><div class="tot">${wi}</div><div class="tot">${wp}</div>`;
+    document.getElementById('u-mx').innerHTML=h;
+    document.getElementById('u-meta').textContent=`InnoDB ghi ${wi} cây, PostgreSQL ghi ${wp} cây`;
+    let log='';
+    if(c.id==='total')log=hot?'Cột total không có index và heap page còn chỗ: PostgreSQL làm HOT update, không index nào bị ghi. Bỏ chọn ô "còn chỗ trống" để xem điều gì xảy ra khi page đầy.':'Page đầy nên phiên bản mới phải sang page khác, nhận TID mới. Bốn index đều phải thêm entry trỏ tới TID đó, dù không cột nào có index bị đổi. Đây là write amplification mà InnoDB không gặp.';
+    if(c.id==='status')log='status có index nên HOT không áp dụng, dù page còn chỗ. PostgreSQL thêm entry vào cả 4 index. InnoDB chỉ sửa row và idx_status, vì idx_user_id và idx_created_at vẫn trỏ đúng bằng PK 9001.';
+    if(c.id==='id')log='Đổi PK là trường hợp đắt nhất của InnoDB: row đổi chỗ trong clustered index và mọi secondary index phải sửa vì PK nằm trong từng entry. Với PostgreSQL, đây chỉ là một UPDATE không HOT như mọi UPDATE khác.';
+    document.getElementById('u-log').innerHTML=`<p>${log}</p>`;
+  }
+  draw();
+})();
+
+/* ---------- split stepper ---------- */
+(function(){
+  const LYY=92,RW=52,RG=8;
+  function leaf(x,label,ids,cls,hl,pos){const w=12+ids.length*(RW+RG)+4;let o=BOX(x,LYY,w,70,'data',label);
+    ids.forEach((id,j)=>{const rx=x+12+j*(RW+RG);pos[id]=rx+RW/2;o+=B(rx,LYY+28,RW,32,hl&&hl.includes(id)?hl.cls||'hot':cls,String(id));});return o;}
+  const ENT0=[[12,9003],[42,9001],[42,9006],[55,9004]],ENT1=[[12,9003],[42,9001],[42,9006],[55,9004],[77,9005]];
+  function sec(ents,pos,opt){let o=BOX(40,212,600,72,'idx','idx_user_id, leaf page 812');
+    ents.forEach(([u,id],j)=>{const ex=52+j*114;const isNew=opt.nw===id,moved=opt.mv&&opt.mv.includes(id);
+      let lab=`(${u}, ${id})`,cls=isNew?'hot':'key';
+      if(opt.phys){lab=`(${u}, p2201 s${opt.phys[id]})`;if(moved)cls='miss';}
+      o+=E(ex,242,104,28,cls,lab);
+      if(pos[id]!==undefined)o+=L(ex+52,242,pos[id],LYY+60,moved?(opt.phys?'miss':'on'):'ptr');});
+    return o;}
+  const S=[
+  {t:'Leaf page 2201 của PRIMARY đã đầy',d:'Để dễ thấy, mỗi leaf chứa tối đa 4 row. Leaf 2201 giữ các id từ 9000 tới dưới 9100. Bên dưới là leaf của idx_user_id: mỗi entry lưu giá trị PK, nét đứt là quan hệ logic qua PK chứ không phải con trỏ vật lý.',ph:0},
+  {t:'Insert id 9005 làm leaf tràn',d:'Row 9005 (user 77) phải nằm giữa 9004 và 9006 theo thứ tự PK. Leaf đã đủ 4 row nên không còn chỗ. PK ở đây không tăng dần tuyệt đối, ví dụ id được cấp theo lô hoặc là UUID.',ph:1},
+  {t:'Split: 3 row chuyển sang page 3110',d:'InnoDB cấp page mới 3110. Row 9004, 9005, 9006 nằm ở page 3110, page 2201 chỉ còn 9001, 9003. Parent nhận separator 9004. Đã ghi 3 page: 2201, 3110 và parent.',ph:2},
+  {t:'Secondary index: chỉ thêm entry của row mới',d:'(55, 9004) và (42, 9006) vẫn đúng nguyên vẹn: lần tìm sau tra PK 9004 qua PRIMARY sẽ tự đến page 3110. Index chỉ ghi thêm (77, 9005) cho row mới. Tổng cộng 4 page bị ghi, và con số này không đổi dù bảng có 10 secondary index.',ph:3},
+  {t:'Giả sử secondary index lưu địa chỉ vật lý',d:'Nếu entry lưu (page, slot), hai entry của 9004 và 9006 giờ trỏ sai vào page 2201. Mỗi secondary index phải tìm và sửa các entry đó, với 10 index là thêm hàng chục page bị ghi cho mỗi lần split. Đây là lý do InnoDB chấp nhận trả giá bằng một lần duyệt cây thêm khi đọc.',ph:4},
+  {t:'PostgreSQL: heap không split',d:'Heap không có thứ tự nên không bao giờ phải chia đôi page để giữ thứ tự. Row mới vào page nào còn chỗ theo Free Space Map, TID của row cũ không đổi. Row chỉ đổi TID khi bị UPDATE không HOT, và lúc đó mọi index đều thêm entry như phần 03.',ph:5}];
+  function draw(s){let o='';const pos={};
+    if(s.ph===5){
+      o+=BOX(40,LYY-62,280,140,'','heap page 88123');
+      [['(88123,1)','9003'],['(88123,2)','9001'],['(88123,3)','9006'],['(88123,4)','9004']].forEach((r,j)=>{o+=E(52,LYY-34+j*26,256,22,'row',`slot ${j+1}: id ${r[1]}`);});
+      o+=BOX(360,LYY-62,280,140,'','heap page 91442');
+      o+=E(372,LYY-34,256,22,'hot','slot 5: id 9005 (FSM chỉ tới đây)');
+      o+=T(500,LYY+50,'không chia đôi, không dời row','middle','ts');
+      o+=BOX(40,212,600,72,'idx','idx_user_id, leaf block 1187');
+      [['12 → (88123,1)','key'],['42 → (88123,2)','key'],['42 → (88123,3)','key'],['55 → (88123,4)','key'],['77 → (91442,5)','hot']].forEach((e,j)=>{o+=E(52+j*114,242,104,28,e[1],e[0]);});
+      return o;}
+    const parent=s.ph>=2?'[ 9000 | 9004 | 9100 ]':'[ 9000 | 9100 ]';
+    o+=B(240,14,200,40,s.ph>=2?'hot':'struct',parent,'parent');
+    if(s.ph===0){o+=L(340,54,340,LYY);o+=leaf(206,'leaf page 2201, đầy',[9001,9003,9004,9006],'row',null,pos);o+=sec(ENT0,pos,{});}
+    else if(s.ph===1){o+=L(340,54,340,LYY);o+=leaf(176,'leaf page 2201, tràn',[9001,9003,9004,9005,9006],'row',{includes:id=>id===9005,cls:'hot'},pos);
+      o+=`<rect x="172" y="${LYY-4}" width="344" height="78" rx="8" fill="none" stroke="var(--miss)" stroke-width="2" stroke-dasharray="6 4"/>`;o+=sec(ENT0,pos,{});}
+    else{o+=L(300,54,140,LYY,'hot')+L(380,54,470,LYY,'hot');
+      o+=leaf(60,'leaf page 2201',[9001,9003],'row',null,pos);
+      o+=leaf(374,'leaf page 3110, mới',[9004,9005,9006],'hot',null,pos);
+      o+=`<line x1="${60+136}" y1="${LYY+35}" x2="374" y2="${LYY+35}" class="dash"/>`;
+      if(s.ph===2)o+=sec(ENT0,pos,{});
+      if(s.ph===3)o+=sec(ENT1,pos,{nw:9005,mv:[9004,9006]});
+      if(s.ph===4){const phys={9003:2,9001:1,9006:4,9004:3,9005:0};o+=sec(ENT0,pos,{phys,mv:[9004,9006]});}}
+    return o;}
+  stepper('split',{title:'Leaf split trong PRIMARY của InnoDB',vb:'0 0 680 296',steps:S,draw});
+})();
+(function(){const links=[...document.querySelectorAll('nav.toc a')];
+  if(!('IntersectionObserver' in window))return;
+  const io=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){links.forEach(a=>a.classList.toggle('on',a.getAttribute('href')==='#'+e.target.id));}});},{rootMargin:'-30% 0px -60% 0px'});
+  document.querySelectorAll('section').forEach(s=>io.observe(s));})();
+</script>
+</body>
+</html>

@@ -38,17 +38,22 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 | Covering index / Index Only Scan and its cost | 2 (prov.) | same, §08 | 2026-10-14 | Exercise E4: measure the page-count difference myself |
 | TOAST and the real cost of `SELECT *` | 2 (prov.) | same, §08 | 2026-10-14 | Measure a wide-column table; find the InnoDB off-page equivalent |
 | Heap, TID, MVCC versions, HOT, bloat | 2 (prov.) | same, §09 | 2026-10-14 | Reproduce bloat and watch autovacuum fail to keep up |
-| InnoDB specifics (clustered index, secondary→PK lookup, undo log) | 1 | same, contrast boxes only | 2026-10-14 | **Primary gap — see Open question 1.** Redo the whole topic on MySQL 8.4 |
+| InnoDB specifics (clustered index, secondary→PK lookup, undo log) | 2 (prov.) | [clustered-vs-secondary-index](../topics/clustered-vs-secondary-index/index.html) §01–§04 | 2026-10-19 | Exercises E5 and E6: measure index sizes and buffer-pool reads on MySQL 8.4 and match them to the model |
+| Clustered vs secondary index (leaf contents, PK vs TID as pointer, covering by PK) | 2 (prov.) | same, §01–§02 | 2026-10-19 | Predict `EXPLAIN` and page reads for an unseen query on both engines, then confirm (E6) |
+| Index write cost of UPDATE (InnoDB in place vs PostgreSQL HOT / non-HOT) | 2 (prov.) | same, §03 | 2026-10-19 | Exercise E7: measure `n_tup_hot_upd` and index growth |
+| Clustered-index page split and PK choice (sequential vs random) | 2 (prov.) | same, §04 | 2026-10-19 | Exercise E8: count `index_page_splits` for sequential vs UUIDv4 keys |
 
 "(prov.)" = provisional. Every row above rests on one artifact I wrote myself, with no measurement behind it. Week 1 of Month 1 includes a baseline assessment (TECHNICAL_GROWTH.md Section 11) that should confirm or cut these.
 
 ## Open questions carried forward
 
-1. **The research is PostgreSQL-shaped; the program is MySQL 8.4.** Heap, TID/`ctid`, `VACUUM`, visibility map, clock-sweep, `INCLUDE`, HOT, `fillfactor`, 8KB pages — all PostgreSQL. ROADMAP.md Month 1 and TECHNICAL_GROWTH.md Track A commit to MySQL 8.4/InnoDB, where the equivalents are different in kind, not just in name: rows live in the clustered index leaf, secondary index leaves hold the PK, old versions go to the undo log, pages are 16KB, and there is no Index Only Scan / visibility map at all. The contrast boxes in the page flag this but do not resolve it. **Decide in Week 1:** either redo the mechanism sections against InnoDB, or keep PostgreSQL deliberately as the comparison exercise Track A allows and make MySQL the primary. Do not leave both half-learned.
+1. **The research is PostgreSQL-shaped; the program is MySQL 8.4.** Heap, TID/`ctid`, `VACUUM`, visibility map, clock-sweep, `INCLUDE`, HOT, `fillfactor`, 8KB pages — all PostgreSQL. ROADMAP.md Month 1 and TECHNICAL_GROWTH.md Track A commit to MySQL 8.4/InnoDB, where the equivalents are different in kind, not just in name: rows live in the clustered index leaf, secondary index leaves hold the PK, old versions go to the undo log, pages are 16KB, and there is no Index Only Scan / visibility map at all. The contrast boxes in the page flag this but do not resolve it. *2026-10-19: the clustered-vs-secondary page is the first one built InnoDB-first with PostgreSQL as the comparison. That is a step toward the second option, not a decision; nothing has been run on MySQL yet.* **Decide in Week 1:** either redo the mechanism sections against InnoDB, or keep PostgreSQL deliberately as the comparison exercise Track A allows and make MySQL the primary. Do not leave both half-learned.
 2. Does a `LIMIT 20` actually stop the index scan early, or does the plan materialise more rows first? The §07 trace assumes early exit.
 3. The §07 numbers (50M rows, ~6.5GB table, ~1.6GB index, 24 page accesses) are estimates, not measurements. Which of them survive contact with a real table?
 4. InnoDB change buffer and adaptive hash index were named but not explained. When does each actually help, and when does it hurt?
 5. The B+tree playground splits at 3 keys per node for visibility. Does anything in my mental model secretly depend on that small fan-out rather than the real ~400?
+6. The clustered-vs-secondary size calculator assumes ~69% leaf fill and a 5-byte InnoDB record header, and ignores the page directory. How far off is it on a real table (E5)?
+7. The page states that InnoDB's extra cost on a secondary-index lookup is mostly buffer-pool hits (CPU and latches), not I/O. At what hit ratio does that stop being true?
 
 ## Pending verification (from the session's own exercise list)
 
@@ -58,7 +63,41 @@ These are written in the page as exercises; none have been run yet.
 - **E2** — Insert 1M rows with a sequential PK vs UUIDv4; compare index size and insert time; explain the gap through split behaviour. *(Directly matches ROADMAP.md Month 1 Week 3.)*
 - **E3** — Restart the server, run one query twice with `BUFFERS`; separate real disk reads from OS page cache.
 - **E4** — 5M-row `orders` table; run the §07 query with a plain index, then a covering index; explain the difference using the 12-step trace.
+- **E5** — Two 5M-row InnoDB tables, PK `BIGINT` vs `CHAR(36)` UUIDv4, 4 secondary indexes each; compare `mysql.innodb_index_stats` sizes with the page's calculator.
+- **E6** — Re-measure the clustered-vs-secondary §02 trace: `Innodb_buffer_pool_read_requests` / `Innodb_buffer_pool_reads` for `SELECT *` vs `SELECT id`; PostgreSQL `BUFFERS` before and after `INCLUDE (id)` + `VACUUM`.
+- **E7** — HOT vs non-HOT: 1M updates on an unindexed vs an indexed column, `fillfactor` 100 vs 90; `n_tup_hot_upd` and index sizes. Same updates on InnoDB.
+- **E8** — 1M inserts with sequential vs UUIDv4 PK on InnoDB; `index_page_splits` from `INNODB_METRICS`, insert time, PRIMARY size. *(Overlaps E2; run them together in Month 1 Week 3.)*
+- **Q6–Q10** — The five check questions at the end of the clustered-vs-secondary page.
 - **Q1–Q5** — The five check questions at the end of the page (leftmost prefix, `COUNT(*)` and the visibility map, full scan polluting the cache, TOAST, a `sessions` table updated 5,000×/sec). Answer in writing before looking anything up, then verify.
+
+---
+
+## 2026-10-19 — Clustered vs secondary index
+
+**Topic and objective.** What a clustered index is and how it differs from a secondary index, InnoDB first with PostgreSQL as the comparison: what each leaf holds, what a lookup through a secondary index costs, which trees an `UPDATE` writes, and why InnoDB points from secondary indexes to the PK instead of to a physical address.
+
+**Output.** [topics/clustered-vs-secondary-index/index.html](../topics/clustered-vs-secondary-index/index.html) — an interactive page in 6 sections: an entry-to-row explorer (both engines), a leaf-entry size calculator, an 11-step page-by-page trace of `SELECT * … WHERE user_id = 42`, an UPDATE matrix (which trees get written, HOT on and off), and a 6-step clustered-index leaf split. The lesson and the first draft were done on 2026-10-14 as a chat explanation plus a standalone visualisation; it was converted to a topic page and committed on 2026-10-19.
+
+**What it covers.**
+
+- A clustered index is the index whose leaves hold the whole row; a table has at most one. InnoDB always has one (PK, else the first `NOT NULL` unique index, else a hidden 6-byte `DB_ROW_ID`). PostgreSQL has none: rows live in an unordered heap and every index, PK included, stores key + TID. `CLUSTER` sorts the heap once, is not maintained, and takes `ACCESS EXCLUSIVE`.
+- InnoDB secondary leaves hold the PK value, so the real key of `(user_id)` is `(user_id, id)`: `SELECT id` is covering for free and `ORDER BY id` after `WHERE user_id = ?` needs no sort. The PK is copied into every secondary index, so a `CHAR(36)` PK roughly triples each one compared with `BIGINT`.
+- Lookup cost: InnoDB walks the PRIMARY tree once per row; PostgreSQL reads one heap page per row. In the modelled trace both engines do 5 disk reads; InnoDB's 6 extra page accesses are buffer-pool hits on PRIMARY's root and internal pages.
+- Writes: InnoDB rewrites only the indexes whose columns changed (or all of them when the PK changes). PostgreSQL adds an entry to every index whenever the row gets a new TID; HOT avoids that only when no indexed column changed and the heap page has room.
+- Why InnoDB points by PK: a leaf split in PRIMARY moves rows between pages without touching any secondary index. The price is the extra tree walk on every read. PostgreSQL's heap never splits; its equivalent cost is the non-HOT update.
+- SQL Server, Oracle (IOT) and SQLite (`rowid`, `WITHOUT ROWID`) placed on the same axis.
+
+**Initial understanding.** TODO — what did I believe about clustered vs secondary indexes before this session? The session started from the single request "explain clustered index vs secondary index in detail", with no stated prior belief.
+
+**Mistakes and misconceptions corrected.** TODO — only I know which. Candidates the page writes as traps: assuming an InnoDB secondary index points straight at the row; equating "clustered index" with "primary key" (true only for InnoDB and SQL Server's default).
+
+**Experiments and results.** None. The trace counts, the calculator's sizes and the UPDATE matrix are a model built from reading, not observations. E5–E8 below are what would turn them into numbers.
+
+**Competency level.** See the matrix: Level 2 provisional on the four rows this session touched, including InnoDB specifics (up from 1). Nothing here supports Level 3 until E5–E8 run on MySQL 8.4.
+
+**Remaining questions.** Open questions 1, 6 and 7 above.
+
+**Next step.** Week 1 lab setup (MySQL 8.4 in Docker, a 5–10M-row generator), then run E6 first: it is the cheapest check of this session's central claim, that the extra PRIMARY walk costs hits rather than disk reads.
 
 ---
 
