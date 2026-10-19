@@ -105,7 +105,7 @@ function stepper(id,{title,vb,steps,draw,after,extra}){
 }
 ```
 
-Minimal CSS the helpers expect (values are per topic):
+Minimal CSS the helpers expect (tokens come from `style.md`):
 
 ```css
 .n rect{fill:var(--surface);stroke:var(--rule-strong)}

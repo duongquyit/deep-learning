@@ -1,0 +1,27 @@
+# MySQL 8.4 lab for Month 1 (ROADMAP.md, Week 1).
+# Start with ./lab.sh up — it also waits for the server and loads the schema.
+services:
+  mysql:
+    # The 8.4 LTS line. Every results file records SELECT VERSION(), so a
+    # newer patch release is visible in the evidence rather than hidden.
+    image: mysql:8.4
+    container_name: lab-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: lab
+      MYSQL_DATABASE: lab
+    ports:
+      # 3307 on the host so the lab never collides with a local MySQL.
+      - "127.0.0.1:3307:3306"
+    volumes:
+      - lab-data:/var/lib/mysql
+      - ./conf/lab.cnf:/etc/mysql/conf.d/lab.cnf:ro
+    healthcheck:
+      # TCP ping: the entrypoint's temporary init server runs with
+      # --skip-networking, so this only passes once the real server is up.
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-plab", "--silent"]
+      interval: 3s
+      timeout: 3s
+      retries: 60
+
+volumes:
+  lab-data:

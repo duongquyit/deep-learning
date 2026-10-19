@@ -589,7 +589,7 @@ footer.page-foot a{color:var(--text-1)}
         },
         {
           "n": 2,
-          "status": " ",
+          "status": "~",
           "start": "2026-10-26",
           "end": "2026-11-01",
           "title": "Reads: secondary index lookups and the extra clustered-index lookup, composite indexes and leftmost prefix, covering indexes, range conditions, cardinality and histograms, EXPLAIN and EXPLAIN ANALYZE."
@@ -611,11 +611,11 @@ footer.page-foot a{color:var(--text-1)}
       ],
       "deliverables": [
         {
-          "status": " ",
+          "status": "~",
           "text": "Reproducible SQL experiments (scripts committed, with predictions written before running)."
         },
         {
-          "status": " ",
+          "status": "~",
           "text": "Query-plan comparisons."
         },
         {
@@ -810,6 +810,20 @@ footer.page-foot a{color:var(--text-1)}
   "sessions": [
     {
       "date": "2026-10-19",
+      "title": "Composite index and query plans (MySQL)",
+      "artifact": "../topics/composite-index-query-plan/index.html",
+      "planned": true,
+      "feeds": ""
+    },
+    {
+      "date": "2026-10-19",
+      "title": "MySQL lab setup",
+      "artifact": "../lab/mysql/README.md",
+      "planned": true,
+      "feeds": ""
+    },
+    {
+      "date": "2026-10-19",
       "title": "Clustered vs secondary index",
       "artifact": "../topics/clustered-vs-secondary-index/index.html",
       "planned": true,
@@ -952,10 +966,45 @@ footer.page-foot a{color:var(--text-1)}
         "provisional": true,
         "evidence": "same, §04",
         "date": "2026-10-19"
+      },
+      {
+        "topic": "Composite index: leftmost prefix, range stops later columns, key_len vs used_key_parts",
+        "level": 2,
+        "provisional": true,
+        "evidence": "composite-index-query-plan §01–§02",
+        "date": "2026-10-19"
+      },
+      {
+        "topic": "Column order (equality, sort, range) and avoiding filesort",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §03",
+        "date": "2026-10-19"
+      },
+      {
+        "topic": "Index Condition Pushdown, Using index condition vs Using where",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §04",
+        "date": "2026-10-19"
+      },
+      {
+        "topic": "Optimizer estimates: index dives, cardinality, histograms, why an index is skipped",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §05",
+        "date": "2026-10-19"
+      },
+      {
+        "topic": "Reading MySQL EXPLAIN / EXPLAIN ANALYZE (type, key_len, rows, filtered, Extra)",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §06",
+        "date": "2026-10-19"
       }
     ],
     "levels": {
-      "2": 13,
+      "2": 18,
       "1": 1
     }
   }

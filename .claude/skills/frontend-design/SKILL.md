@@ -16,9 +16,11 @@ This repo has two kinds of screen, and they get opposite treatment. Decide which
 
 Reuse what's there rather than adding to it. The four `grad-*` icon-badge gradients are the whole palette for badges; a fifth hue is what turns "varied but controlled" into sprawl. Same for the two shadow recipes and the three radii — depth comes from picking the right one, not from a new value. If a genuinely new component is needed, build it from the existing card chrome and then add it to §4, so the file keeps describing what's actually shipped.
 
-**Topic lesson pages — design fresh, per topic.** `topics/<slug>/index.html` deliberately keeps its own palette, type, and motion per topic. `DESIGN_SYSTEM.md` does not apply there, and reaching for its violet/pink dark theme because it's familiar is exactly the templating this skill exists to prevent. Everything below governs these pages.
+**Topic lesson pages — follow the topic-page house style, don't invent.** Every `topics/<slug>/index.html` uses the style of the first topic, `topics/btree-index-internals/index.html`, written down in [`.claude/skills/topic-page/references/style.md`](../topic-page/references/style.md): Instrument Sans and JetBrains Mono, the grid-paper background, the type scale, frame and callout chrome, and one shared state palette. The author asked for this on 2026-10-19 after three pages had drifted into three looks; consistency between lessons matters more here than a fresh identity per topic. Copy the tokens and base CSS from that file, skip the two-pass brainstorm below, and spend the design effort on the widgets: what each one shows, how its state reads at a glance, how it behaves at 390px. `DESIGN_SYSTEM.md` does not apply to lesson pages either; its violet/pink dark theme is the dashboard's.
 
-If a screen sits between the two, ask rather than guess: the cost of wrongly templating a lesson page and the cost of wrongly forking the dashboard identity are both high.
+The sections below on writing, restraint, motion and self-critique still apply to both kinds of screen. The sections on choosing palette and type apply only to a genuinely new kind of screen that is neither a dashboard nor a lesson page.
+
+If a screen sits between the two, ask rather than guess: the cost of wrongly forking either identity is high.
 
 ## Ground your designs in the subject matter
 

@@ -8,13 +8,13 @@ This repository is intended to hold learning documentation and reference materia
 
 ## Structure
 
-Each topic is a self-contained folder: `topics/<topic-slug>/index.html`. There is no build step — open the file directly in a browser. Each page inlines its own `<style>` and `<script>` rather than pulling from a shared stylesheet/script, since the design (palette, type, motion) is meant to be reconsidered per topic rather than templated. There are no build or lint commands.
+Each topic is a self-contained folder: `topics/<topic-slug>/index.html`. There is no build step — open the file directly in a browser. Each page inlines its own `<style>` and `<script>` rather than pulling from a shared stylesheet/script, so a page opens on its own from disk. All topic pages share one visual style; each page carries its own copy of it (see Design). There are no build or lint commands.
 
 Reference implementation: `topics/btree-index-internals/index.html`.
 
 ## Building a page
 
-Use the `topic-page` skill (`.claude/skills/topic-page/SKILL.md`) whenever creating, extending, or reviewing a topic page. It defines the workflow (lesson → learning-order outline → one widget per mechanism → verify), the content conventions (Vietnamese copy, callouts, exercises), and the widget patterns (stepper, simulator, playground, calculator, static figure) with copy-ready helper code.
+Use the `topic-page` skill (`.claude/skills/topic-page/SKILL.md`) whenever creating, extending, or reviewing a topic page. It defines the workflow (lesson → fixed document structure → one widget per mechanism → verify), the document structure every topic follows (hero brief with goals, prerequisites and status; then core concept, mechanism, design reasons, examples, experiments, production implications, misconceptions, recall questions with answers, open questions, references — see `references/content.md`), the content conventions (Vietnamese copy, callouts), and the widget patterns (stepper, simulator, playground, calculator, static figure) with copy-ready helper code.
 
 Before committing a page, run its check and review the screenshots:
 
@@ -82,6 +82,6 @@ The program's own definitions of the competency levels, the session rules, and t
 Use the `frontend-design` skill (`.claude/skills/frontend-design/SKILL.md`) before writing or restyling **any** page — topic pages and dashboard screens alike. It governs visual design decisions — palette, typography, layout, and motion — and opens by routing the two kinds of screen apart:
 
 - **Dashboard/overview screens** (`roadmap.html`, `index.html`, anything new that summarizes a program, a log, or a dataset) follow the house system in [.claude/docs/DESIGN_SYSTEM.md](.claude/docs/DESIGN_SYSTEM.md) — fixed tokens, shell, components, and content rules. Don't design these fresh.
-- **Topic lesson pages** (`topics/<slug>/index.html`) deliberately get a new palette, type, and motion per topic. `DESIGN_SYSTEM.md` does not apply to them.
+- **Topic lesson pages** (`topics/<slug>/index.html`) all share one style: the style of the first topic, `topics/btree-index-internals/index.html`. Fonts (Instrument Sans, JetBrains Mono), the light grid background and its dark counterpart, type scale, frame and button chrome, callouts and the shared state palette are written down copy-ready in [.claude/skills/topic-page/references/style.md](.claude/skills/topic-page/references/style.md). Do not pick a new palette, font or layout for a topic. `DESIGN_SYSTEM.md` does not apply to them.
 
-The `topic-page` skill fixes structure and interaction, not the visual identity.
+The `topic-page` skill fixes structure, interaction and the shared style. When the style itself changes, change `style.md` and every existing topic page in the same commit, so the pages never drift apart again.

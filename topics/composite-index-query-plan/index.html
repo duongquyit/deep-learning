@@ -1,0 +1,1085 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Composite index và query plan trên MySQL</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F2F4F6; --surface:#FFFFFF; --ink:#18203A; --ink-2:#56607A; --ink-3:#8A93A8;
+  --rule:#CCD3DD; --rule-strong:#8C96AB;
+  --struct:#3446B8; --struct-bg:#E6E9FA;            /* cấu trúc index, chrome của trang */
+  --row:#16795F;    --row-bg:#DDF2EA;               /* dữ liệu row thật */
+  --hot:#9A5F00;    --hot-bg:#FCEFD2; --hot-line:#E3A21A;  /* bị ghi, bị chạm, bị lọc */
+  --miss:#B5302B;   --miss-bg:#FBE1DF;              /* đọc từ disk, việc thừa, lỗi */
+  --path:#0B7A8A;   --path-bg:#D8F1F3;              /* đường đi hoặc khoảng đang đọc */
+  --key:#A8327A;    --key-bg:#F8E0EE;               /* con trỏ: PK, TID */
+  --ram:#5B4BB0;    --ram-bg:#E7E3FA;               /* hit trong buffer pool */
+  --grid:rgba(52,70,184,.06);
+  --r-s:4px; --r-m:8px;
+  --sans:"Instrument Sans",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --paper:#0F1320; --surface:#171C2B; --ink:#E6E9F2; --ink-2:#A3ABC0; --ink-3:#6E7790;
+  --rule:#2C3448; --rule-strong:#55607A;
+  --struct:#97A3FF; --struct-bg:#232A55;
+  --row:#5FD0AE;    --row-bg:#123A31;
+  --hot:#F2BE5C;    --hot-bg:#3B2C0E; --hot-line:#E3A21A;
+  --miss:#FF8A84;   --miss-bg:#3E1A1A;
+  --path:#5ED3E0;   --path-bg:#113A40;
+  --key:#F28DC4;    --key-bg:#3E1A2E;
+  --ram:#B7A8FF;    --ram-bg:#2A2350;
+  --grid:rgba(151,163,255,.05);
+}}
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important;animation:none!important}}
+body{margin:0;color:var(--ink);font:400 17px/1.65 var(--sans);
+  background-color:var(--paper);
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:24px 24px}
+a{color:var(--struct)}
+:focus-visible{outline:2px solid var(--struct);outline-offset:2px}
+
+/* layout */
+.shell{display:grid;grid-template-columns:230px minmax(0,1fr);gap:56px;max-width:1180px;margin:0 auto;padding:0 32px}
+nav.toc{position:sticky;top:0;align-self:start;height:100vh;padding:48px 0;overflow:auto}
+nav.toc p{font-weight:600;margin:0 0 12px;font-size:15px}
+nav.toc ol,.mobile-toc ol{list-style:none;margin:0;padding:0;counter-reset:s}
+nav.toc li,.mobile-toc li{counter-increment:s;margin:0}
+nav.toc a,.mobile-toc a{display:grid;grid-template-columns:28px 1fr;padding:5px 0;color:var(--ink-2);text-decoration:none;font-size:14.5px;line-height:1.4}
+nav.toc a::before,.mobile-toc a::before{content:counter(s,decimal-leading-zero);font:500 12px/1.9 var(--mono);color:var(--ink-3)}
+nav.toc a:hover,nav.toc a.on{color:var(--struct)}
+main{min-width:0;padding:56px 0 120px}
+.prose{max-width:720px}
+section{padding-top:72px}
+section>header{display:grid;grid-template-columns:auto 1fr;gap:0 18px;align-items:baseline;max-width:720px;margin-bottom:12px}
+section>header .num{font:500 15px var(--mono);color:var(--struct);border:1.5px solid var(--struct);border-radius:var(--r-s);padding:2px 7px;transform:translateY(-4px)}
+h1,h2,h3,h4{line-height:1.2;letter-spacing:-.015em;margin:0}
+h1{font-size:clamp(2.3rem,5.4vw,3.9rem);font-weight:700;letter-spacing:-.03em;line-height:1.02;max-width:14ch;margin-bottom:20px}
+.lede{font-size:19px;color:var(--ink-2);max-width:56ch;margin-bottom:28px}
+h2{font-size:clamp(1.6rem,3vw,2.1rem);font-weight:650}
+h3{font-size:1.2rem;font-weight:600;margin:36px 0 8px}
+p{margin:0 0 14px}
+ul,ol.list{margin:0 0 16px;padding-left:22px}
+li{margin:4px 0}
+code{font:0.88em var(--mono);background:var(--struct-bg);color:var(--ink);padding:1px 5px;border-radius:3px}
+pre{font:13.5px/1.6 var(--mono);background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:var(--r-s);padding:14px 16px;overflow-x:auto;margin:0 0 18px;max-width:720px}
+pre code{background:none;padding:0}
+.tablewrap{overflow-x:auto;max-width:720px;margin:0 0 20px}
+table{border-collapse:collapse;width:100%;max-width:720px;margin:0 0 20px;font-size:15px;background:var(--surface)}
+.tablewrap table{margin:0;min-width:560px}
+th,td{text-align:left;padding:9px 12px;border:1px solid var(--rule);vertical-align:top}
+th{font-weight:600;background:var(--struct-bg)}
+
+/* widget frame: styled like a page, header strip = page header */
+.frame{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);margin:22px 0 28px;max-width:920px;overflow:hidden}
+.frame>.ph{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:9px 16px;border-bottom:1px solid var(--rule);background:var(--struct-bg);font-size:14px}
+.frame>.ph strong{font-weight:600}
+.frame>.ph .meta{margin-left:auto;font:500 12.5px var(--mono);color:var(--ink-2)}
+.frame .bd{padding:16px;min-width:0}
+.frame svg{display:block;width:100%;height:auto}
+.st-t{font:600 16px var(--sans);margin:0 0 8px}
+.desc{background:var(--paper);border-radius:var(--r-s);padding:12px 14px;margin-top:12px;min-height:84px;font-size:15.5px;color:var(--ink-2)}
+.desc pre{margin:10px 0 0;font-size:12.5px;border-left-color:var(--rule-strong)}
+.nav{display:flex;gap:8px;margin-top:12px;align-items:center}
+button{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 14px;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--struct);color:var(--struct)}
+button:disabled{opacity:.4;cursor:default}
+button.primary,button[aria-pressed="true"]{background:var(--struct);border-color:var(--struct);color:var(--surface)}
+button.primary:hover:not(:disabled),button[aria-pressed="true"]:hover{color:var(--surface);filter:brightness(1.1)}
+input,select{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 10px}
+input[type=number]{width:84px}
+input[type=range],input[type=checkbox]{accent-color:var(--struct)}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-top:12px}
+.stat{background:var(--paper);border-radius:var(--r-s);padding:8px 12px}
+.stat span{display:block;font-size:13px;color:var(--ink-2)}
+.stat b{font:600 20px var(--sans);font-variant-numeric:tabular-nums}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;color:var(--ink-2);margin-top:12px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:14px;height:14px;border-radius:3px;border:2px solid;display:inline-block}
+
+/* svg text */
+.tb{font:600 14px var(--sans)} .t{font:400 13px var(--sans)} .ts{font:400 12px var(--sans)} .tm{font:500 12.5px var(--mono)}
+.lbl{fill:var(--ink-2);font:400 12.5px var(--sans)}
+
+/* callouts */
+.note{border-left:3px solid var(--hot-line);background:var(--hot-bg);padding:12px 16px;border-radius:0 var(--r-s) var(--r-s) 0;margin:18px 0;max-width:720px;font-size:16px}
+.note strong{color:var(--hot)}
+.senior{border:1.5px solid var(--struct);border-radius:var(--r-m);padding:14px 18px;margin:22px 0;max-width:720px;background:var(--surface)}
+.senior h4{font-size:16px;margin-bottom:6px;color:var(--struct)}
+.senior p:last-child,.senior ul:last-child{margin-bottom:0}
+details{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-s);padding:10px 14px;margin:10px 0;max-width:720px}
+details summary{cursor:pointer;font-weight:600}
+details[open] summary{margin-bottom:8px}
+details.answer{background:var(--paper);border-style:dashed;margin:10px 0 0}
+details.answer summary{font-weight:500;color:var(--struct)}
+.tag{display:inline-block;font:500 12px var(--sans);color:var(--ink-2);border:1px solid var(--rule-strong);border-radius:999px;padding:0 8px;margin-right:6px;vertical-align:1px}
+
+/* hero brief: mục tiêu, cần biết trước, trạng thái */
+.brief{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px 24px;background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);padding:14px 18px;max-width:920px;margin:0 0 8px;font-size:15px}
+.brief h4{font-size:14px;color:var(--struct);margin:0 0 4px}
+.brief ul{margin:0;padding-left:18px}
+.brief p{margin:0}
+
+.mobile-toc{display:none}
+@media (max-width:900px){
+  .shell{grid-template-columns:1fr;padding:0 16px;gap:0}
+  nav.toc{display:none}
+  .mobile-toc{display:block;margin-top:20px}
+  main{padding-top:32px}
+  .frame .bd{padding:12px}
+  body{font-size:16px}
+}
+
+/* ---------- widgets ---------- */
+.fine{font-size:13.5px;color:var(--ink-2);margin:10px 0 0}
+td code{white-space:nowrap}
+.svgwrap{overflow-x:auto}
+.frame svg{display:block;width:100%;height:auto;min-width:520px}
+.controls{margin:0 0 12px}
+select{padding:5px 8px;max-width:100%}
+.builder{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px 14px;margin-bottom:12px}
+.builder label{display:flex;flex-direction:column;gap:4px;font-size:13px}
+.builder .chk{flex-direction:row;align-items:center;gap:8px;align-self:end;padding-bottom:6px;font-size:14px;color:var(--ink)}
+.presets{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 14px}
+.presets button{font-size:13px;padding:4px 10px}
+.sqlline{font:13px/1.55 var(--mono);background:var(--paper);border-radius:4px;padding:10px 12px;margin:0 0 12px;overflow-x:auto;white-space:pre}
+.sqlline .k{color:var(--struct);font-weight:500}
+.split{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:16px}
+@media (max-width:760px){.split{grid-template-columns:1fr}}
+.ledger{font:13px/1 var(--mono);border:1px solid var(--rule);border-radius:6px;overflow:hidden}
+.ledger .hd,.ledger .en{display:grid;grid-template-columns:var(--cols);align-items:center}
+.ledger .hd{background:var(--struct-bg);color:var(--struct);font:600 12.5px var(--sans);padding:7px 10px;gap:8px}
+.ledger .en{padding:4px 10px;gap:8px;border-top:1px solid var(--rule);color:var(--ink-3);position:relative;min-height:25px}
+.ledger .en.grp{border-top:2px solid var(--rule-strong)}
+.ledger .en span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ledger .en .pk{color:inherit;opacity:.85}
+.ledger .en.seek{background:var(--path-bg);color:var(--path)}
+.ledger .en.icp{background:var(--hot-bg);color:var(--hot)}
+.ledger .en.row{background:var(--row-bg);color:var(--row);font-weight:500}
+.ledger .en.ok{background:var(--path-bg);color:var(--path);font-weight:500}
+.ledger .en.drop{background:var(--miss-bg);color:var(--miss)}
+.ledger .en .ltag{font:500 11.5px var(--sans);justify-self:end}
+.ledger .mk{font:500 12px var(--sans);padding:4px 10px;border-top:1px dashed var(--path);color:var(--path);background:var(--surface)}
+.ledger .mk.stop{border-top:1px dashed var(--rule-strong);color:var(--ink-2)}
+.explain{font:12.3px/1.5 var(--mono);overflow-x:auto;background:var(--paper);border-radius:4px;padding:10px 12px;margin:0 0 10px}
+.explain table{min-width:0;width:auto;background:none;font:inherit}
+.explain th,.explain td{border:none;padding:1px 14px 1px 0;background:none;white-space:normal}
+.explain th{color:var(--ink-2);font-weight:500}
+.why{font-size:14.5px;color:var(--ink-2)}
+.why p{margin:0 0 8px}
+.why b{color:var(--ink)}
+.result{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+.result span{font:12px var(--mono);border:1px solid var(--row);color:var(--row);background:var(--row-bg);border-radius:3px;padding:2px 6px}
+.result span.ok{border-color:var(--path);color:var(--path);background:var(--path-bg)}
+.n rect{fill:var(--surface);stroke:var(--rule-strong);stroke-width:1}
+.n text{fill:var(--ink)}
+.n.struct rect{fill:var(--struct-bg);stroke:var(--struct)}
+.n.struct text{fill:var(--struct)}
+.n.seek rect{fill:var(--path-bg);stroke:var(--path);stroke-width:2.2}
+.n.seek text{fill:var(--path)}
+.n.icp rect{fill:var(--hot-bg);stroke:var(--hot);stroke-width:1.6}
+.n.icp text{fill:var(--hot)}
+.n.row rect{fill:var(--row-bg);stroke:var(--row);stroke-width:1.6}
+.n.row text{fill:var(--row)}
+.n.drop rect{fill:var(--miss-bg);stroke:var(--miss);stroke-width:1.6}
+.n.drop text{fill:var(--miss)}
+.n.dim rect{fill:var(--paper);stroke:var(--rule)}
+.n.dim text{fill:var(--ink-3)}
+.n.cur rect{stroke-width:3.2}
+.lblb{fill:var(--ink);font:600 13px var(--sans)}
+.edge{stroke:var(--rule-strong);stroke-width:1.2;fill:none}
+.edge.on{stroke:var(--path);stroke-width:2.6}
+.edge.row{stroke:var(--row);stroke-width:1.8}
+.edge.icp{stroke:var(--hot);stroke-width:1.8}
+.edge.drop{stroke:var(--miss);stroke-width:1.8}
+.bar.est{fill:var(--rule-strong)}
+.bar.act{fill:var(--path)}
+.bar.sel{stroke:var(--ink);stroke-width:2}
+.axis{stroke:var(--rule-strong);stroke-width:1}
+.thr{stroke:var(--miss);stroke-width:1.5;stroke-dasharray:5 4}
+.zone{fill:var(--struct-bg);opacity:.55}
+.ann{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
+.ann button{font:500 12.5px var(--mono);padding:4px 9px}
+</style>
+</head>
+<body>
+
+<div class="shell">
+<nav class="toc" aria-label="Mục lục">
+  <p>Composite index</p>
+  <ol>
+    <li><a href="#s1">Bản chất vấn đề</a></li>
+    <li><a href="#s2">Cơ chế hoạt động</a></li>
+    <li><a href="#s3">Vì sao thiết kế như vậy</a></li>
+    <li><a href="#s4">Ví dụ</a></li>
+    <li><a href="#s5">Thí nghiệm</a></li>
+    <li><a href="#s6">Ảnh hưởng khi chạy production</a></li>
+    <li><a href="#s7">Hiểu lầm thường gặp</a></li>
+    <li><a href="#s8">Câu hỏi ôn tập</a></li>
+    <li><a href="#s9">Câu hỏi còn mở</a></li>
+    <li><a href="#s10">Tài liệu tham khảo</a></li>
+  </ol>
+</nav>
+
+<main>
+<div class="hero">
+<h1>Composite index và query plan trên MySQL</h1>
+<p class="lede">Index <code>(user_id, status, created_at)</code> là một danh sách entry đã sort theo ba cột. Mỗi điều kiện trong <code>WHERE</code> hoặc giúp InnoDB nhảy thẳng tới đúng đoạn cần đọc, hoặc chỉ giúp lọc bớt sau khi đã đọc. Bài này về cách phân biệt hai trường hợp đó, và cách đọc chúng ra từ <code>EXPLAIN</code>.</p>
+<div class="brief">
+  <div><h4>Mục tiêu</h4><ul>
+    <li>Dự đoán được cột nào của một index nhiều cột dùng để seek, cột nào chỉ để lọc, cho một query bất kỳ.</li>
+    <li>Chọn được thứ tự cột cho một query có equality, range và <code>ORDER BY</code>, và nói được mình đánh đổi gì.</li>
+    <li>Đọc được <code>type</code>, <code>key_len</code>, <code>rows</code>, <code>filtered</code>, <code>Extra</code> và một cây <code>EXPLAIN ANALYZE</code>, chỉ ra chỗ ước tính lệch thực tế.</li>
+    <li>Giải thích được vì sao optimizer bỏ qua một index tốt, và kiểm tra lý do đó bằng gì.</li>
+  </ul></div>
+  <div><h4>Cần biết trước</h4><ul>
+    <li><a href="../btree-index-internals/index.html">B+tree index internals</a>: seek rồi đọc tuần tự theo leaf.</li>
+    <li><a href="../clustered-vs-secondary-index/index.html">Clustered và secondary index</a>: secondary index của InnoDB chứa PK, mỗi row cần một lần lookup PRIMARY.</li>
+  </ul></div>
+  <div><h4>Trạng thái</h4><p>Level 2 (prov.) trên cả năm mục của bảng năng lực. Chưa có thí nghiệm nào do bạn chạy. Mọi output trên trang lấy từ manual hoặc từ sandbox MySQL 8.0.46 của Claude.</p></div>
+</div>
+<details class="mobile-toc"><summary>Mục lục</summary><ol><li><a href="#s1">Bản chất vấn đề</a></li><li><a href="#s2">Cơ chế hoạt động</a></li><li><a href="#s3">Vì sao thiết kế như vậy</a></li><li><a href="#s4">Ví dụ</a></li><li><a href="#s5">Thí nghiệm</a></li><li><a href="#s6">Ảnh hưởng khi chạy production</a></li><li><a href="#s7">Hiểu lầm thường gặp</a></li><li><a href="#s8">Câu hỏi ôn tập</a></li><li><a href="#s9">Câu hỏi còn mở</a></li><li><a href="#s10">Tài liệu tham khảo</a></li></ol></details>
+</div>
+
+<!-- 1 -->
+<section id="s1">
+<header><span class="num">01</span><h2>Bản chất vấn đề</h2></header>
+<div class="prose">
+<p>Bảng <code>orders</code> có index <code>(user_id, status, created_at)</code>. Query <code>WHERE user_id BETWEEN 41 AND 43 AND status = 'paid'</code> có điều kiện trên cả hai cột đầu, và <code>EXPLAIN</code> ghi <code>key_len = 5</code>, nghe như cả hai cột đều được dùng. Thực tế InnoDB đọc 23 entry để lấy ra 18 row. Đổi thành <code>user_id IN (41, 42, 43)</code> thì nó đọc đúng 18. Có index không đủ. Phải biết index được dùng tới đâu.</p>
+<p>Một index trên <code>(user_id, status, created_at)</code> sort entry theo <code>user_id</code> trước. Trong cùng một <code>user_id</code>, entry sort theo <code>status</code>. Trong cùng <code>(user_id, status)</code>, entry mới sort theo <code>created_at</code>. Ở InnoDB còn một cột ẩn cuối cùng là PK <code>id</code>, nên key thật của cây là <code>(user_id, status, created_at, id)</code>.</p>
+<p>Giống danh bạ sort theo họ, rồi tên, rồi tên đệm: tìm "họ Nguyễn" thì lật thẳng tới đúng trang, tìm "tên Lan" thì phải đọc cả cuốn. Index chỉ seek được theo một <strong>tiền tố bên trái</strong> của danh sách cột. Tiền tố đó dừng ở cột đầu tiên không có điều kiện, và không đi qua được cột đầu tiên có điều kiện range.</p>
+<p>Ghép một câu query dưới đây và xem entry nào được đọc, entry nào bị loại ngay trong index, row nào phải lấy qua PRIMARY.</p>
+</div>
+<div class="frame" id="lab">
+  <div class="ph"><strong>Seek vào index nhiều cột</strong><span class="meta" id="lab-meta"></span></div>
+  <div class="bd">
+    <div class="presets" role="group" aria-label="Câu query mẫu" id="lab-presets"></div>
+    <div class="builder">
+      <label>Index<select id="q-perm"></select></label>
+      <label>user_id<select id="q-u"><option value="">không có điều kiện</option><option value="eq">= 42</option><option value="in">IN (41, 43)</option><option value="rg">BETWEEN 41 AND 43</option></select></label>
+      <label>status<select id="q-s"><option value="">không có điều kiện</option><option value="eq">= 'paid'</option><option value="in">IN ('paid', 'shipped')</option></select></label>
+      <label>created_at<select id="q-c"><option value="">không có điều kiện</option><option value="ge">&gt;= '2025-02-05'</option></select></label>
+      <label>SELECT<select id="q-sel"><option value="all">*</option><option value="cov">id, created_at</option></select></label>
+      <label>ORDER BY<select id="q-o"><option value="">không có</option><option value="asc">created_at</option><option value="desc">created_at DESC</option></select></label>
+      <label class="chk"><input type="checkbox" id="q-t"> AND total &gt; 1000000</label>
+    </div>
+    <div class="sqlline" id="lab-sql" aria-live="polite"></div>
+    <div class="split">
+      <div>
+        <div class="ledger" id="lab-ledger" role="list" aria-label="Entry của index, theo thứ tự trong index"></div>
+      </div>
+      <div>
+        <div class="explain" id="lab-explain"></div>
+        <div class="stats" style="margin-top:0">
+          <div class="stat"><span>Entry index đã đọc</span><b id="lab-a"></b></div>
+          <div class="stat"><span>Loại ngay trong index</span><b id="lab-b"></b></div>
+          <div class="stat"><span>Lookup qua PRIMARY</span><b id="lab-c"></b></div>
+          <div class="stat"><span>Row trả về</span><b id="lab-d"></b></div>
+        </div>
+        <div class="why" id="lab-why" aria-live="polite" style="margin-top:12px"></div>
+      </div>
+    </div>
+    <div class="legend" aria-label="Chú thích màu">
+      <span><i style="background:var(--struct-bg);border-color:var(--struct)"></i>cột của index</span>
+      <span><i style="background:var(--path-bg);border-color:var(--path)"></i>đọc trong khoảng seek</span>
+      <span><i style="background:var(--hot-bg);border-color:var(--hot)"></i>loại ngay trong index</span>
+      <span><i style="background:var(--row-bg);border-color:var(--row)"></i>lấy qua PRIMARY, trả về</span>
+      <span><i style="background:var(--miss-bg);border-color:var(--miss)"></i>lấy qua PRIMARY rồi mới bị loại</span>
+    </div>
+    <p class="fine">27 entry là toàn bộ đơn của user 41, 42 và 43, lấy từ bảng <code>orders</code> 1 triệu row sinh bằng generator của lab (<code>users = 100000</code>). Mô phỏng giả định optimizer dùng đúng index đang chọn, như khi có <code>FORCE INDEX</code>. Cột <code>rows</code> ở đây là số entry thật sự được đọc, còn <code>rows</code> trong EXPLAIN thật là ước tính.</p>
+  </div>
+</div>
+<p class="prose">Mọi phần sau chỉ là giải thích chi tiết cho những gì khung này cho thấy: khoảng seek bắt đầu và dừng ở đâu, ai lọc entry, khi nào phải sort, và optimizer quyết định dùng index này dựa vào đâu.</p>
+</section>
+
+<!-- 2 -->
+<section id="s2">
+<header><span class="num">02</span><h2>Cơ chế hoạt động</h2></header>
+
+<h3>Leftmost prefix và key_len</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>Điều kiện</th><th>Cột dùng để seek</th><th><code>key_len</code></th><th>Ghi chú</th></tr></thead>
+<tbody>
+<tr><td><code>user_id = 42</code></td><td>user_id</td><td>4</td><td><code>type = ref</code></td></tr>
+<tr><td><code>user_id = 42 AND status = 'paid'</code></td><td>user_id, status</td><td>5</td><td><code>ref</code>, ref là <code>const,const</code></td></tr>
+<tr><td><code>user_id = 42 AND status = 'paid' AND created_at &gt;= …</code></td><td>cả ba</td><td>10</td><td><code>range</code>, khoảng hẹp nhất có thể</td></tr>
+<tr><td><code>user_id = 42 AND created_at &gt;= …</code></td><td>user_id</td><td>4</td><td>thiếu <code>status</code> nên <code>created_at</code> chỉ còn để lọc (ICP)</td></tr>
+<tr><td><code>status = 'paid'</code></td><td>không có</td><td>–</td><td>không seek được, thường là full table scan</td></tr>
+<tr><td><code>status = 'paid' AND created_at &gt;= …</code></td><td>không có</td><td>–</td><td>trừ khi skip scan, xem bên dưới</td></tr>
+</tbody></table></div>
+<p class="prose"><code>key_len</code> là tổng số byte của các cột index nằm trong key của khoảng seek. Với bảng <code>orders</code> của lab: <code>INT UNSIGNED NOT NULL</code> 4 byte, <code>ENUM</code> dưới 256 giá trị 1 byte, <code>DATETIME</code> 5 byte. Cột cho phép <code>NULL</code> cộng thêm 1 byte. <code>VARCHAR(n)</code> trong utf8mb4 tính <code>4n + 2</code>.</p>
+<p class="prose"><strong>Skip scan</strong> (MySQL 8.0.13 trở lên) là ngoại lệ duy nhất cho luật tiền tố trái. Optimizer coi cột đầu thiếu điều kiện như một <code>IN</code> qua mọi giá trị của nó, rồi seek từng đoạn. Điều kiện: chỉ một bảng, không <code>GROUP BY</code> hay <code>DISTINCT</code>, query chỉ đọc cột của index, và có range trên cột ngay sau phần bị bỏ qua. Extra ghi <code>Using index for skip scan</code>. Optimizer chỉ chọn nó khi cột đầu có ít giá trị khác nhau. Trên bảng lab, <code>user_id</code> có khoảng 100 nghìn giá trị, nên sandbox quét cả index (<code>type = index</code>) thay vì skip scan.</p>
+
+<h3>Range ở cột giữa chặn các cột sau</h3>
+<div class="prose">
+<p>Seek là tìm một điểm bắt đầu trong cây rồi đọc tuần tự sang phải tới điểm dừng. Mọi entry thoả điều kiện phải nằm liền nhau trong đoạn đó. Với <code>user_id = 42 AND status = 'paid'</code>, các entry <code>(42, paid, …)</code> nằm liền nhau, nên cả hai cột thu hẹp được khoảng đọc.</p>
+<p>Với <code>user_id BETWEEN 41 AND 43 AND status = 'paid'</code>, các entry <code>paid</code> nằm thành ba cụm rời nhau, xen giữa là <code>shipped</code> và <code>cancelled</code> của từng user. Không có một khoảng liền nào chỉ chứa entry <code>paid</code>. InnoDB đọc từ cụm đầu tới cụm cuối, và <code>status</code> chỉ còn dùng để lọc từng entry.</p>
+</div>
+<div class="frame" id="rangetrace"></div>
+<div class="note"><strong>Lỗi hay gặp:</strong> đọc <code>key_len = 5</code> rồi kết luận <code>status</code> đã được dùng để seek. MySQL đưa <code>status</code> vào hai đầu khoảng, <code>(41, 'paid')</code> tới <code>(43, 'paid')</code>, nên <code>key_len</code> tính cả nó. Nhưng nó chỉ cắt được vài entry ở hai mép. <code>EXPLAIN FORMAT=JSON</code> ghi rõ <code>"used_key_parts": ["user_id"]</code>. Muốn biết cột nào thực sự thu hẹp khoảng đọc, xem <code>used_key_parts</code> hoặc đếm <code>Handler_read_next</code>.</div>
+<p class="prose">Mỗi giá trị trong <code>IN</code> là một lần seek riêng, nên <code>IN (41, 42, 43)</code> cho <code>status</code> thu hẹp lại từng khoảng. Cách này chỉ dùng được khi tập giá trị nhỏ và rời rạc. Range thời gian thì không đổi thành <code>IN</code> được, nên cột range phải đứng cuối.</p>
+
+<h3>Thứ tự cột và ORDER BY</h3>
+<div class="prose">
+<p>Index trả về row đúng thứ tự <code>ORDER BY created_at</code> khi và chỉ khi mọi cột đứng trước <code>created_at</code> trong index đều bị cố định bằng đúng một giá trị. Thiếu một cột, hoặc một cột dùng <code>IN</code> hay range, là phải filesort. Từ đó ra luật dễ nhớ khi thiết kế index cho một query: <strong>equality trước, sort sau, range cuối</strong>.</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Query, index <code>(user_id, status, created_at)</code></th><th>Filesort?</th><th>Lý do</th></tr></thead>
+<tbody>
+<tr><td><code>WHERE user_id = 42 AND status = 'paid' ORDER BY created_at</code></td><td>Không</td><td>hai cột đầu cố định, entry đã sort theo <code>created_at</code></td></tr>
+<tr><td><code>… ORDER BY created_at DESC LIMIT 5</code></td><td>Không</td><td>đọc ngược, Extra ghi <code>Backward index scan</code>, dừng sau 5 entry</td></tr>
+<tr><td><code>WHERE user_id = 42 ORDER BY created_at</code></td><td>Có</td><td><code>status</code> chưa cố định: <code>paid</code> tháng 2 đứng trước <code>shipped</code> tháng 1</td></tr>
+<tr><td><code>WHERE user_id = 42 AND status IN ('paid','shipped') ORDER BY created_at</code></td><td>Có</td><td>hai đoạn, mỗi đoạn tự sort, ghép lại thì không</td></tr>
+<tr><td><code>WHERE user_id = 42 ORDER BY status, created_at</code></td><td>Không</td><td><code>ORDER BY</code> đi đúng theo thứ tự cột index</td></tr>
+<tr><td><code>WHERE user_id = 42 ORDER BY status, created_at DESC</code></td><td>Có, trừ khi index khai báo <code>created_at DESC</code></td><td>chiều sort trộn lẫn. MySQL 8.0 có descending index</td></tr>
+</tbody></table></div>
+<div class="frame" id="order">
+  <div class="ph"><strong>So sánh 6 thứ tự cột cho một query</strong><span class="meta">tính trên 27 entry</span></div>
+  <div class="bd">
+    <div class="controls" role="group" aria-label="Chọn query" id="ord-q"></div>
+    <div class="sqlline" id="ord-sql"></div>
+    <div class="tablewrap" style="margin:0"><table id="ord-tbl"></table></div>
+    <p class="fine">Bấm vào một dòng để mở thứ tự cột đó trong khung ở đầu trang.</p>
+  </div>
+</div>
+
+<h3>Index Condition Pushdown</h3>
+<div class="prose">
+<p>MySQL có hai tầng. Storage engine (InnoDB) đọc index và lấy row. Server nhận từng row, kiểm tra phần <code>WHERE</code> còn lại, rồi sort, group, join. Không có ICP, mỗi entry trong khoảng seek đều bị lookup qua PRIMARY rồi đưa lên server, kể cả entry mà chỉ nhìn index là đã biết không khớp.</p>
+<p>Index Condition Pushdown (ICP) đẩy phần điều kiện chỉ dùng cột của index xuống InnoDB. InnoDB kiểm tra ngay trên entry và chỉ lookup những entry qua được. Extra ghi <code>Using index condition</code>. Phần điều kiện cần cột không có trong index, như <code>total</code>, vẫn phải chờ có row rồi server kiểm tra. Extra ghi <code>Using where</code>.</p>
+</div>
+<div class="frame" id="icp">
+  <div class="ph"><strong>Cùng một query, ICP bật và tắt</strong><span class="meta" id="icp-meta"></span></div>
+  <div class="bd">
+    <div class="controls" role="group" aria-label="Index Condition Pushdown">
+      <button id="icp-on" aria-pressed="true">ICP bật</button>
+      <button id="icp-off" aria-pressed="false">ICP tắt</button>
+    </div>
+    <div class="sqlline">SELECT * FROM orders
+WHERE user_id BETWEEN 41 AND 43 AND status = 'paid' AND total &gt; 1000000;</div>
+    <div class="svgwrap"><svg id="icp-svg" viewBox="0 0 680 300" role="img" aria-label="Luồng entry từ index qua InnoDB lên server"></svg></div>
+    <div class="stats">
+      <div class="stat"><span>Entry index đọc</span><b id="icp-a"></b></div>
+      <div class="stat"><span>Lookup qua PRIMARY</span><b id="icp-b"></b></div>
+      <div class="stat"><span>Row InnoDB gửi lên server</span><b id="icp-c"></b></div>
+      <div class="stat"><span>Row trả về</span><b id="icp-d"></b></div>
+    </div>
+    <pre id="icp-pre" style="margin-top:12px"></pre>
+  </div>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Extra</th><th>Ai làm việc</th><th>Nghĩa</th></tr></thead>
+<tbody>
+<tr><td><code>Using index</code></td><td>InnoDB</td><td>covering: mọi cột cần đều có trong index, không lookup PRIMARY</td></tr>
+<tr><td><code>Using index condition</code></td><td>InnoDB</td><td>ICP: lọc trên entry trước khi lookup</td></tr>
+<tr><td><code>Using where</code></td><td>server</td><td>lọc row sau khi InnoDB đã trả lên. Đi cùng <code>Using index</code> thì là lọc trên entry của index covering, không có lookup</td></tr>
+<tr><td><code>Using filesort</code></td><td>server</td><td>sort sau khi đọc, trong RAM (<code>sort_buffer_size</code>) hoặc tràn ra disk</td></tr>
+<tr><td><code>Using temporary</code></td><td>server</td><td>cần bảng tạm, thường do <code>GROUP BY</code> hoặc <code>DISTINCT</code> không theo index</td></tr>
+<tr><td><code>Backward index scan</code></td><td>InnoDB</td><td>đọc index từ phải sang trái để phục vụ <code>DESC</code></td></tr>
+<tr><td><code>Using index for skip scan</code></td><td>InnoDB</td><td>skip scan, xem đầu phần này</td></tr>
+</tbody></table></div>
+<div class="note"><strong>Lỗi hay gặp:</strong> coi <code>Using index condition</code> là "query dùng index tốt". Nó chỉ nói có một phần điều kiện được lọc trên entry thay vì trên row. Số entry InnoDB phải đọc không giảm chút nào. Ở InnoDB, ICP chỉ áp dụng cho secondary index, và không xuất hiện khi index đã covering, vì khi đó không có lookup nào để tiết kiệm.</div>
+
+<h3>Optimizer ước tính bằng gì</h3>
+<div class="prose">
+<p>Với mỗi cách truy cập, optimizer ước tính số row sẽ đọc, nhân với chi phí mỗi row, rồi chọn cách rẻ nhất. Ước tính đến từ ba nguồn:</p>
+<ul>
+<li><strong>Index dive.</strong> Với khoảng trên cột có index, optimizer duyệt cây tới hai đầu khoảng và ước lượng số entry ở giữa. Khá chính xác nhưng tốn công. Với <code>IN</code> từ <code>eq_range_index_dive_limit</code> giá trị trở lên (sandbox: 200), nó chuyển sang dùng cardinality.</li>
+<li><strong>Cardinality.</strong> Số giá trị khác nhau của từng tiền tố index. InnoDB ước lượng bằng cách lấy mẫu 20 page (<code>innodb_stats_persistent_sample_pages</code>) và tự tính lại khi hơn 10% bảng đã đổi. Với <code>ref</code>, số row ước tính khoảng bằng số row của bảng chia cho cardinality.</li>
+<li><strong>Histogram</strong> (MySQL 8.0). Phân bố giá trị của một cột, tạo bằng <code>ANALYZE TABLE … UPDATE HISTOGRAM</code>, lưu trong <code>information_schema.COLUMN_STATISTICS</code>, chỉ cập nhật khi chạy lại lệnh đó. Singleton khi số giá trị khác nhau không vượt số bucket, equi-height khi vượt. Manual nói rõ: khi range optimizer áp dụng được cho cột, optimizer không dùng histogram. Histogram vì vậy chủ yếu phục vụ cột không có index, qua cột <code>filtered</code>.</li>
+</ul>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th><code>SHOW INDEX</code>, bảng 1 triệu row</th><th>Cardinality</th><th>Ước tính cho <code>ref</code></th></tr></thead>
+<tbody>
+<tr><td><code>idx_usc</code>, tiền tố <code>(user_id)</code></td><td>98 753</td><td>khoảng 10 row mỗi user</td></tr>
+<tr><td><code>idx_usc</code>, tiền tố <code>(user_id, status)</code></td><td>295 247</td><td>khoảng 3 row</td></tr>
+<tr><td><code>idx_usc</code>, cả ba cột</td><td>995 605</td><td>khoảng 1 row</td></tr>
+<tr><td><code>idx_status</code></td><td>3</td><td>4 giá trị ENUM, lấy mẫu chỉ thấy 3</td></tr>
+</tbody></table></div>
+<p class="prose">Index không tự động thắng. Mỗi row lấy qua secondary index tốn một lần duyệt PRIMARY ở vị trí ngẫu nhiên, còn full table scan đọc PRIMARY tuần tự. Khi số row khớp đủ lớn, đọc hết bảng rẻ hơn. Khung dưới đo trong sandbox: <code>SELECT * FROM orders WHERE total &gt; X</code>, có index <code>idx_total</code>, kéo X xuống dần.</p>
+<div class="frame" id="cross">
+  <div class="ph"><strong>Khi nào optimizer bỏ index</strong><span class="meta" id="cross-meta"></span></div>
+  <div class="bd">
+    <div class="controls"><label for="cross-r">total &gt;</label><input type="range" id="cross-r" min="0" max="8" step="1" value="0" aria-describedby="cross-v"><b id="cross-v" style="font-variant-numeric:tabular-nums"></b></div>
+    <div class="svgwrap"><svg id="cross-svg" viewBox="0 0 680 250" role="img" aria-label="Số row ước tính và thực tế theo ngưỡng total"></svg></div>
+    <div class="stats">
+      <div class="stat"><span>Plan được chọn</span><b id="cross-a"></b></div>
+      <div class="stat"><span>Optimizer ước tính</span><b id="cross-b"></b></div>
+      <div class="stat"><span>Thực tế khớp</span><b id="cross-c"></b></div>
+    </div>
+    <p class="fine">Đo trong sandbox của Claude, MySQL 8.0.46, 995 605 row, buffer pool 128 MB, không phải trên lab 8.4 của bạn. Ngưỡng phụ thuộc cost model, độ rộng row và kích thước bảng. Bài tập E12 đo lại trên lab. Với plan <code>ALL</code>, số ước tính là <code>rows × filtered</code>.</p>
+  </div>
+</div>
+
+<h3>Đọc EXPLAIN và EXPLAIN ANALYZE</h3>
+<div class="prose">
+<p><code>EXPLAIN</code> cho biết plan optimizer định chạy và các con số nó ước tính. <code>EXPLAIN ANALYZE</code> (MySQL 8.0.18 trở lên) chạy thật query rồi in plan dạng cây, mỗi node kèm ước tính và số đo thật. Vì nó chạy thật, đừng dùng với <code>UPDATE</code> hay <code>DELETE</code> trên production. Bấm vào từng cột của dòng <code>EXPLAIN</code> dưới đây:</p>
+</div>
+<div class="frame" id="annot">
+  <div class="ph"><strong>Một dòng EXPLAIN, từng cột</strong><span class="meta" id="annot-meta"></span></div>
+  <div class="bd">
+    <div class="sqlline">EXPLAIN SELECT * FROM orders
+WHERE user_id BETWEEN 41 AND 43 AND status = 'paid' AND total &gt; 1000000;</div>
+    <div class="ann" role="group" aria-label="Các cột của EXPLAIN" id="annot-btns"></div>
+    <div class="desc" aria-live="polite" id="annot-d" style="margin-top:0"></div>
+  </div>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th><code>type</code>, từ tốt tới tệ</th><th>Nghĩa</th><th>Ví dụ trên <code>orders</code></th></tr></thead>
+<tbody>
+<tr><td><code>const</code></td><td>tối đa một row, qua PK hoặc unique index với giá trị hằng</td><td><code>WHERE id = 524585</code></td></tr>
+<tr><td><code>eq_ref</code></td><td>trong join, mỗi row bên ngoài khớp đúng một row qua PK hoặc unique</td><td><code>JOIN users u ON u.id = o.user_id</code></td></tr>
+<tr><td><code>ref</code></td><td>so sánh bằng trên tiền tố của index không unique</td><td><code>WHERE user_id = 42</code></td></tr>
+<tr><td><code>range</code></td><td>một hoặc nhiều khoảng trên index, kể cả <code>IN</code></td><td><code>WHERE user_id IN (41, 43)</code></td></tr>
+<tr><td><code>index</code></td><td>đọc toàn bộ index theo thứ tự</td><td>query covering nhưng không seek được</td></tr>
+<tr><td><code>ALL</code></td><td>đọc toàn bộ bảng, tức toàn bộ PRIMARY</td><td><code>WHERE total &gt; 1000000</code></td></tr>
+</tbody></table></div>
+<pre><code>-> Filter: (orders.total > 1000000)  (cost=25.1 rows=3.83)
+       (actual time=0.0392..0.0632 rows=10 loops=1)
+    -> Index range scan on orders using idx_usc
+         over (41 &lt;= user_id &lt;= 43 AND status = 'paid'),
+         with index condition: ((orders.`status` = 'paid')
+           and (orders.user_id between 41 and 43))  (cost=25.1 rows=23)
+       (actual time=0.038..0.0603 rows=18 loops=1)</code></pre>
+<div class="prose">
+<ul>
+<li>Đọc từ node trong cùng ra ngoài. Node con trả row cho node cha.</li>
+<li><code>cost</code> và <code>rows</code> đầu tiên là ước tính. <code>rows=23</code> là số entry optimizer nghĩ sẽ đọc, đúng bằng 23 entry thật.</li>
+<li><code>actual time=0.038..0.0603</code> là mili giây tới row đầu tiên và tới row cuối cùng, trung bình mỗi loop. <code>rows=18</code> là số row node trả lên, cũng trung bình mỗi loop. Nhân với <code>loops</code> để ra tổng; điều này quan trọng ở node bên trong một nested loop join.</li>
+<li>Ở node Filter, optimizer đoán còn 3.83 row, thực tế còn 10. Con số 3.83 là 23 × 16.67% từ cột <code>filtered</code>: một đoán mặc định cho cả <code>status</code> lẫn <code>total</code>. Ước tính lệch thực tế nhiều lần là chỗ đầu tiên cần nhìn khi một plan chậm.</li>
+</ul>
+</div>
+<div class="note"><strong>Lỗi hay gặp:</strong> đọc <code>rows</code> trong <code>EXPLAIN</code> như số row được trả về. Đó là số row optimizer ước tính sẽ <em>đọc</em> bằng cách truy cập đã chọn, trước khi áp phần điều kiện còn lại. Số trả về ước tính là <code>rows × filtered / 100</code>. Số thật nằm trong <code>EXPLAIN ANALYZE</code>.</div>
+</section>
+
+<!-- 3 -->
+<section id="s3">
+<header><span class="num">03</span><h2>Vì sao thiết kế như vậy</h2></header>
+<div class="tablewrap"><table>
+<thead><tr><th>Cơ chế</th><th>Vì sao</th><th>Cái giá</th></tr></thead>
+<tbody>
+<tr><td>Chỉ seek theo tiền tố trái</td><td>Cây B+ sort entry theo thứ tự từ điển trên cả tuple. Chỉ một tiền tố cố định mới cho ra một đoạn entry liền nhau để seek tới rồi đọc tuần tự.</td><td>Một index chỉ phục vụ tốt các query khớp tiền tố của nó. Muốn phục vụ thứ tự cột khác thì cần index khác, tức thêm chi phí ghi.</td></tr>
+<tr><td>Range chặn các cột sau</td><td>Sau một range, các entry khớp cột tiếp theo nằm rải rác trong nhiều đoạn. Seek riêng từng đoạn cần biết mọi giá trị của cột range, đó chính là skip scan.</td><td>Đọc thừa các entry ở giữa, phần thừa lớn dần theo độ rộng của range.</td></tr>
+<tr><td>Hai tầng server và storage engine</td><td>MySQL cho nhiều storage engine dùng chung một server qua handler API. Server lo SQL, engine lo đọc và ghi.</td><td>Engine vốn không hiểu <code>WHERE</code>. ICP (MySQL 5.6) là cách đẩy một phần điều kiện xuống engine để bớt lookup.</td></tr>
+<tr><td>Optimizer theo chi phí</td><td>Không có cách truy cập nào luôn thắng. Chọn theo ước tính số row và chi phí mỗi row.</td><td>Ước tính sai thì chọn sai. Thống kê lấy mẫu và histogram làm tay đều có thể cũ.</td></tr>
+<tr><td>Thống kê lấy mẫu 20 page</td><td>Đếm chính xác trên bảng lớn quá đắt và phải làm lại liên tục.</td><td>Phân bố lệch thì mẫu đoán sai, như <code>idx_status</code> chỉ thấy 3 trên 4 giá trị.</td></tr>
+</tbody></table></div>
+<h3>So với PostgreSQL</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>Điểm</th><th>MySQL InnoDB</th><th>PostgreSQL</th></tr></thead>
+<tbody>
+<tr><td>Lọc trên cột index không dùng để seek</td><td>ICP, Extra <code>Using index condition</code></td><td>luôn kiểm tra trong lúc quét index, hiện trong <code>Index Cond</code> hoặc <code>Filter</code></td></tr>
+<tr><td>Bỏ qua cột đầu của index</td><td>skip scan từ 8.0.13, chỉ khi query covering</td><td>skip scan cho B-tree nhiều cột từ PostgreSQL 18</td></tr>
+<tr><td>Kết hợp nhiều index cho một bảng</td><td><code>index_merge</code>, ít khi được chọn</td><td>bitmap index scan, dùng thường xuyên</td></tr>
+<tr><td>Thống kê nhiều cột</td><td>không có, histogram chỉ trên một cột</td><td><code>CREATE STATISTICS</code> cho tương quan giữa các cột</td></tr>
+<tr><td>Thống kê cập nhật thế nào</td><td>InnoDB tự tính lại sau 10% thay đổi; histogram thì làm tay</td><td><code>ANALYZE</code>, autovacuum chạy định kỳ</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- 4 -->
+<section id="s4">
+<header><span class="num">04</span><h2>Ví dụ</h2></header>
+<p class="prose">Mọi output dưới đây lấy từ sandbox MySQL 8.0.46 của Claude, bảng <code>orders</code> 1 triệu row sinh bằng generator của lab, thêm index <code>idx_usc (user_id, status, created_at)</code>, các index một cột để <code>INVISIBLE</code>. Đây là minh hoạ, không phải số đo của bạn.</p>
+<h3>Cùng index, ba câu query</h3>
+<pre><code>EXPLAIN SELECT * FROM orders WHERE user_id = 42 AND status = 'paid';
+-- type=ref    key_len=5   ref=const,const  rows=6
+
+EXPLAIN SELECT * FROM orders WHERE user_id = 42 AND created_at >= '2025-03-01';
+-- type=ref    key_len=4   rows=7   filtered=30.88   Extra: Using index condition
+
+EXPLAIN SELECT * FROM orders WHERE user_id BETWEEN 41 AND 43 AND status = 'paid';
+-- type=range  key_len=5   rows=23  Extra: Using index condition
+-- FORMAT=JSON: "used_key_parts": ["user_id"]</code></pre>
+<h3>Viết lại range thành IN</h3>
+<pre><code>-- 23 entry đọc, 18 row
+WHERE user_id BETWEEN 41 AND 43 AND status = 'paid'
+-- 18 entry đọc, 18 row: mỗi giá trị một lần seek
+WHERE user_id IN (41, 42, 43) AND status = 'paid'</code></pre>
+<h3>ORDER BY có và không có filesort</h3>
+<pre><code>EXPLAIN SELECT * FROM orders WHERE user_id = 42 ORDER BY created_at;
+-- Extra: Using filesort          (status chưa cố định)
+EXPLAIN SELECT * FROM orders WHERE user_id = 42 AND status = 'paid'
+ORDER BY created_at DESC LIMIT 5;
+-- Extra: Backward index scan     (không sort, dừng sau 5 entry)</code></pre>
+<h3>Hàm trên cột làm mất index</h3>
+<pre><code>-- không seek được: optimizer phải tính DATE() cho từng row
+WHERE DATE(created_at) = '2025-02-06'
+-- seek được
+WHERE created_at >= '2025-02-06' AND created_at &lt; '2025-02-07'</code></pre>
+<h3>Histogram trên cột không có index</h3>
+<p class="prose">Trên một bản sao của <code>orders</code> chỉ có index <code>user_id</code>, cột <code>filtered</code> trong <code>EXPLAIN</code>:</p>
+<div class="tablewrap"><table>
+<thead><tr><th>Điều kiện</th><th>Không có histogram</th><th>Có histogram</th><th>Thực tế</th></tr></thead>
+<tbody>
+<tr><td><code>status = 'cancelled'</code></td><td>25.00%</td><td>4.99%</td><td>4.99%</td></tr>
+<tr><td><code>status = 'paid'</code></td><td>25.00%</td><td>60.00%</td><td>60.00%</td></tr>
+<tr><td><code>total &lt; 100000</code></td><td>33.33%</td><td>1.81%</td><td>1.80%</td></tr>
+</tbody></table></div>
+<pre><code>ANALYZE TABLE oh UPDATE HISTOGRAM ON status WITH 8 BUCKETS;
+SELECT HISTOGRAM FROM information_schema.COLUMN_STATISTICS
+WHERE TABLE_NAME = 'oh' AND COLUMN_NAME = 'status';
+-- {"buckets": [[1, 0.0998], [2, 0.6998], [3, 0.9499], [4, 1.0]],
+--  "histogram-type": "singleton", ...}</code></pre>
+<p class="prose">Không có thống kê, MySQL đoán: so sánh bằng trên ENUM 4 giá trị là 1/4, so sánh khoảng là 1/3. Với một bảng, sai số này chỉ đổi con số in ra. Trong một join, nó quyết định bảng nào được đọc trước.</p>
+</section>
+
+<!-- 5 -->
+<section id="s5">
+<header><span class="num">05</span><h2>Thí nghiệm</h2></header>
+<div class="prose">
+<p>Chạy trên lab MySQL 8.4 với <code>orders</code> 5 triệu row (<code>./lab.sh load orders 5000000</code>). Bảng lab đã có <code>idx_user_id</code> và <code>idx_status</code>, sẽ tranh với index mới. Ẩn chúng trước:</p>
+</div>
+<pre><code>ALTER TABLE orders ADD INDEX idx_usc (user_id, status, created_at);
+ALTER TABLE orders ALTER INDEX idx_user_id INVISIBLE, ALTER INDEX idx_status INVISIBLE;
+ANALYZE TABLE orders;</code></pre>
+<p class="prose">Với 5 triệu row, user 41, 42, 43 có đơn khác ví dụ trên trang. Chạy <code>SELECT user_id, status, created_at, id FROM orders WHERE user_id BETWEEN 41 AND 43 ORDER BY user_id, status, created_at</code> trước để có bảng entry của riêng bạn. Viết dự đoán vào file <code>prediction.md</code> trước khi chạy.</p>
+<details><summary>E9. Leftmost prefix và key_len</summary>
+<p><strong>Câu hỏi.</strong> Với 6 điều kiện trong bảng leftmost prefix ở phần 02, cộng <code>user_id BETWEEN 41 AND 43 AND status = 'paid'</code>, mỗi query có <code>type</code>, <code>key_len</code> và <code>used_key_parts</code> là gì? Ở query nào <code>key_len</code> và <code>used_key_parts</code> kể hai câu chuyện khác nhau?</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e9/prediction.md</code></p>
+<p><strong>Chạy.</strong> <code>EXPLAIN</code> và <code>EXPLAIN FORMAT=JSON</code> cho từng query trong <code>./lab.sh shell</code>.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+<details><summary>E10. ICP bật và tắt</summary>
+<p><strong>Câu hỏi.</strong> ICP tiết kiệm bao nhiêu lookup và bao nhiêu page cho <code>user_id BETWEEN 41 AND 43 AND status = 'paid'</code>? Khi range rộng hơn (<code>BETWEEN 1 AND 5000</code>), chênh lệch page có tăng theo cùng tỉ lệ không?</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e10/prediction.md</code></p>
+<p><strong>Chạy.</strong></p>
+<pre><code>FLUSH STATUS;
+SELECT COUNT(note) FROM orders WHERE user_id BETWEEN 41 AND 43 AND status = 'paid';
+SHOW SESSION STATUS LIKE 'Handler_read%';
+SET optimizer_switch = 'index_condition_pushdown=off';
+-- chạy lại hai câu trên, rồi bật lại ICP
+./lab.sh reads "SELECT COUNT(note) FROM orders WHERE user_id BETWEEN 41 AND 43 AND status = 'paid'"</code></pre>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+<details><summary>E11. Thứ tự cột và filesort</summary>
+<p><strong>Câu hỏi.</strong> Cho <code>WHERE user_id = ? AND status = 'paid' AND created_at &gt;= ? ORDER BY created_at DESC LIMIT 20</code>. Index <code>(user_id, status, created_at)</code> hay <code>(user_id, created_at, status)</code> nhanh hơn, với một user bình thường và với một user có 2 000 đơn?</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e11/prediction.md</code></p>
+<p><strong>Chạy.</strong> Tạo lần lượt từng index, mỗi lần chỉ để một index visible. So <code>Extra</code>, <code>Handler_read_next</code> và <code>./lab.sh latency "…" 500</code>. Thêm 2 000 đơn cho một user bằng <code>INSERT … SELECT</code> rồi đo lại.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+<details><summary>E12. Ngưỡng bỏ index và histogram</summary>
+<p><strong>Câu hỏi.</strong> Ở X nào trong <code>WHERE total &gt; X</code> optimizer đổi từ <code>range</code> sang <code>ALL</code> trên bảng 5 triệu row? Ở ngưỡng đó, plan nào thực sự nhanh hơn? Histogram trên <code>status</code> có đổi <code>filtered</code> khi <code>status</code> còn trong <code>idx_usc</code> không?</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e12/prediction.md</code></p>
+<p><strong>Chạy.</strong></p>
+<pre><code>EXPLAIN SELECT * FROM orders WHERE total > 4800000;   -- đổi X tới khi type đổi
+SELECT COUNT(*) FROM orders WHERE total > 4800000;
+./lab.sh latency "SELECT * FROM orders WHERE total > 4800000" 50
+./lab.sh latency "SELECT * FROM orders FORCE INDEX (idx_total) WHERE total > 4800000" 50
+EXPLAIN SELECT * FROM orders WHERE note LIKE 'c%' AND status = 'cancelled';
+ANALYZE TABLE orders UPDATE HISTOGRAM ON status WITH 8 BUCKETS;
+-- chạy lại EXPLAIN, so cột filtered</code></pre>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+</section>
+
+<!-- 6 -->
+<section id="s6">
+<header><span class="num">06</span><h2>Ảnh hưởng khi chạy production</h2></header>
+<h3>Khi nào dùng, khi nào không</h3>
+<div class="prose">
+<ul>
+<li><strong>Dùng</strong> khi một query chạy thường xuyên lọc theo nhiều cột cùng lúc, nhất là có <code>ORDER BY … LIMIT</code> cho trang danh sách. Một index đúng thứ tự thay được cả seek, lọc lẫn sort.</li>
+<li><strong>Không dùng</strong> chỉ để "phủ" mọi tổ hợp cột. Mỗi index phục vụ một họ query có chung tiền tố. Tổ hợp ít chạy chấp nhận plan kém hơn.</li>
+<li><strong>Thay bằng</strong> index covering khi query chỉ cần vài cột và đọc nhiều row; bảng tổng hợp hoặc cột tính sẵn khi điều kiện là hàm trên cột (hoặc functional index).</li>
+</ul>
+</div>
+<h3>Cái giá</h3>
+<div class="prose">
+<ul>
+<li>Mỗi index là một cây nữa phải cập nhật trên mọi <code>INSERT</code>, <code>DELETE</code> và mọi <code>UPDATE</code> chạm vào cột của nó.</li>
+<li>Mỗi entry chứa cả PK, nên index nhiều cột trên bảng có PK lớn tốn đáng kể dung lượng và chỗ trong buffer pool.</li>
+<li>Index thừa vẫn tốn ghi và còn có thể kéo optimizer chọn sai.</li>
+</ul>
+</div>
+<div class="senior">
+<h4>Góc nhìn senior: index tiền tố là index thừa</h4>
+<p>Index <code>(user_id)</code> là tiền tố của <code>(user_id, status, created_at)</code>. Mọi query nó phục vụ thì index ba cột cũng phục vụ được. Bảng <code>orders</code> của lab đang có cả hai. Trong sandbox, optimizer chọn <code>idx_user_id</code> cho <code>user_id = 42 AND created_at &gt;= …</code>, rồi lookup cả 7 row mới lọc <code>created_at</code> (<code>Using where</code>), thay vì lọc ngay trong index ba cột. Trước khi xoá, cho index thừa <code>INVISIBLE</code> một thời gian để chắc không query nào cần nó.</p>
+</div>
+<h3>Nhận ra trên production bằng gì</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>Dấu hiệu</th><th>Nhìn ở đâu</th></tr></thead>
+<tbody>
+<tr><td>Query đọc nhiều hơn trả về rất nhiều</td><td><code>performance_schema.events_statements_summary_by_digest</code>: so <code>SUM_ROWS_EXAMINED</code> với <code>SUM_ROWS_SENT</code></td></tr>
+<tr><td>Query không dùng index nào</td><td><code>SUM_NO_INDEX_USED</code> trong bảng digest, <code>sys.statements_with_full_table_scans</code>, slow log với <code>log_queries_not_using_indexes</code></td></tr>
+<tr><td>Sort tốn kém</td><td><code>sys.statements_with_sorting</code>, <code>Sort_merge_passes</code> tăng</td></tr>
+<tr><td>Index thừa hoặc không dùng</td><td><code>sys.schema_redundant_indexes</code>, <code>sys.schema_unused_indexes</code></td></tr>
+<tr><td>Plan đổi đột ngột sau khi data tăng</td><td><code>EXPLAIN ANALYZE</code> so ước tính với thực tế; kiểm tra thống kê bằng <code>ANALYZE TABLE</code></td></tr>
+</tbody></table></div>
+<div class="senior">
+<h4>Góc nhìn senior: đừng vội FORCE INDEX</h4>
+<p>Hint đúng hôm nay sẽ sai khi phân bố dữ liệu đổi, và không ai nhớ nó ở đó. Trước tiên tìm vì sao ước tính lệch: so <code>rows</code> ước tính với thực tế trong <code>EXPLAIN ANALYZE</code>, xem <code>optimizer_trace</code> để thấy chi phí từng phương án. Sửa thống kê, sửa query, hoặc sửa index. Hint là lựa chọn cuối, kèm comment ghi lý do.</p>
+</div>
+<h3>Checklist khi review một index hoặc query</h3>
+<div class="prose">
+<ul>
+<li>Thứ tự cột có theo equality, sort, range không? Cột range có đứng cuối không?</li>
+<li>Index mới có phải tiền tố của index sẵn có, hoặc ngược lại, làm index cũ thành thừa không?</li>
+<li><code>EXPLAIN</code> của query chính: <code>type</code>, <code>used_key_parts</code>, có <code>Using filesort</code> hay <code>Using temporary</code> không?</li>
+<li>Có hàm hoặc ép kiểu nào trên cột trong <code>WHERE</code> không?</li>
+<li><code>rows</code> ước tính so với số row thật cỡ nào, đo trên dữ liệu cỡ production chứ không phải bảng test vài trăm row?</li>
+<li>Bảng ghi nhiều tới đâu, index mới làm chậm ghi bao nhiêu?</li>
+</ul>
+</div>
+</section>
+
+<!-- 7 -->
+<section id="s7">
+<header><span class="num">07</span><h2>Hiểu lầm thường gặp</h2></header>
+<p class="prose">Chưa đánh dấu hiểu lầm nào là "(đã mắc)". Bạn đánh dấu những mục chính mình từng hiểu sai.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>Hiểu lầm</th><th>Vì sao sai</th><th>Quy tắc</th></tr></thead>
+<tbody>
+<tr><td><code>key_len</code> cho biết bao nhiêu cột được dùng để seek</td><td>Các cột equality sau một range vẫn vào hai đầu khoảng và được tính, dù chỉ cắt mép</td><td>Xem <code>used_key_parts</code> hoặc đếm <code>Handler_read_next</code></td></tr>
+<tr><td>Có điều kiện trên cả ba cột của index thì index dùng cả ba</td><td>Sau cột range đầu tiên, các cột sau không thu hẹp khoảng đọc</td><td>Equality trước, range cuối; đổi range nhỏ thành <code>IN</code> khi được</td></tr>
+<tr><td><code>Using index condition</code> nghĩa là query dùng index tốt</td><td>Nó chỉ nói lọc trên entry trước khi lookup; số entry đọc không đổi</td><td>Nhìn khoảng seek, không nhìn Extra</td></tr>
+<tr><td>Index trên <code>(a, b, c)</code> giúp <code>WHERE a = ? ORDER BY c</code> khỏi sort</td><td><code>b</code> chưa cố định nên entry không theo thứ tự <code>c</code></td><td>Mọi cột trước cột sort phải cố định bằng một giá trị</td></tr>
+<tr><td><code>rows</code> trong <code>EXPLAIN</code> là số row trả về</td><td>Đó là số row ước tính sẽ đọc</td><td>Số trả về ước tính là <code>rows × filtered / 100</code>; số thật ở <code>EXPLAIN ANALYZE</code></td></tr>
+<tr><td>Optimizer bỏ index là optimizer sai</td><td>Đọc nhiều row qua secondary index có thể đắt hơn scan tuần tự</td><td>So ước tính với thực tế, đo cả hai plan trước khi ép</td></tr>
+<tr><td>Thêm histogram là sửa được ước tính cho mọi cột</td><td>Khi range optimizer áp dụng được, histogram không được dùng</td><td>Histogram dành cho cột không có index</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- 8 -->
+<section id="s8">
+<header><span class="num">08</span><h2>Câu hỏi ôn tập</h2></header>
+<p class="prose">Viết ngày 2026-10-19. Trả lời ra giấy trước rồi mới mở đáp án.</p>
+<details><summary><span class="tag">Giải thích</span>key_len 5 nhưng chỉ một cột</summary>
+<p>Vì sao <code>user_id BETWEEN 41 AND 43 AND status = 'paid'</code> trên index <code>(user_id, status, created_at)</code> có <code>key_len = 5</code> mà <code>used_key_parts</code> chỉ có <code>user_id</code>? <code>status</code> cắt được những entry nào khỏi khoảng đọc?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Khoảng seek là từ <code>(41, 'paid')</code> tới <code>(43, 'paid')</code>, nên hai đầu khoảng chứa cả hai cột và <code>key_len</code> tính 4 + 1. Nhưng các entry nằm giữa hai đầu đó gồm mọi status của user 41, 42 và phần status nhỏ hơn hoặc bằng <code>paid</code> của 43, nên chỉ <code>user_id</code> thực sự thu hẹp khoảng đọc. <code>status</code> chỉ cắt các entry ở hai mép: status đứng trước <code>paid</code> của user 41 (<code>new</code>, nếu có) và status đứng sau <code>paid</code> của user 43 (<code>shipped</code>, <code>cancelled</code>).</p></details></details>
+<details><summary><span class="tag">Dự đoán</span>Ba điều kiện, một index</summary>
+<p>Query có <code>a = ?</code>, <code>b &gt; ?</code>, <code>c = ?</code> và <code>ORDER BY d</code>. Bạn chỉ được tạo một index. Chọn thứ tự cột nào, và mất gì so với các thứ tự khác?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Không có thứ tự nào được cả ba thứ. <code>(a, c, b)</code> seek bằng cả ba cột, đọc ít entry nhất, nhưng phải filesort theo <code>d</code>. <code>(a, c, d)</code> seek bằng <code>a, c</code>, trả đúng thứ tự <code>d</code> nên dừng sớm được với <code>LIMIT</code>, còn <code>b</code> chỉ lọc qua ICP nếu thêm vào cuối: <code>(a, c, d, b)</code>. Chọn <code>(a, c, b)</code> khi <code>b &gt; ?</code> rất chọn lọc; chọn <code>(a, c, d, b)</code> khi có <code>LIMIT</code> nhỏ và nhiều row khớp.</p></details></details>
+<details><summary><span class="tag">Giải thích</span>Using where nhưng không lookup</summary>
+<p>Khi nào <code>Using where</code> đi cùng <code>Using index</code>, và khi đó row có được đọc từ PRIMARY không?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Khi index covering (mọi cột query cần đều nằm trong index, tính cả PK) và còn điều kiện không dùng được để seek. Server lọc trên entry index mà InnoDB trả lên. Không có lookup PRIMARY nào; ICP không xuất hiện vì không có lookup để tiết kiệm.</p></details></details>
+<details><summary><span class="tag">Chẩn đoán</span>Index tốt bị bỏ qua</summary>
+<p><code>WHERE created_at &gt;= NOW() - INTERVAL 1 DAY</code> dùng index ở staging nhưng production lại full scan. Nêu ba nguyên nhân có thể và cách kiểm tra từng cái.</p>
+<details class="answer"><summary>Xem đáp án</summary><ul>
+<li>Production có nhiều row trong một ngày hơn hẳn, ước tính vượt ngưỡng nên optimizer chọn scan. Kiểm tra: <code>EXPLAIN</code> xem <code>rows</code>, <code>COUNT(*)</code> thật, so latency hai plan bằng <code>FORCE INDEX</code>.</li>
+<li>Kiểu dữ liệu khác: cột là <code>VARCHAR</code> hoặc <code>TIMESTAMP</code> so với giá trị khác kiểu, gây ép kiểu trên cột. Kiểm tra: <code>SHOW CREATE TABLE</code> trên production, <code>EXPLAIN</code> có <code>possible_keys</code> không.</li>
+<li>Thống kê lệch hoặc cũ. Kiểm tra: <code>SHOW INDEX</code>, <code>mysql.innodb_index_stats</code> (<code>last_update</code>), chạy <code>ANALYZE TABLE</code> rồi <code>EXPLAIN</code> lại. Thêm: index có thể invisible hoặc không tồn tại trên production.</li>
+</ul></details></details>
+<details><summary><span class="tag">Dự đoán</span>rows và filtered trong join</summary>
+<p>Dòng đầu của một join có <code>rows = 10000, filtered = 10.00</code>, dòng thứ hai <code>type = ref, rows = 5</code>. Bảng thứ hai bị truy cập khoảng bao nhiêu lần? Nếu thực tế <code>filtered</code> là 90% thì chuyện gì xảy ra với plan?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Khoảng 10000 × 10% = 1 000 lần lookup vào bảng thứ hai, mỗi lần khoảng 5 row, tức khoảng 5 000 row. Nếu thực tế là 90% thì có 9 000 lần lookup và khoảng 45 000 row, gấp 9 lần ước tính. Optimizer có thể đã chọn thứ tự join hoặc cách truy cập khác nếu biết con số thật. Histogram trên cột lọc của bảng đầu là cách sửa ước tính đó.</p></details></details>
+<details><summary><span class="tag">Chẩn đoán</span>Thêm index mà query không nhanh hơn</summary>
+<p>Bạn thêm <code>(status, created_at)</code> cho <code>WHERE status = 'paid' AND created_at &gt;= ? ORDER BY created_at LIMIT 50</code>. <code>EXPLAIN</code> dùng index mới, nhưng latency gần như không đổi. Nghĩ ra hai lý do.</p>
+<details class="answer"><summary>Xem đáp án</summary><ul>
+<li>Plan cũ vốn đã rẻ. Với index <code>(created_at)</code> có sẵn, optimizer đọc theo thứ tự <code>created_at</code> và lọc <code>status</code>; vì <code>paid</code> chiếm 60% bảng, nó chỉ cần đọc khoảng 85 entry là đủ 50 row rồi dừng. Index mới chỉ bớt được khoảng 35 entry. Kiểm tra: <code>EXPLAIN ANALYZE</code> của cả hai plan, xem số row thật ở từng node.</li>
+<li>Thời gian nằm ở chỗ khác: 50 lookup PRIMARY ngẫu nhiên khi buffer pool lạnh, hoặc lock wait, hoặc mạng. Kiểm tra bằng <code>./lab.sh reads</code> (page đọc từ disk) và <code>performance_schema</code> (thời gian chờ lock).</li>
+</ul></details></details>
+</section>
+
+<!-- 9 -->
+<section id="s9">
+<header><span class="num">09</span><h2>Câu hỏi còn mở</h2></header>
+<p class="prose">Số thứ tự trùng với Open questions trong <code>.claude/docs/LEARNING_LOG.md</code>. Log là bản gốc.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>#</th><th>Câu hỏi</th><th>Trạng thái</th></tr></thead>
+<tbody>
+<tr><td>8</td><td>Trong sandbox, histogram trên <code>status</code> không đổi <code>filtered</code> khi <code>status</code> còn nằm trong một index, kể cả index invisible. 8.4 có giống vậy không?</td><td>Đã trả lời một phần: manual 8.4 (Optimizer Statistics) nói optimizer không dùng histogram khi range optimizer áp dụng được. Chưa rõ index invisible có tính không. Kiểm chứng bằng E12.</td></tr>
+<tr><td>9</td><td>Optimizer bỏ <code>idx_total</code> ở khoảng 10% bảng theo ước tính, khi thực tế chỉ khoảng 5% khớp. Full scan có thực sự nhanh hơn ở ngưỡng đó không?</td><td>Mở. E12.</td></tr>
+<tr><td>10</td><td>Vì sao MySQL vẫn ghi <code>Using index condition</code> cho <code>user_id = 42 AND status = 'paid'</code>, khi cả hai điều kiện đã nằm trong key của <code>ref</code>?</td><td>Mở.</td></tr>
+<tr><td>11</td><td>Manual mô tả range optimizer "không xét thêm key part nào" sau một range, nhưng sandbox in <code>key_len</code> và khoảng có cả cột equality sau range. Bản nào đúng với 8.4?</td><td>Mở. E9.</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- 10 -->
+<section id="s10">
+<header><span class="num">10</span><h2>Tài liệu tham khảo</h2></header>
+<div class="prose">
+<ul>
+<li>MySQL 8.4 Reference Manual, <a href="https://dev.mysql.com/doc/refman/8.4/en/multiple-column-indexes.html">Multiple-Column Indexes</a></li>
+<li><a href="https://dev.mysql.com/doc/refman/8.4/en/range-optimization.html">Range Optimization</a>: khoảng trên index nhiều cột, <code>eq_range_index_dive_limit</code>, skip scan</li>
+<li><a href="https://dev.mysql.com/doc/refman/8.4/en/index-condition-pushdown-optimization.html">Index Condition Pushdown Optimization</a></li>
+<li><a href="https://dev.mysql.com/doc/refman/8.4/en/order-by-optimization.html">ORDER BY Optimization</a></li>
+<li><a href="https://dev.mysql.com/doc/refman/8.4/en/descending-indexes.html">Descending Indexes</a>, <a href="https://dev.mysql.com/doc/refman/8.4/en/invisible-indexes.html">Invisible Indexes</a></li>
+<li><a href="https://dev.mysql.com/doc/refman/8.4/en/explain-output.html">EXPLAIN Output Format</a>, <a href="https://dev.mysql.com/doc/refman/8.4/en/explain.html">EXPLAIN Statement</a> (EXPLAIN ANALYZE)</li>
+<li><a href="https://dev.mysql.com/doc/refman/8.4/en/optimizer-statistics.html">Optimizer Statistics</a> (histogram), <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-persistent-stats.html">Configuring Persistent Optimizer Statistics</a></li>
+<li>PostgreSQL: <a href="https://www.postgresql.org/about/featurematrix/detail/skip-scan-on-multicolumn-b-tree-indexes">skip scan on multicolumn B-tree indexes</a> (PostgreSQL 18)</li>
+</ul>
+</div>
+<h3>Mức kiểm chứng</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>Khẳng định</th><th>Nguồn</th></tr></thead>
+<tbody>
+<tr><td>Leftmost prefix; range dừng các key part sau</td><td>manual (Range Optimization); sandbox 8.0.46 khớp với <code>used_key_parts</code> nhưng <code>key_len</code> tính cả cột equality sau range (câu hỏi 11)</td></tr>
+<tr><td>Điều kiện của skip scan</td><td>manual; sandbox không chọn skip scan với 100 nghìn giá trị <code>user_id</code></td></tr>
+<tr><td>ICP giảm lookup, không giảm entry đọc</td><td>manual; sandbox: <code>Handler_read_next</code> 18 khi bật, 23 khi tắt</td></tr>
+<tr><td>Luật ORDER BY và filesort</td><td>manual; sandbox cho cả 6 trường hợp trong bảng</td></tr>
+<tr><td>Histogram không dùng khi range optimizer áp dụng được</td><td>manual (Optimizer Statistics); sandbox khớp</td></tr>
+<tr><td>Ngưỡng bỏ index khoảng 10% ước tính</td><td>chỉ sandbox 8.0.46, 1 triệu row; chưa đo trên lab</td></tr>
+<tr><td>Cách nhận ra trên production (bảng phần 06)</td><td>đọc tài liệu <code>sys</code> và <code>performance_schema</code>; chưa thử trên lab</td></tr>
+<tr><td>So sánh với PostgreSQL</td><td>đọc tài liệu; chưa chạy</td></tr>
+</tbody></table></div>
+</section>
+</main>
+
+</div>
+
+<script>
+/* ---------- helpers ---------- */
+const DEFS=`<defs><marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>`;
+function B(x,y,w,h,cls,t,sub){
+  const tx=x+w/2;
+  return `<g class="n ${cls||''}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="4"/>`+
+  `<text class="tb" x="${tx}" y="${y+(sub?h/2-8:h/2)}" text-anchor="middle" dominant-baseline="central">${t}</text>`+
+  (sub?`<text class="ts" x="${tx}" y="${y+h/2+9}" text-anchor="middle" dominant-baseline="central">${sub}</text>`:'')+`</g>`;
+}
+const L=(x1,y1,x2,y2,cls)=>`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" class="edge ${cls||''}"/>`;
+const A=(d,cls)=>`<path d="${d}" class="edge ${cls||''}" marker-end="url(#arw)"/>`;
+const T=(x,y,t,anchor,cls)=>`<text class="${cls||'lbl'}" x="${x}" y="${y}" text-anchor="${anchor||'start'}">${t}</text>`;
+const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const $=id=>document.getElementById(id);
+const fmt=n=>n.toLocaleString('vi-VN');
+
+function stepper(id,{title,vb,steps,draw,after,extra}){
+  const el=$(id);
+  el.innerHTML=`<div class="ph"><strong>${title}</strong><span class="meta"></span></div><div class="bd">
+  <h3 class="st-t"></h3>${extra||''}
+  <div class="svgwrap"><svg viewBox="${vb}" role="img"></svg></div>
+  <div class="desc" aria-live="polite"><div class="st-d"></div><pre hidden></pre></div>
+  <div class="nav"><button data-d="-1">Trước</button><button data-d="1" class="primary">Tiếp</button></div></div>`;
+  const svg=el.querySelector('svg'),t=el.querySelector('.st-t'),d=el.querySelector('.st-d'),pre=el.querySelector('pre'),meta=el.querySelector('.meta');
+  const [pv,nx]=el.querySelectorAll('.nav button');let i=0;
+  function render(){const s=steps[i];svg.innerHTML=DEFS+draw(s,i);svg.setAttribute('aria-label',s.t);t.textContent=s.t;d.textContent=s.d;
+    pre.hidden=!s.c;pre.textContent=s.c||'';meta.textContent=`bước ${i+1} / ${steps.length}`;pv.disabled=i===0;nx.disabled=i===steps.length-1;after&&after(s,el,i);}
+  function go(k){i=Math.max(0,Math.min(steps.length-1,i+k));render();}
+  pv.onclick=()=>go(-1);nx.onclick=()=>go(1);
+  el.tabIndex=0;el.addEventListener('keydown',e=>{if(e.key==='ArrowRight')go(1);if(e.key==='ArrowLeft')go(-1);});
+  render();
+}
+
+/* ---------- data: mọi đơn của user 41, 42, 43 (bảng 1M row, generator của lab) ---------- */
+const EN=['new','paid','shipped','cancelled'];
+const D=[
+[41,'paid','01-09 16:36',125165,2147692],[41,'paid','01-14 19:54',199149,4442988],[41,'paid','01-23 22:48',330487,597292],[41,'paid','02-17 04:57',679774,812044],
+[41,'shipped','01-15 19:39',213394,2057676],[41,'shipped','01-20 09:13',279134,4870444],[41,'shipped','02-08 07:36',551764,4877932],[41,'shipped','03-02 18:13',874935,3437452],
+[42,'paid','01-31 19:12',443526,754605],[42,'paid','02-01 05:37',449771,3493933],[42,'paid','02-06 10:18',524585,2036621],[42,'paid','02-07 01:22',533628,2488173],
+[42,'paid','02-10 22:20',589404,428333],[42,'paid','02-17 15:45',686257,147565],[42,'shipped','01-18 04:47',247675,3566253],
+[43,'paid','01-02 08:32',19521,2405599],[43,'paid','01-07 13:52',94729,352223],[43,'paid','01-18 20:06',256870,503758],[43,'paid','01-23 06:34',320749,2361038],
+[43,'paid','01-27 00:07',374476,1273166],[43,'paid','02-10 00:44',576444,2782446],[43,'paid','02-15 16:24',657847,560110],[43,'paid','02-28 10:47',841671,2634702],
+[43,'shipped','01-19 20:10',271304,373166],[43,'shipped','02-24 23:58',791982,4228110],[43,'cancelled','01-15 08:55',206951,4172910],[43,'cancelled','02-11 06:04',594043,2273422]
+].map(([u,s,c,id,t])=>({u,s,c,id,t}));
+const COL={u:{n:'user_id',b:4},s:{n:'status',b:1},c:{n:'created_at',b:5}};
+const VAL={u:e=>e.u,s:e=>EN.indexOf(e.s),c:e=>e.c};
+const INF={inf:1};
+const CONDS={
+  u:{eq:{k:'eq',v:[42],sql:'user_id = 42'},in:{k:'in',v:[41,43],sql:'user_id IN (41, 43)'},rg:{k:'rg',lo:41,hi:43,sql:'user_id BETWEEN 41 AND 43'}},
+  s:{eq:{k:'eq',v:[1],sql:"status = 'paid'"},in:{k:'in',v:[1,2],sql:"status IN ('paid', 'shipped')"}},
+  c:{ge:{k:'rg',lo:'02-05',hi:INF,sql:"created_at >= '2025-02-05'"}}
+};
+const PERMS=[['u','s','c'],['u','c','s'],['s','u','c'],['s','c','u'],['c','u','s'],['c','s','u']];
+const permName=p=>'('+p.map(k=>COL[k].n).join(', ')+')';
+function okCol(k,cd,e){const v=VAL[k](e);if(cd.k==='rg')return v>=cd.lo&&(cd.hi===INF||v<=cd.hi);return cd.v.includes(v);}
+function cmpV(a,b){if(a===b)return 0;if(a===INF)return 1;if(b===INF)return -1;return a<b?-1:1;}
+function showV(k,v){if(v===INF)return '+∞';if(k==='s')return `'${EN[v]}'`;if(k==='c')return `'${v}'`;return v;}
+
+/* real algorithm: build seek intervals from the leftmost prefix, then walk the sorted entries */
+function plan(q){
+  const {perm,cond,cov,tot,ord}=q;
+  const seek=[],bound=[];let multi=false,range=false;
+  for(const k of perm){const cd=cond[k];if(!cd)break;
+    if(!range){seek.push(k);bound.push(k);if(cd.k==='in')multi=true;if(cd.k==='rg')range=true;continue;}
+    if(cd.k==='eq'){bound.push(k);continue;}
+    if(cd.k==='rg')bound.push(k);
+    break;}
+  const sorted=D.slice().sort((a,b)=>{for(const k of perm){const c=cmpV(VAL[k](a),VAL[k](b));if(c)return c;}return a.id-b.id;});
+  // intervals: product of value choices over bound columns
+  let ivs=[{lo:[],hi:[]}];
+  for(const k of bound){const cd=cond[k],nx=[];
+    const choices=cd.k==='rg'?[[cd.lo,cd.hi]]:cd.v.map(v=>[v,v]);
+    for(const iv of ivs)for(const [lo,hi] of choices)nx.push({lo:[...iv.lo,lo],hi:[...iv.hi,hi]});ivs=nx;}
+  const key=e=>bound.map(k=>VAL[k](e));
+  const cmpT=(kv,t)=>{for(let j=0;j<t.length;j++){const c=cmpV(kv[j],t[j]);if(c)return c;}return 0;};
+  const tableScan=!seek.length&&!cov, fullIndex=!seek.length&&cov;
+  const out=sorted.map(e=>({e,st:'',iv:-1}));
+  out.forEach(o=>{
+    if(tableScan)return;
+    let iv=-1;
+    if(fullIndex)iv=0;else{const kv=key(o.e);ivs.forEach((v,j)=>{if(cmpT(kv,v.lo)>=0&&cmpT(kv,v.hi)<=0)iv=j;});}
+    o.iv=iv;if(iv<0)return;
+    const idxOk=['u','s','c'].every(k=>!cond[k]||okCol(k,cond[k],o.e));
+    if(!idxOk){o.st='icp';return;}
+    if(cov){o.st='ok';return;}
+    o.st=(tot&&o.e.t<=1000000)?'drop':'row';
+  });
+  const residual=['u','s','c'].some(k=>cond[k]&&!seek.includes(k));
+  let type,keyName='idx_'+perm.join(''),kl='NULL',ref='NULL',extra=[];
+  if(tableScan){type='ALL';keyName='NULL';if(Object.values(cond).some(Boolean)||tot)extra.push('Using where');}
+  else if(fullIndex){type='index';kl=String(perm.reduce((s,k)=>s+COL[k].b,0));if(residual)extra.push('Using where');extra.push('Using index');}
+  else{type=(multi||range)?'range':'ref';kl=String(bound.reduce((s,k)=>s+COL[k].b,0));
+    if(type==='ref')ref=seek.map(()=>'const').join(',');
+    if(cov){if(residual)extra.push('Using where');extra.push('Using index');}
+    else{if(residual)extra.push('Using index condition');if(tot)extra.push('Using where');}}
+  let fsort=false,back=false;
+  if(ord){const p=perm.indexOf('c');const fixed=perm.slice(0,p).every(k=>cond[k]&&cond[k].k==='eq'&&seek.includes(k));
+    if(tableScan)fsort=true;else if(fullIndex)fsort=p!==0;else fsort=!fixed;
+    if(fsort)extra.push('Using filesort');else if(ord==='desc'){extra.push('Backward index scan');back=true;}}
+  const read=tableScan?D.length:out.filter(o=>o.iv>=0).length;
+  const rej=out.filter(o=>o.st==='icp').length;
+  const look=out.filter(o=>o.st==='row'||o.st==='drop').length;
+  let res=tableScan?D.filter(e=>['u','s','c'].every(k=>!cond[k]||okCol(k,cond[k],e))&&(!tot||e.t>1000000)):out.filter(o=>o.st==='row'||o.st==='ok').map(o=>o.e);
+  if(back)res=res.slice().reverse();
+  if(fsort)res=res.slice().sort((a,b)=>ord==='desc'?cmpV(b.c,a.c):cmpV(a.c,b.c));
+  return {seek,bound,ivs,out,type,keyName,kl,ref,extra,read,rej,look,res,fsort,back,tableScan,fullIndex,multi,range,residual};
+}
+
+/* ---------- lab (hero) ---------- */
+const LAB={perm:['u','s','c'],u:'',s:'',c:'',sel:'all',o:'',t:false};
+const PRESETS=[
+  ['Chỉ user_id',{u:'eq'}],
+  ['user_id + status',{u:'eq',s:'eq'}],
+  ['Cả ba cột',{u:'eq',s:'eq',c:'ge'}],
+  ['Thiếu status',{u:'eq',c:'ge'}],
+  ['Range ở user_id',{u:'rg',s:'eq'}],
+  ['Thiếu user_id',{s:'eq'}],
+  ['ORDER BY, thiếu status',{u:'eq',o:'asc'}],
+  ['ORDER BY DESC',{u:'eq',s:'eq',o:'desc'}],
+  ['IN rồi ORDER BY',{u:'eq',s:'in',o:'asc'}],
+];
+(function(){
+  const ps=$('q-perm');PERMS.forEach((p,i)=>{const o=document.createElement('option');o.value=i;o.textContent=permName(p);ps.appendChild(o);});
+  const pr=$('lab-presets');
+  PRESETS.forEach(([name,cfg])=>{const b=document.createElement('button');b.textContent=name;b.onclick=()=>{
+    Object.assign(LAB,{perm:['u','s','c'],u:'',s:'',c:'',sel:'all',o:'',t:false},cfg);syncInputs();drawLab();};pr.appendChild(b);});
+  ['q-u','q-s','q-c','q-sel','q-o'].forEach(id=>$(id).onchange=e=>{LAB[{'q-u':'u','q-s':'s','q-c':'c','q-sel':'sel','q-o':'o'}[id]]=e.target.value;drawLab();});
+  ps.onchange=e=>{LAB.perm=PERMS[+e.target.value];drawLab();};
+  $('q-t').onchange=e=>{LAB.t=e.target.checked;if(LAB.t&&LAB.sel==='cov'){LAB.sel='all';syncInputs();}drawLab();};
+  Object.assign(LAB,{u:'rg',s:'eq'});syncInputs();drawLab();
+})();
+function syncInputs(){$('q-perm').value=PERMS.findIndex(p=>p.join()===LAB.perm.join());$('q-u').value=LAB.u;$('q-s').value=LAB.s;$('q-c').value=LAB.c;$('q-sel').value=LAB.sel;$('q-o').value=LAB.o;$('q-t').checked=LAB.t;
+  $('q-sel').querySelector('[value=cov]').disabled=LAB.t;}
+function labQuery(){const cond={u:LAB.u?CONDS.u[LAB.u]:null,s:LAB.s?CONDS.s[LAB.s]:null,c:LAB.c?CONDS.c[LAB.c]:null};
+  return {perm:LAB.perm,cond,cov:LAB.sel==='cov'&&!LAB.t,tot:LAB.t,ord:LAB.o};}
+function sqlText(q){const w=['u','s','c'].filter(k=>q.cond[k]).map(k=>q.cond[k].sql);if(q.tot)w.push('total > 1000000');
+  let s=`SELECT ${q.cov?'id, created_at':'*'} FROM orders`;if(w.length)s+='\nWHERE '+w.join('\n  AND ');if(q.ord)s+='\nORDER BY created_at'+(q.ord==='desc'?' DESC':'');return s;}
+function hl(s){return esc(s).replace(/\b(SELECT|FROM|WHERE|AND|ORDER BY|BETWEEN|IN|DESC)\b/g,'<span class="k">$1</span>');}
+function tupleText(bound,t){return '('+t.map((v,j)=>showV(bound[j],v)).join(', ')+')';}
+function drawLab(){
+  const q=labQuery(),P=plan(q);
+  $('lab-sql').innerHTML=hl(sqlText(q));
+  $('lab-meta').textContent=`index ${permName(q.perm)}`;
+  const led=$('lab-ledger');
+  led.style.setProperty('--cols',q.perm.map(k=>k==='c'?'1.35fr':k==='s'?'1.1fr':'.8fr').join(' ')+' 1fr');
+  let h=`<div class="hd" role="presentation">${q.perm.map(k=>`<span>${COL[k].n}</span>`).join('')}<span>id (PK)</span></div>`;
+  let prevIv=-1,prev0=null;const lab={icp:'ICP loại',row:'lookup',drop:'lookup, loại',ok:'từ index'};
+  P.out.forEach((o,i)=>{
+    if(!P.tableScan&&!P.fullIndex&&prevIv>=0&&o.iv!==prevIv){h+=`<div class="mk stop" role="listitem">dừng: entry kế tiếp vượt ${esc(tupleText(P.bound,P.ivs[prevIv].hi))}</div>`;}
+    if(!P.tableScan&&!P.fullIndex&&o.iv>=0&&o.iv!==prevIv){const v=P.ivs[o.iv];h+=`<div class="mk" role="listitem">seek tới ${esc(tupleText(P.bound,v.lo))}</div>`;}
+    const g=prev0!==null&&VAL[q.perm[0]](o.e)!==prev0;prev0=VAL[q.perm[0]](o.e);
+    const cls=o.st||(o.iv>=0?'seek':'');
+    const tag=o.st?lab[o.st]:(o.iv>=0?'đọc':'');
+    h+=`<div class="en ${cls} ${g?'grp':''}" role="listitem">${q.perm.map(k=>`<span>${k==='s'?o.e.s:k==='c'?o.e.c:o.e.u}</span>`).join('')}<span class="pk">${o.e.id}${tag?` <span class="ltag">${tag}</span>`:''}</span></div>`;
+    prevIv=o.iv;
+  });
+  if(!P.tableScan&&!P.fullIndex&&prevIv>=0)h+=`<div class="mk stop" role="listitem">dừng: entry kế tiếp vượt ${esc(tupleText(P.bound,P.ivs[prevIv].hi))}</div>`;
+  led.innerHTML=h;
+  const ex=[['type',P.type],['key',P.keyName],['key_len',P.kl],['ref',P.ref],['rows',P.read],['Extra',P.extra.join('; ')||'NULL']];
+  $('lab-explain').innerHTML=`<table>${ex.map(x=>`<tr><th>${x[0]}</th><td>${esc(x[1])}</td></tr>`).join('')}</table>`;
+  $('lab-a').textContent=P.tableScan?'0 (scan bảng)':P.read;
+  $('lab-b').textContent=P.rej;
+  $('lab-c').textContent=P.tableScan?'0':P.look;
+  $('lab-d').textContent=P.res.length;
+  // explanation
+  const W=[];
+  if(P.tableScan){W.push(`<p><b>Không seek được.</b> Cột đầu của index là <code>${COL[q.perm[0]].n}</code> nhưng query không có điều kiện trên nó. Với <code>SELECT *</code>, InnoDB đọc cả PRIMARY (${D.length} row ở đây, cả bảng ngoài đời) và server lọc từng row.</p>`);}
+  else if(P.fullIndex){W.push(`<p><b>Không seek được, nhưng index covering.</b> Đọc toàn bộ ${D.length} entry của index, lọc ngay trên entry, không lookup PRIMARY. Đó là <code>type = index</code>.</p>`);}
+  else{
+    W.push(`<p><b>Seek bằng ${P.seek.map(k=>'<code>'+COL[k].n+'</code>').join(', ')}.</b> ${P.ivs.length>1?`${P.ivs.length} khoảng, mỗi giá trị trong IN là một lần seek. `:''}${P.range?`<code>${COL[P.seek[P.seek.length-1]].n}</code> là range, nên ${q.perm.slice(P.seek.length).filter(k=>q.cond[k]).map(k=>'<code>'+COL[k].n+'</code>').join(', ')||'không cột nào sau nó'} không còn thu hẹp được khoảng đọc.`:''}</p>`);
+    const nb=P.bound.filter(k=>!P.seek.includes(k));
+    if(nb.length)W.push(`<p><b>key_len ${P.kl} tính cả ${nb.map(k=>'<code>'+COL[k].n+'</code>').join(', ')}</b> vì nó nằm ở hai đầu khoảng, nhưng <code>used_key_parts</code> chỉ có ${P.seek.map(k=>'<code>'+COL[k].n+'</code>').join(', ')}.</p>`);
+    if(P.rej)W.push(`<p><b>${P.rej} entry bị loại ngay trong index</b> (${q.cov?'<code>Using where</code> trên index covering':'ICP'}), không tốn lần lookup nào.</p>`);
+    if(!q.cov&&P.look)W.push(`<p><b>${P.look} lần lookup PRIMARY</b>, mỗi lần một lần duyệt cây clustered index.${q.tot?` ${P.out.filter(o=>o.st==='drop').length} row bị loại sau đó vì <code>total</code> không có trong index.`:''}</p>`);
+    if(q.cov)W.push(`<p><b>Covering:</b> index đã chứa <code>id</code> và <code>created_at</code>, không lookup PRIMARY.</p>`);
+  }
+  if(q.ord){
+    if(P.fsort){const p=q.perm.indexOf('c');const miss=q.perm.slice(0,p).filter(k=>!(q.cond[k]&&q.cond[k].k==='eq'&&P.seek.includes(k)));
+      W.push(`<p><b>Filesort:</b> ${miss.length?miss.map(k=>'<code>'+COL[k].n+'</code>').join(', ')+' đứng trước <code>created_at</code> trong index nhưng không bị cố định bằng một giá trị, nên entry đọc ra không theo thứ tự <code>created_at</code>.':'thứ tự đọc không khớp ORDER BY.'}</p>`);}
+    else W.push(`<p><b>Không filesort:</b> mọi cột trước <code>created_at</code> đã cố định, entry đọc ra đúng thứ tự${P.back?', đọc ngược cho DESC':''}.</p>`);
+  }
+  W.push(`<p>Kết quả${P.fsort?' sau filesort':''}:</p><div class="result">${P.res.map(e=>`<span class="${q.cov?'ok':''}">${e.id} (${e.c.slice(0,5)})</span>`).join('')||'<em>không row nào</em>'}</div>`);
+  $('lab-why').innerHTML=W.join('');
+}
+
+/* ---------- 02: range trace ---------- */
+(function(){
+  const G=[ // group boxes along the leaf level
+    {l:'40 …',n:0,dim:1},
+    {l:'41 paid',n:4,ok:1},{l:'41 shipped',n:4},{l:'42 paid',n:6,ok:1},{l:'42 shipped',n:1},{l:'43 paid',n:8,ok:1},{l:'43 shipped',n:2,after:1},{l:'43 cancelled',n:2,after:1},
+    {l:'44 …',n:0,dim:1}];
+  const W=[50,66,76,70,78,70,76,84,50],X=[];let x=20;W.forEach(w=>{X.push(x);x+=w+6;});
+  const S=[
+    {t:'Query và khoảng cần đọc',d:"Index (user_id, status, created_at). MySQL tính hai đầu khoảng: bắt đầu từ (41, 'paid'), dừng sau (43, 'paid'). Mọi entry nằm giữa hai điểm đó đều phải đọc, dù status của nó là gì.",c:"SELECT * FROM orders\nWHERE user_id BETWEEN 41 AND 43 AND status = 'paid';",st:{},cnt:[0,0,0]},
+    {t:'Duyệt cây tới điểm bắt đầu',d:"Từ root xuống internal page rồi tới leaf chứa entry đầu tiên lớn hơn hoặc bằng (41, 'paid'). User 41 không có đơn 'new', nên đó là entry paid đầu tiên của 41.",path:1,st:{},cnt:[0,0,0]},
+    {t:"Đọc 4 entry (41, 'paid')",d:"4 entry khớp cả hai điều kiện. Mỗi entry chứa PK, nên InnoDB lookup 4 lần vào PRIMARY để lấy row.",st:{1:'row'},cur:1,cnt:[4,0,4]},
+    {t:"Đọc tiếp 4 entry (41, 'shipped')",d:"Chúng nằm ngay sau trong index, vẫn trong khoảng [(41,'paid'), (43,'paid')]. ICP thấy status không phải 'paid' và loại ngay trên entry, không lookup. Nhưng InnoDB vẫn phải đọc chúng: không có cách nào nhảy qua.",st:{1:'row',2:'icp'},cur:2,cnt:[8,4,4]},
+    {t:"Đọc 6 entry (42, 'paid')",d:"Cụm paid thứ hai. 6 lookup nữa.",st:{1:'row',2:'icp',3:'row'},cur:3,cnt:[14,4,10]},
+    {t:"Đọc 1 entry (42, 'shipped')",d:"Lại một entry bị ICP loại. Cứ mỗi user trong khoảng, phần status khác 'paid' đều phải đọc qua.",st:{1:'row',2:'icp',3:'row',4:'icp'},cur:4,cnt:[15,5,10]},
+    {t:"Đọc 8 entry (43, 'paid')",d:"Cụm paid cuối cùng, 8 lookup.",st:{1:'row',2:'icp',3:'row',4:'icp',5:'row'},cur:5,cnt:[23,5,18]},
+    {t:'Dừng',d:"Entry kế tiếp là (43, 'shipped'), lớn hơn đầu cuối (43, 'paid'). Scan dừng. Tổng cộng 23 entry đọc, 5 bị loại trong index, 18 lookup. Đây là phần duy nhất status giúp được: cắt các entry shipped và cancelled của user 43 ở mép phải.",st:{1:'row',2:'icp',3:'row',4:'icp',5:'row',6:'stop',7:'stop'},cur:6,cnt:[23,5,18]},
+    {t:'Số đo trong sandbox',d:"MySQL 8.0.46, cùng 27 entry. key_len là 5 nhưng used_key_parts chỉ có user_id. Handler_read_next đếm entry InnoDB trả lên: 18 khi ICP bật, 23 khi tắt.",st:{1:'row',2:'icp',3:'row',4:'icp',5:'row',6:'stop',7:'stop'},cnt:[23,5,18],
+     c:"type: range   key: idx_usc   key_len: 5   rows: 23   Extra: Using index condition\n\"used_key_parts\": [\"user_id\"]\nHandler_read_next = 18   (ICP tắt: 23)"},
+    {t:"Viết lại bằng IN (41, 42, 43)",d:"Ba giá trị rời nhau thành ba lần seek: (41,'paid'), (42,'paid'), (43,'paid'). Lần này status thu hẹp được từng khoảng. 18 entry đọc, không entry nào bị loại. key_len vẫn là 5, nhưng giờ cả hai cột đều được dùng để seek.",in:1,st:{1:'row',3:'row',5:'row',2:'skip',4:'skip',6:'stop',7:'stop'},cnt:[18,0,18],
+     c:"SELECT * FROM orders\nWHERE user_id IN (41, 42, 43) AND status = 'paid';"}
+  ];
+  stepper('rangetrace',{title:'Đọc range trên user_id, từng cụm entry',vb:'0 0 680 290',steps:S,
+    extra:`<div class="stats" style="margin:0 0 10px"><div class="stat"><span>Entry đã đọc</span><b class="c0"></b></div><div class="stat"><span>Loại trong index</span><b class="c1"></b></div><div class="stat"><span>Lookup PRIMARY</span><b class="c2"></b></div></div>`,
+    draw(s){
+      let o='';const y=150;
+      o+=B(270,14,140,36,s.path||s.cur?'seek':'struct','root');
+      o+=B(110,76,140,36,s.path||s.cur?'seek':'struct','internal','user_id 30–47');
+      o+=B(430,76,140,36,'struct','internal','user_id 48–…');
+      o+=L(310,50,180,76,s.path||s.cur?'on':'')+L(370,50,500,76);
+      if(!s.in)o+=A(`M180 112 L${X[1]+33} ${y-3}`,s.path||s.cur?'on':'');
+      G.forEach((g,i)=>{
+        let cls='struct';const st=s.st[i];
+        if(g.dim)cls='dim';else if(st==='row')cls='row';else if(st==='icp')cls='icp';else if(st==='stop'||st==='skip')cls='dim';
+        if(s.cur===i)cls+=' cur';
+        o+=B(X[i],y,W[i],44,cls,g.l,g.n?g.n+' entry':'');
+      });
+      o+=T(660,y+66,'leaf level, đọc trái sang phải theo con trỏ next','end','ts');
+      // bounds
+      if(!s.in){o+=T(X[1]+72,y-12,"bắt đầu (41,'paid')",'start','ts');
+        o+=A(`M${X[5]+W[5]-4} ${y-26} L${X[5]+W[5]-4} ${y-4}`,'on')+T(X[5]+W[5]-10,y-12,"dừng sau (43,'paid')",'end','ts');}
+      else{[1,3,5].forEach(i=>{o+=A(`M${X[i]+W[i]/2} ${y-22} L${X[i]+W[i]/2} ${y-4}`,'on');});o+=T(X[5]+W[5]+8,y-12,'ba lần seek','start','ts');}
+      // primary
+      const py=262;o+=B(20,py-20,640,30,'struct','PRIMARY (clustered index)');
+      G.forEach((g,i)=>{if(s.st[i]==='row')o+=A(`M${X[i]+W[i]/2} ${y+44} L${X[i]+W[i]/2} ${py-22}`,'row');});
+      return o;},
+    after(s,el){['c0','c1','c2'].forEach((c,j)=>el.querySelector('.'+c).textContent=s.cnt[j]);}
+  });
+})();
+
+/* ---------- 03: six orders ---------- */
+(function(){
+  const Q=[
+    ['Equality, equality, range',{u:'eq',s:'eq',c:'ge'}],
+    ['Range trên user_id',{u:'rg',s:'eq'}],
+    ['ORDER BY, thiếu status',{u:'eq',o:'asc'}],
+    ['user_id, status, ORDER BY',{u:'eq',s:'eq',o:'desc'}],
+  ];
+  let qi=0;const box=$('ord-q');
+  Q.forEach(([n],i)=>{const b=document.createElement('button');b.textContent=n;b.onclick=()=>{qi=i;draw();};box.appendChild(b);});
+  function draw(){
+    box.querySelectorAll('button').forEach((b,i)=>b.setAttribute('aria-pressed',i===qi));
+    const cfg=Object.assign({u:'',s:'',c:'',o:''},Q[qi][1]);
+    const cond={u:cfg.u?CONDS.u[cfg.u]:null,s:cfg.s?CONDS.s[cfg.s]:null,c:cfg.c?CONDS.c[cfg.c]:null};
+    $('ord-sql').innerHTML=hl(sqlText({cond,cov:false,tot:false,ord:cfg.o}));
+    let h='<thead><tr><th>Index</th><th>type</th><th>key_len</th><th>Seek bằng</th><th>Entry đọc</th><th>Loại trong index</th><th>Filesort</th></tr></thead><tbody>';
+    PERMS.forEach((p,i)=>{const P=plan({perm:p,cond,cov:false,tot:false,ord:cfg.o});
+      h+=`<tr tabindex="0" data-p="${i}" style="cursor:pointer"><td><code>${permName(p)}</code></td><td>${P.type}</td><td>${P.kl}</td><td>${P.seek.map(k=>COL[k].n).join(', ')||'không'}</td><td>${P.tableScan?'scan bảng':P.read}</td><td>${P.rej}</td><td>${cfg.o?(P.fsort?'có':'không'):'–'}</td></tr>`;});
+    $('ord-tbl').innerHTML=h+'</tbody>';
+    $('ord-tbl').querySelectorAll('tr[data-p]').forEach(tr=>{const go=()=>{Object.assign(LAB,{perm:PERMS[+tr.dataset.p],u:cfg.u,s:cfg.s,c:cfg.c,o:cfg.o,sel:'all',t:false});syncInputs();drawLab();$('lab').scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});};
+      tr.onclick=go;tr.onkeydown=e=>{if(e.key==='Enter')go();};});
+  }
+  draw();
+})();
+
+/* ---------- 04: ICP ---------- */
+(function(){
+  let on=true;
+  function draw(){
+    $('icp-on').setAttribute('aria-pressed',on);$('icp-off').setAttribute('aria-pressed',!on);
+    const look=on?18:23,sent=look;
+    $('icp-meta').textContent=on?'Using index condition; Using where':'Using where';
+    $('icp-a').textContent=23;$('icp-b').textContent=look;$('icp-c').textContent=sent;$('icp-d').textContent=10;
+    let o=DEFS;
+    o+=`<rect x="10" y="10" width="660" height="168" rx="8" class="zone"/>`+T(22,30,'InnoDB (storage engine)','start','lblb');
+    o+=`<rect x="10" y="196" width="660" height="94" rx="8" fill="none" stroke="var(--rule-strong)" stroke-dasharray="4 4"/>`+T(22,216,'MySQL server','start','lblb');
+    o+=B(30,48,150,52,'seek','idx_usc','23 entry trong khoảng');
+    if(on){
+      o+=B(250,48,150,52,'icp','ICP trên entry','status = \'paid\'?');
+      o+=A('M180 74 L248 74','on')+T(214,66,'23','middle','tm');
+      o+=A('M325 100 L325 128','icp')+T(335,122,'5 bị loại','start','ts');
+      o+=B(470,48,180,52,'row','lookup PRIMARY','18 lần');
+      o+=A('M400 74 L468 74','row')+T(434,66,'18','middle','tm');
+      o+=A('M560 100 L560 238','row')+T(570,170,'18 row','start','tm');
+      o+=B(390,232,260,46,'drop','server: total > 1000000','8 bị loại, còn 10');
+    }else{
+      o+=B(470,48,180,52,'drop','lookup PRIMARY','23 lần, kể cả 5 thừa');
+      o+=A('M180 74 L468 74','on')+T(324,66,'23 entry, không lọc','middle','tm');
+      o+=A('M560 100 L560 238','drop')+T(570,170,'23 row','start','tm');
+      o+=B(330,232,320,46,'drop','server: status = \'paid\' AND total > 1000000','13 bị loại, còn 10');
+    }
+    $('icp-svg').innerHTML=o;
+    $('icp-pre').textContent=on?
+"Handler_read_next = 18      -- đo trong sandbox, MySQL 8.0.46\nExtra: Using index condition; Using where":
+"SET optimizer_switch = 'index_condition_pushdown=off';\nHandler_read_next = 23\nExtra: Using where";
+  }
+  $('icp-on').onclick=()=>{on=true;draw();};$('icp-off').onclick=()=>{on=false;draw();};
+  draw();
+})();
+
+/* ---------- 05: crossover ---------- */
+(function(){
+  const N=995605;
+  const P=[[4900000,'range',45310,21977],[4850000,'range',70364,31896],[4800000,'range',100274,41914],[4780000,'range',90870,45927],[4760000,'range',102396,50027],
+    [4740000,'ALL',Math.round(N*.1163),54022],[4720000,'ALL',Math.round(N*.1254),58070],[4700000,'ALL',Math.round(N*.1369),62073],[4600000,'ALL',Math.round(N*.1924),82002]];
+  const r=$('cross-r');
+  function draw(){
+    const i=+r.value,p=P[i];
+    $('cross-v').textContent=fmt(p[0]);
+    $('cross-a').textContent=p[1]==='range'?'range trên idx_total':'ALL, full scan';
+    $('cross-b').textContent=`${fmt(p[2])} (${(p[2]/N*100).toFixed(1)}%)`;
+    $('cross-c').textContent=`${fmt(p[3])} (${(p[3]/N*100).toFixed(1)}%)`;
+    $('cross-meta').textContent=p[1];
+    const x0=60,y0=200,w=600,h=170,max=200000,bw=w/P.length;
+    let o='';
+    o+=`<rect class="zone" x="${x0+bw*5}" y="${y0-h}" width="${bw*4}" height="${h}"/>`+T(x0+bw*7,y0-h+16,'optimizer chọn full scan','middle','ts');
+    o+=T(x0+bw*2.5,y0-h+16,'optimizer dùng index','middle','ts');
+    [0,50000,100000,150000,200000].forEach(v=>{const y=y0-v/max*h;o+=`<line class="axis" x1="${x0}" x2="${x0+w}" y1="${y}" y2="${y}" stroke-opacity=".35"/>`+T(x0-6,y+4,v/1000+'k','end','ts');});
+    P.forEach((q,j)=>{const bx=x0+j*bw+10;
+      const he=Math.min(q[2],max)/max*h,ha=q[3]/max*h,sel=j===i?' sel':'';
+      o+=`<rect class="bar est${sel}" x="${bx}" y="${y0-he}" width="${bw/2-12}" height="${he}"/>`;
+      o+=`<rect class="bar act${sel}" x="${bx+bw/2-10}" y="${y0-ha}" width="${bw/2-12}" height="${ha}"/>`;
+      o+=T(x0+j*bw+bw/2,y0+16,(q[0]/1e6).toFixed(2)+'M','middle','ts');});
+    o+=`<line class="thr" x1="${x0}" x2="${x0+w}" y1="${y0-N*.1/max*h}" y2="${y0-N*.1/max*h}"/>`+T(x0+w,y0-N*.1/max*h-6,'10% bảng','end','ts');
+    o+=`<line class="axis" x1="${x0}" x2="${x0+w}" y1="${y0}" y2="${y0}"/>`;
+    o+=`<rect class="bar est" x="${x0}" y="228" width="12" height="12"/>`+T(x0+18,238,'ước tính','start','ts');
+    o+=`<rect class="bar act" x="${x0+90}" y="228" width="12" height="12"/>`+T(x0+108,238,'thực tế','start','ts');
+    o+=T(x0+w,238,'ngưỡng total >','end','ts');
+    $('cross-svg').innerHTML=o;
+  }
+  r.oninput=draw;draw();
+})();
+
+/* ---------- 06: annotated explain ---------- */
+(function(){
+  const C=[
+    ['id','1','Số thứ tự của SELECT trong câu lệnh. Subquery và UNION có id khác nhau. Các dòng cùng id là các bảng trong cùng một join, đọc từ trên xuống.'],
+    ['select_type','SIMPLE','SIMPLE là không có subquery hay UNION. Các giá trị khác: PRIMARY, SUBQUERY, DERIVED (bảng tạm từ subquery trong FROM), UNION.'],
+    ['type','range','Cách truy cập bảng. range nghĩa là một hoặc nhiều khoảng trên index. Bảng type ở bên dưới xếp từ tốt tới tệ.'],
+    ['possible_keys','idx_total,idx_usc','Những index optimizer có thể dùng cho điều kiện này. idx_total có mặt vì total > 1000000, nhưng khoảng 80% bảng khớp điều kiện đó nên nó không được chọn.'],
+    ['key','idx_usc','Index thực sự được dùng. NULL nghĩa là không dùng index nào.'],
+    ['key_len','5','Số byte của các cột index nằm trong key dùng để seek: user_id 4 + status 1. Như phần 02 đã chỉ ra, status chỉ góp vào hai đầu khoảng. used_key_parts trong FORMAT=JSON mới cho biết cột nào thực sự thu hẹp khoảng đọc.'],
+    ['ref','NULL','Giá trị so sánh với index: const cho hằng số, hoặc tên cột của bảng trước trong join. Với range thì NULL.'],
+    ['rows','23','Số row optimizer ước tính sẽ đọc bằng cách truy cập này, từ index dive. Ở đây trùng với 23 entry thật. Không phải số row trả về.'],
+    ['filtered','16.67','Phần trăm ước tính của rows còn lại sau mọi điều kiện chưa dùng để seek, ở đây là status và total. 16.67% của 23 là 3.83 row, đúng con số node Filter in ra trong EXPLAIN ANALYZE. Thực tế còn 10 / 23, khoảng 43%. Không có histogram trên status hay total, optimizer chỉ có đoán mặc định.'],
+    ['Extra','Using index condition; Using where','Using index condition: status được kiểm tra trên entry trước khi lookup (ICP). Using where: total được server kiểm tra sau khi đã có row.'],
+  ];
+  const box=$('annot-btns');let cur=2;
+  C.forEach((c,i)=>{const b=document.createElement('button');b.textContent=`${c[0]}: ${c[1]}`;b.onclick=()=>{cur=i;draw();};box.appendChild(b);});
+  function draw(){box.querySelectorAll('button').forEach((b,i)=>b.setAttribute('aria-pressed',i===cur));
+    $('annot-d').textContent=C[cur][2];$('annot-meta').textContent=`cột ${cur+1} / ${C.length}`;}
+  draw();
+})();
+
+/* ---------- toc highlight ---------- */
+(function(){
+  const links=[...document.querySelectorAll('nav.toc a')];
+  const io=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){links.forEach(a=>a.classList.toggle('on',a.getAttribute('href')==='#'+e.target.id));}});},{rootMargin:'-40% 0px -55% 0px'});
+  document.querySelectorAll('main section').forEach(s=>io.observe(s));
+})();
+</script>
+</body>
+</html>
