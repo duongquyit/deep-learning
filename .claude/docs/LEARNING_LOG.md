@@ -78,6 +78,10 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 | Locks and stalled jobs: lock renewal on the event loop, two-pass stalled check, `maxStalledCount`, why a job can run on two workers at once | 2 (prov.) | same, §02 | 2026-10-20 | Exercise E33: block the event loop and watch the job move to a second worker |
 | Resumable batches: chunked transactions, checkpoint in the same transaction, natural keys as a safety net | 2 (prov.) | same, §02, §04 | 2026-10-20 | Exercise E34: kill the worker five times during a 200k-row import and reconcile counts and totals *(Month 3 exit criterion)* |
 | Worker operations: concurrency vs CPU-bound work, sandboxed processors, graceful shutdown, Redis `noeviction` | 2 (prov.) | same, §02, §06 | 2026-10-20 | Exercise E35; then review one worker at work against the page's checklist |
+| Back-of-the-envelope estimation: DAU to average and peak QPS, storage with index overhead, bandwidth, per-key load | 2 (prov.) | [capacity-estimation](../topics/capacity-estimation/index.html) §01, §04 | 2026-10-20 | Estimate one real feature at work, then compare every assumption with production metrics |
+| Latency orders of magnitude and what they imply (round trips, RAM vs disk, cross-region) | 2 (prov.) | same, §02 | 2026-10-20 | Measure RTT and buffer-pool hit vs miss latency on the lab and place them on the ladder |
+| Little's law for in-flight requests and connection pool sizing | 2 (prov.) | same, §02 | 2026-10-20 | Exercise E37: compare `Threads_running` with λ × W at several rates |
+| Utilization vs latency (M/M/1), headroom targets | 2 (prov.) | same, §02–§03 | 2026-10-20 | Exercises E36 and E37: find the real knee of the p99 curve on the lab |
 
 "(prov.)" = provisional. Every row above rests on one artifact I wrote myself, with no measurement behind it. Week 1 of Month 1 includes a baseline assessment (TECHNICAL_GROWTH.md Section 11) that should confirm or cut these.
 
@@ -111,6 +115,8 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 26. With ROW binlog and `binlog_row_image = FULL`, how many binlog bytes does one outbox event with a 2KB payload add, and does insert-then-delete in the same transaction double it?
 27. In BullMQ 6.3.17, a job past `maxStalledCount` goes back to `wait` with a deferred failure reason (`defa` field) instead of straight to `failed`, as older versions did. When exactly does it fail, and do `failed` listeners see it? Read `moveToActive`; observe in E33.
 28. How long can GC pause the event loop on a worker with a heap of several GB, and is the default 30 s `lockDuration` still safe? Measure with `monitorEventLoopDelay` during E34.
+29. On the lab hardware, does MySQL's p99-vs-utilization curve look like M/M/1 or like a multi-server queue (M/M/c), and from what utilization does p99 double compared with idle? E37.
+30. What is the real "index and overhead" factor of the tables at work? Is the capacity page's default of 2 too low for tables with many secondary indexes? Measure with `information_schema.tables`.
 
 ## Pending verification (from the session's own exercise list)
 
@@ -164,8 +170,40 @@ These are written in the page as exercises; none have been run yet.
 - **E35** — `SIGTERM` mid-batch with and without `worker.close()`: exit time, job state, resume row.
 - **Q59–Q64** — The six recall questions in section 08 of the BullMQ page.
 - **C10–C12** — The three real-world cases in section 09 of the BullMQ page (a 2M-line nightly reconciliation split into staged, set-based child jobs; a 500k-recipient email campaign under a provider rate limit; a synchronous PDF step causing stalls, duplicate side effects and a CPU shortfall). Solve in writing before opening the answers.
+- **E36** — Single-row 1 KB inserts at 1, 8, 32, 128 clients and with 100-row transactions: writes per second, p99, bottleneck. Gives the "primary capacity" every estimate needs.
+- **E37** — Open-loop reads at 20–95% of max: p50, p99, `Threads_running` vs λ × W, and the knee of the curve.
+- **Q65–Q70** — The six recall questions in section 08 of the capacity page.
+- **C13–C15** — The three real-world cases in section 09 of the capacity page (5 years of wallet ledger on one MySQL, a Black Friday ×8 plan, a viral article's view counter). Solve in writing before opening the answers.
 - **Q11–Q16** — The six recall questions in section 08 of the composite-index page (answers are on the page, hidden).
 - **Q1–Q5** — The five check questions at the end of the page (leftmost prefix, `COUNT(*)` and the visibility map, full scan polluting the cache, TOAST, a `sessions` table updated 5,000×/sec). Answer in writing before looking anything up, then verify.
+
+---
+
+## 2026-10-20 — Capacity estimation
+
+**Topic and objective.** Month 5 topic, written ahead as documentation only (Phase 5 of the documentation plan, 1 of 4): turning users and behaviour into QPS, storage and bandwidth; latency orders of magnitude; Little's law for concurrency and connection pools; why latency explodes near full utilization.
+
+**Output.** [topics/capacity-estimation/index.html](../topics/capacity-estimation/index.html) — 11 sections, including section 09 with cases C13–C15. Widgets: an estimator (DAU, reads, writes, peak factor, row size, retention, index factor, response size, measured primary capacity → peak QPS, storage, bandwidth, utilization, with the arithmetic shown); a log-scale latency ladder ("Latency Comparison Numbers (~2012)"); a Little's-law pool calculator (busy connections, suggested pool, total vs `max_connections`); an M/M/1 curve of mean and p99 latency vs utilization. Prediction templates for E36–E37.
+
+**What it covers.**
+
+- Estimation habits: round hard (a day ≈ 10^5 s), separate assumptions from arithmetic, always compute the peak and the hottest key.
+- Latency ladder from the jboner gist (~2012, Jeff Dean and Peter Norvig) and what follows: round trips dominate chatty requests, RAM vs disk is ~1000×, cross-region ≥ 100 ms.
+- L = λW; busy connections = rate × hold time; pool per pod and the total at maximum pod count; `max_connections` read from the server (its default was not verified, so the page gives none).
+- M/M/1: mean S/(1−ρ), percentile S·ln(1/(1−p))/(1−ρ); target under ~70% at peak.
+- Sizing data in MySQL: row overhead, page fill, secondary indexes, working set vs buffer pool, whole-table operations; partitioning limits (no foreign keys, partition column in every unique key).
+
+**Initial understanding.** TODO — what did I believe about capacity estimation before this page? No prior belief was stated in the session.
+
+**Mistakes and misconceptions corrected.** TODO — only I know which. Traps the page writes down: average load is enough; 80% CPU leaves 20% to use; a bigger pool is faster; low total QPS means no hot spot; estimates must be precise; storage is only data.
+
+**Experiments and results.** None. The widgets are models; E36 measures the lab primary's write capacity that every estimate needs, E37 checks Little's law and the queueing curve.
+
+**Competency level.** Level 2 provisional on four new matrix rows.
+
+**Remaining questions.** Open questions 29 and 30.
+
+**Next step.** Topic 21 of the plan, caching and invalidation.
 
 ---
 

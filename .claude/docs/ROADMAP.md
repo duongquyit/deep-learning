@@ -62,6 +62,7 @@ Research and topics done outside the monthly plan. Each row needs a log entry, a
 | 2026-10-20 | Idempotency and retries (delivery semantics, idempotency keys, consumer dedup, backoff with jitter, DLQ) — documentation only, written ahead of Month 3; no measurements | [topics/idempotency-retries](../topics/idempotency-retries/index.html) | Month 3 | [2026-10-20](LEARNING_LOG.md) |
 | 2026-10-20 | Transactional outbox (dual write, polling relay and the id-cursor gap, CDC from the binlog, saga at concept level) — documentation only, written ahead of Month 3; no measurements | [topics/transactional-outbox](../topics/transactional-outbox/index.html) | Month 3 | [2026-10-20](LEARNING_LOG.md) |
 | 2026-10-20 | BullMQ workers and resumable batches (job lifecycle, locks and stalled jobs, checkpoints, worker operations) — documentation only, written ahead of Month 3; no measurements | [topics/bullmq-workers-resumable](../topics/bullmq-workers-resumable/index.html) | Month 3 | [2026-10-20](LEARNING_LOG.md) |
+| 2026-10-20 | Capacity estimation (QPS, storage, latency numbers, Little's law, utilization and queueing) — documentation only, written ahead of Month 5; no measurements | [topics/capacity-estimation](../topics/capacity-estimation/index.html) | Month 5 | [2026-10-20](LEARNING_LOG.md) |
 
 ## Month 1 — Database Internals and Query Optimization
 
