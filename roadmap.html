@@ -810,6 +810,13 @@ footer.page-foot a{color:var(--text-1)}
   "sessions": [
     {
       "date": "2026-10-20",
+      "title": "Transactional outbox",
+      "artifact": "../topics/transactional-outbox/index.html",
+      "planned": false,
+      "feeds": "Month 3"
+    },
+    {
+      "date": "2026-10-20",
       "title": "Idempotency and retries",
       "artifact": "../topics/idempotency-retries/index.html",
       "planned": false,
@@ -896,6 +903,12 @@ footer.page-foot a{color:var(--text-1)}
       "date": "2026-10-20",
       "work": "Idempotency and retries (delivery semantics, idempotency keys, consumer dedup, backoff with jitter, DLQ) — documentation only, written ahead of Month 3; no measurements",
       "artifact": "topics/idempotency-retries",
+      "feeds": "Month 3"
+    },
+    {
+      "date": "2026-10-20",
+      "work": "Transactional outbox (dual write, polling relay and the id-cursor gap, CDC from the binlog, saga at concept level) — documentation only, written ahead of Month 3; no measurements",
+      "artifact": "topics/transactional-outbox",
       "feeds": "Month 3"
     }
   ],
@@ -1216,11 +1229,39 @@ footer.page-foot a{color:var(--text-1)}
         "provisional": true,
         "evidence": "same, §02, §06",
         "date": "2026-10-20"
+      },
+      {
+        "topic": "Dual write: why commit-then-send, send-then-commit and send-inside-transaction each lose events or create phantom events",
+        "level": 2,
+        "provisional": true,
+        "evidence": "transactional-outbox §01",
+        "date": "2026-10-20"
+      },
+      {
+        "topic": "Transactional outbox with a polling relay: status-based reads, the id-cursor gap, SKIP LOCKED with several relays, ordering by aggregate, cleanup",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §02, §04",
+        "date": "2026-10-20"
+      },
+      {
+        "topic": "Polling vs CDC from the binlog (latency, load, ordering, operations)",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §02–§03",
+        "date": "2026-10-20"
+      },
+      {
+        "topic": "Saga at concept level: compensations, orchestration vs choreography, no isolation",
+        "level": 1,
+        "provisional": false,
+        "evidence": "same, §02–§03",
+        "date": "2026-10-20"
       }
     ],
     "levels": {
-      "2": 41,
-      "1": 1
+      "2": 44,
+      "1": 2
     }
   }
 }

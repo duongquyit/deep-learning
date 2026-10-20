@@ -70,6 +70,10 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 | Idempotency keys for a POST API: storage, fingerprint, same-transaction design vs `processing` state, 409/422, expiry | 2 (prov.) | same, §02, §04 | 2026-10-20 | Exercise E27: concurrent duplicates against a real implementation, read `data_locks` while they wait |
 | Consumer-side dedup: where to write the processed marker, ack after commit | 2 (prov.) | same, §02 | 2026-10-20 | Exercise E28: kill the consumer at each point for four designs and count the effects |
 | Retry policy: retryable errors, exponential backoff with full/equal jitter, attempt limits, retry budget, DLQ | 2 (prov.) | same, §02, §06 | 2026-10-20 | Exercise E29: measure a retry storm with and without jitter; then audit the retry layers of one call path at work |
+| Dual write: why commit-then-send, send-then-commit and send-inside-transaction each lose events or create phantom events | 2 (prov.) | [transactional-outbox](../topics/transactional-outbox/index.html) §01 | 2026-10-20 | Exercise E30: count missing, phantom and duplicate events under injected failures |
+| Transactional outbox with a polling relay: status-based reads, the id-cursor gap, `SKIP LOCKED` with several relays, ordering by aggregate, cleanup | 2 (prov.) | same, §02, §04 | 2026-10-20 | Exercise E31: reproduce the id-cursor gap, then run two relays under kills and count losses and duplicates |
+| Polling vs CDC from the binlog (latency, load, ordering, operations) | 2 (prov.) | same, §02–§03 | 2026-10-20 | Exercise E32 for polling; read the outbox rows in `mysqlbinlog` output |
+| Saga at concept level: compensations, orchestration vs choreography, no isolation | 1 | same, §02–§03 | 2026-10-20 | Design the compensations for one multi-service flow at work, including the intermediate states users see |
 
 "(prov.)" = provisional. Every row above rests on one artifact I wrote myself, with no measurement behind it. Week 1 of Month 1 includes a baseline assessment (TECHNICAL_GROWTH.md Section 11) that should confirm or cut these.
 
@@ -99,6 +103,8 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 22. With a version column and 32 clients writing one row, how many attempts and how much backoff does it take for nearly every request to succeed, and how much does jittered exponential backoff help over an immediate retry? E25.
 23. Three requests with the same idempotency key, the first rolls back on a business error: do the other two deadlock, as in the manual's three-session duplicate-key example? If so, how should `transfer()` handle 1213 and still return one result? E27.
 24. How long should idempotency keys be kept when the client is a mobile app with an offline queue that may resend days later? Should finished keys (fingerprint and response only) be kept apart from in-flight ones?
+25. Under REPEATABLE READ, which gap and next-key locks does the relay's `FOR UPDATE SKIP LOCKED` on `WHERE sent_at IS NULL ORDER BY id` take on `idx_unsent`, and do they block new inserts into the outbox? Should the relay run at READ COMMITTED? E31.
+26. With ROW binlog and `binlog_row_image = FULL`, how many binlog bytes does one outbox event with a 2KB payload add, and does insert-then-delete in the same transaction double it?
 
 ## Pending verification (from the session's own exercise list)
 
@@ -142,8 +148,43 @@ These are written in the page as exercises; none have been run yet.
 - **E29** — Retry storm against a rate-limited endpoint: immediate, exponential, full jitter, equal jitter. Checks the page's model against the AWS article.
 - **Q47–Q52** — The six recall questions in section 08 of the idempotency page.
 - **C4–C6** — The three real-world cases in section 09 of the idempotency page (payment gateway with out-of-order webhooks, SMS without provider idempotency, a retry storm after a 90 s database failover). Solve in writing before opening the answers.
+- **E30** — 1,000 orders with each dual-write design and the outbox under injected crashes, broker rejects and commit failures; reconcile orders vs events.
+- **E31** — The id-cursor gap by hand; then two `SKIP LOCKED` relays killed every 10 s: lost and duplicated events, `data_locks` on `idx_unsent`.
+- **E32** — Polling relay latency (p50/p99) and idle query rate at 100 ms and 1 s sleep, 10 and 1,000 events/s.
+- **Q53–Q58** — The six recall questions in section 08 of the outbox page.
+- **C7–C9** — The three real-world cases in section 09 of the outbox page (lost confirmation emails and a migration to the outbox, a polling relay slowed by an 80M-row table, a flight and hotel saga with an irreversible step). Solve in writing before opening the answers.
 - **Q11–Q16** — The six recall questions in section 08 of the composite-index page (answers are on the page, hidden).
 - **Q1–Q5** — The five check questions at the end of the page (leftmost prefix, `COUNT(*)` and the visibility map, full scan polluting the cache, TOAST, a `sessions` table updated 5,000×/sec). Answer in writing before looking anything up, then verify.
+
+---
+
+## 2026-10-20 — Transactional outbox
+
+**Topic and objective.** Month 3 topic, written ahead as documentation only (Phase 3 of the documentation plan): why writing to the database and the broker separately loses or invents events, how an outbox in the same transaction fixes it, how to relay the outbox without skipping rows, polling vs CDC, and sagas at concept level.
+
+**Output.** [topics/transactional-outbox/index.html](../topics/transactional-outbox/index.html) — 10 sections. Widgets: a dual-write matrix that runs a small model for four designs × three failures (crash, broker reject, commit failure) and labels each cell matched / lost event / phantom event; an 8-step stepper of a relay with an id cursor skipping an event committed late, and the status-based fix; a polling calculator (sleep-then-drain cycle: added latency, idle query rate, keeps up or not); a saga stepper with a selectable failing step and reverse compensations. Prediction templates for E30–E32.
+
+**Cases added (same day).** Section 09 "Bài toán thực tế" with cases C7–C9, each a shown problem and a hidden senior-style answer. The answers are reasoning from reading, not measurements; C8's lock diagnosis depends on open question 25.
+
+**What it covers.**
+
+- Dual write and its two failure directions; no ordering or in-transaction send fixes it.
+- Outbox row in the same transaction; relay at-least-once (send, then mark), so consumers dedup by `event_id`.
+- Polling relay: AUTO_INCREMENT ids are assigned at insert and become visible at commit, so an id or time cursor can skip rows forever; read by status with an index on `(sent_at, id)`; several relays with `FOR UPDATE SKIP LOCKED`, ordering by aggregate key; batched cleanup; lock held while publishing.
+- CDC: MySQL 8.4 binlog on by default, ROW format (variable deprecated); Debezium outbox router default columns, `outbox.event.<aggregatetype>` routing, DELETE events ignored, event id for dedup.
+- Saga: local transactions plus compensations, no isolation, orchestration vs choreography; why not XA/2PC.
+
+**Initial understanding.** TODO — what did I believe about publishing events from a service before this page? No prior belief was stated in the session.
+
+**Mistakes and misconceptions corrected.** TODO — only I know which. Traps the page writes down: sending after commit is safe; sending inside the transaction lets rollback cancel the event; an id cursor is safe because ids increase; an outbox gives exactly-once to consumers; a compensation is a rollback.
+
+**Experiments and results.** None. All widgets are models; the id-cursor gap is derived from how AUTO_INCREMENT and consistent reads work and has not been reproduced (E31).
+
+**Competency level.** Level 2 provisional on three new matrix rows; Level 1 on sagas, which the page covers at concept level only.
+
+**Remaining questions.** Open questions 25 and 26.
+
+**Next step.** Topic 13 of the plan, BullMQ workers and resumable batches.
 
 ---
 

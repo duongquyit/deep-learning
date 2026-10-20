@@ -1,0 +1,978 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Transactional outbox: gửi event cùng transaction</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F2F4F6; --surface:#FFFFFF; --ink:#18203A; --ink-2:#56607A; --ink-3:#8A93A8;
+  --rule:#CCD3DD; --rule-strong:#8C96AB;
+  --struct:#3446B8; --struct-bg:#E6E9FA;            /* cấu trúc index, chrome của trang */
+  --row:#16795F;    --row-bg:#DDF2EA;               /* dữ liệu row thật */
+  --hot:#9A5F00;    --hot-bg:#FCEFD2; --hot-line:#E3A21A;  /* bị ghi, bị chạm, bị lọc */
+  --miss:#B5302B;   --miss-bg:#FBE1DF;              /* đọc từ disk, việc thừa, lỗi */
+  --path:#0B7A8A;   --path-bg:#D8F1F3;              /* đường đi hoặc khoảng đang đọc */
+  --key:#A8327A;    --key-bg:#F8E0EE;               /* con trỏ: PK, TID */
+  --ram:#5B4BB0;    --ram-bg:#E7E3FA;               /* hit trong buffer pool */
+  --grid:rgba(52,70,184,.06);
+  --r-s:4px; --r-m:8px;
+  --sans:"Instrument Sans",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --paper:#0F1320; --surface:#171C2B; --ink:#E6E9F2; --ink-2:#A3ABC0; --ink-3:#6E7790;
+  --rule:#2C3448; --rule-strong:#55607A;
+  --struct:#97A3FF; --struct-bg:#232A55;
+  --row:#5FD0AE;    --row-bg:#123A31;
+  --hot:#F2BE5C;    --hot-bg:#3B2C0E; --hot-line:#E3A21A;
+  --miss:#FF8A84;   --miss-bg:#3E1A1A;
+  --path:#5ED3E0;   --path-bg:#113A40;
+  --key:#F28DC4;    --key-bg:#3E1A2E;
+  --ram:#B7A8FF;    --ram-bg:#2A2350;
+  --grid:rgba(151,163,255,.05);
+}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important;animation:none!important}}
+body{margin:0;color:var(--ink);font:400 17px/1.65 var(--sans);
+  background-color:var(--paper);
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:24px 24px}
+a{color:var(--struct)}
+:focus-visible{outline:2px solid var(--struct);outline-offset:2px}
+
+/* layout */
+.shell{display:grid;grid-template-columns:230px minmax(0,1fr);gap:56px;max-width:1180px;margin:0 auto;padding:0 32px}
+nav.toc{position:sticky;top:0;align-self:start;height:100vh;padding:48px 0;overflow:auto}
+nav.toc p{font-weight:600;margin:0 0 12px;font-size:15px}
+nav.toc ol,.mobile-toc ol{list-style:none;margin:0;padding:0;counter-reset:s}
+nav.toc li,.mobile-toc li{counter-increment:s;margin:0}
+nav.toc a,.mobile-toc a{display:grid;grid-template-columns:28px 1fr;padding:5px 0;color:var(--ink-2);text-decoration:none;font-size:14.5px;line-height:1.4}
+nav.toc a::before,.mobile-toc a::before{content:counter(s,decimal-leading-zero);font:500 12px/1.9 var(--mono);color:var(--ink-3)}
+nav.toc a:hover,nav.toc a.on{color:var(--struct)}
+main{min-width:0;padding:56px 0 120px}
+.prose{max-width:720px}
+section{padding-top:72px}
+section>header{display:grid;grid-template-columns:auto 1fr;gap:0 18px;align-items:baseline;max-width:720px;margin-bottom:12px}
+section>header .num{font:500 15px var(--mono);color:var(--struct);border:1.5px solid var(--struct);border-radius:var(--r-s);padding:2px 7px;transform:translateY(-4px)}
+h1,h2,h3,h4{line-height:1.2;letter-spacing:-.015em;margin:0}
+h1{font-size:clamp(2.3rem,5.4vw,3.9rem);font-weight:700;letter-spacing:-.03em;line-height:1.02;max-width:14ch;margin-bottom:20px}
+.lede{font-size:19px;color:var(--ink-2);max-width:56ch;margin-bottom:28px}
+h2{font-size:clamp(1.6rem,3vw,2.1rem);font-weight:650}
+h3{font-size:1.2rem;font-weight:600;margin:36px 0 8px}
+p{margin:0 0 14px}
+ul,ol.list{margin:0 0 16px;padding-left:22px}
+li{margin:4px 0}
+code{font:0.88em var(--mono);background:var(--struct-bg);color:var(--ink);padding:1px 5px;border-radius:3px}
+pre{font:13.5px/1.6 var(--mono);background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:var(--r-s);padding:14px 16px;overflow-x:auto;margin:0 0 18px;max-width:720px}
+pre code{background:none;padding:0}
+.tablewrap{overflow-x:auto;max-width:720px;margin:0 0 20px}
+table{border-collapse:collapse;width:100%;max-width:720px;margin:0 0 20px;font-size:15px;background:var(--surface)}
+.tablewrap table{margin:0;min-width:560px}
+th,td{text-align:left;padding:9px 12px;border:1px solid var(--rule);vertical-align:top}
+th{font-weight:600;background:var(--struct-bg)}
+
+/* widget frame: styled like a page, header strip = page header */
+.frame{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);margin:22px 0 28px;max-width:920px;overflow:hidden}
+.frame>.ph{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:9px 16px;border-bottom:1px solid var(--rule);background:var(--struct-bg);font-size:14px}
+.frame>.ph strong{font-weight:600}
+.frame>.ph .meta{margin-left:auto;font:500 12.5px var(--mono);color:var(--ink-2)}
+.frame .bd{padding:16px;min-width:0}
+.frame svg{display:block;width:100%;height:auto}
+.st-t{font:600 16px var(--sans);margin:0 0 8px}
+.desc{background:var(--paper);border-radius:var(--r-s);padding:12px 14px;margin-top:12px;min-height:84px;font-size:15.5px;color:var(--ink-2)}
+.desc pre{margin:10px 0 0;font-size:12.5px;border-left-color:var(--rule-strong)}
+.nav{display:flex;gap:8px;margin-top:12px;align-items:center}
+button{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 14px;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--struct);color:var(--struct)}
+button:disabled{opacity:.4;cursor:default}
+button.primary,button[aria-pressed="true"]{background:var(--struct);border-color:var(--struct);color:var(--surface)}
+button.primary:hover:not(:disabled),button[aria-pressed="true"]:hover{color:var(--surface);filter:brightness(1.1)}
+input,select{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 10px}
+input[type=number]{width:84px}
+input[type=range],input[type=checkbox]{accent-color:var(--struct)}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-top:12px}
+.stat{background:var(--paper);border-radius:var(--r-s);padding:8px 12px}
+.stat span{display:block;font-size:13px;color:var(--ink-2)}
+.stat b{font:600 20px var(--sans);font-variant-numeric:tabular-nums}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;color:var(--ink-2);margin-top:12px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:14px;height:14px;border-radius:3px;border:2px solid;display:inline-block}
+.fine{font-size:13.5px;color:var(--ink-2);margin:10px 0 0}  /* chú thích nhỏ dưới widget */
+
+/* svg text */
+.tb{font:600 14px var(--sans)} .t{font:400 13px var(--sans)} .ts{font:400 12px var(--sans)} .tm{font:500 12.5px var(--mono)}
+.lbl{fill:var(--ink-2);font:400 12.5px var(--sans)}
+
+/* callouts */
+.note{border-left:3px solid var(--hot-line);background:var(--hot-bg);padding:12px 16px;border-radius:0 var(--r-s) var(--r-s) 0;margin:18px 0;max-width:720px;font-size:16px}
+.note strong{color:var(--hot)}
+.senior{border:1.5px solid var(--struct);border-radius:var(--r-m);padding:14px 18px;margin:22px 0;max-width:720px;background:var(--surface)}
+.senior h4{font-size:16px;margin-bottom:6px;color:var(--struct)}
+.senior p:last-child,.senior ul:last-child{margin-bottom:0}
+details{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-s);padding:10px 14px;margin:10px 0;max-width:720px}
+details summary{cursor:pointer;font-weight:600}
+details[open] summary{margin-bottom:8px}
+details.answer{background:var(--paper);border-style:dashed;margin:10px 0 0}
+details.answer summary{font-weight:500;color:var(--struct)}
+.tag{display:inline-block;font:500 12px var(--sans);color:var(--ink-2);border:1px solid var(--rule-strong);border-radius:999px;padding:0 8px;margin-right:6px;vertical-align:1px}
+
+/* hero brief: mục tiêu, cần biết trước, trạng thái */
+.brief{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px 24px;background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);padding:14px 18px;max-width:920px;margin:0 0 8px;font-size:15px}
+.brief h4{font-size:14px;color:var(--struct);margin:0 0 4px}
+.brief ul{margin:0;padding-left:18px}
+.brief p{margin:0}
+
+.mobile-toc{display:none}
+@media (max-width:900px){
+  .shell{grid-template-columns:1fr;padding:0 16px;gap:0}
+  nav.toc{display:none}
+  .mobile-toc{display:block;margin-top:20px}
+  main{padding-top:32px}
+  .frame .bd{padding:12px}
+  body{font-size:16px}
+}
+
+
+/* ---- page widgets ---- */
+.n rect{fill:var(--surface);stroke:var(--rule-strong);stroke-width:1}
+.n text{fill:var(--ink)}
+.n.struct rect{fill:var(--struct-bg);stroke:var(--struct)} .n.struct text{fill:var(--struct)}
+.n.row rect{fill:var(--row-bg);stroke:var(--row);stroke-width:1.6} .n.row text{fill:var(--row)}
+.n.hot rect{fill:var(--hot-bg);stroke:var(--hot);stroke-width:2} .n.hot text{fill:var(--hot)}
+.n.miss rect{fill:var(--miss-bg);stroke:var(--miss);stroke-width:2} .n.miss text{fill:var(--miss)}
+.n.key rect{fill:var(--key-bg);stroke:var(--key);stroke-width:2} .n.key text{fill:var(--key)}
+.n.path rect{fill:var(--path-bg);stroke:var(--path);stroke-width:2} .n.path text{fill:var(--path)}
+.n.dim rect{fill:var(--paper);stroke:var(--rule);stroke-dasharray:4 3} .n.dim text{fill:var(--ink-3)}
+.edge{stroke:var(--rule-strong);stroke-width:1.2;fill:none}
+.edge.path{stroke:var(--path);stroke-width:2.2}
+.edge.row{stroke:var(--row);stroke-width:2.2}
+.edge.miss{stroke:var(--miss);stroke-width:2.2;stroke-dasharray:5 4}
+.edge.hot{stroke:var(--hot);stroke-width:2.2}
+.cur{stroke:var(--key);stroke-width:2.5}
+.lg-path{border-color:var(--path);background:var(--path-bg)} .lg-row{border-color:var(--row);background:var(--row-bg)}
+.lg-miss{border-color:var(--miss);background:var(--miss-bg)} .lg-hot{border-color:var(--hot);background:var(--hot-bg)}
+.lg-key{border-color:var(--key);background:var(--key-bg)} .lg-dim{border-color:var(--rule);background:var(--paper);border-style:dashed}
+.calc{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px 14px;margin-bottom:12px}
+.calc label{display:flex;flex-direction:column;gap:4px;font-size:13.5px;color:var(--ink-2)}
+.stat b.bad{color:var(--miss)} .stat b.good{color:var(--row)}
+.mx{width:100%;border-collapse:collapse;font-size:14px;margin:0}
+.mx th,.mx td{padding:7px 9px;text-align:center}
+.mx th:first-child,.mx td:first-child{text-align:left}
+.mx td button{width:100%;font:600 13px var(--sans);padding:5px 6px}
+.mx td button.ok{color:var(--row);border-color:var(--row);background:var(--row-bg)}
+.mx td button.lost{color:var(--hot);border-color:var(--hot);background:var(--hot-bg)}
+.mx td button.ghost{color:var(--miss);border-color:var(--miss);background:var(--miss-bg)}
+.mx td button[aria-pressed="true"]{outline:2.5px solid var(--struct);outline-offset:1px}
+.trace{font:12.5px/1.6 var(--mono);background:var(--paper);border-radius:var(--r-s);padding:10px 12px;margin:10px 0 0;white-space:pre-wrap}
+/* bài toán thực tế */
+.case{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:0 var(--r-m) var(--r-m) 0;padding:16px 20px;margin:22px 0;max-width:720px}
+.case>h3{margin:0 0 6px;font-size:1.15rem}
+.case .src{font-size:13.5px;color:var(--ink-2);margin:0 0 12px}
+.case dl{margin:0;display:grid;grid-template-columns:104px minmax(0,1fr);gap:8px 16px}
+.case dt{font-weight:600;color:var(--struct);font-size:15px}
+.case dd{margin:0}
+.case dd p:last-child,.case dd ul:last-child{margin-bottom:0}
+.case details{max-width:none;margin:12px 0 0}
+.case details.hint{background:var(--paper)}
+.case details.answer[open]{background:var(--surface)}
+.ah{font-size:15.5px;color:var(--struct);margin:20px 0 6px}
+.answer .tablewrap{max-width:none}
+@media (max-width:900px){.case{padding:14px}.case dl{grid-template-columns:minmax(0,1fr);gap:2px}.case dd{margin-bottom:8px}}
+</style>
+</head>
+<body>
+
+<div class="shell">
+<nav class="toc" aria-label="Mục lục">
+  <p>Transactional outbox</p>
+  <ol>
+    <li><a href="#s1">Bản chất vấn đề</a></li>
+    <li><a href="#s2">Cơ chế hoạt động</a></li>
+    <li><a href="#s3">Vì sao thiết kế như vậy</a></li>
+    <li><a href="#s4">Ví dụ</a></li>
+    <li><a href="#s5">Thí nghiệm</a></li>
+    <li><a href="#s6">Ảnh hưởng khi chạy production</a></li>
+    <li><a href="#s7">Hiểu lầm thường gặp</a></li>
+    <li><a href="#s8">Câu hỏi ôn tập</a></li>
+    <li><a href="#s9">Bài toán thực tế</a></li>
+    <li><a href="#s10">Câu hỏi còn mở</a></li>
+    <li><a href="#s11">Tài liệu tham khảo</a></li>
+  </ol>
+</nav>
+
+<main>
+<div class="hero">
+<h1>Transactional outbox: gửi event cùng transaction</h1>
+<p class="lede">Service lưu đơn hàng vào MySQL, rồi gửi event "đơn đã tạo" lên message broker. Hai việc ghi vào hai hệ thống, không có transaction nào bao được cả hai. Bài này giải thích vì sao cách làm đó lúc thì mất event, lúc thì tạo event cho đơn không tồn tại, và cách outbox sửa nó: ghi event vào chính database, trong cùng transaction, rồi để một tiến trình khác chuyển đi.</p>
+<div class="brief">
+  <div><h4>Mục tiêu</h4><ul>
+    <li>Giải thích được vì sao ghi database rồi gửi broker (dual write) có thể mất event hoặc tạo event "ma", với bất kỳ thứ tự nào.</li>
+    <li>Thiết kế được bảng outbox và tiến trình chuyển tiếp (relay) theo kiểu polling mà không bỏ sót event, kể cả khi chạy nhiều relay.</li>
+    <li>So sánh được polling với CDC đọc binlog: độ trễ, tải lên database, việc vận hành.</li>
+    <li>Mô tả được saga ở mức khái niệm: bước bù trừ, điều phối tập trung hay phân tán, và vì sao saga không có isolation.</li>
+  </ul></div>
+  <div><h4>Cần biết trước</h4><ul>
+    <li><a href="../idempotency-retries/index.html">Idempotency và retry</a>: at-least-once, consumer idempotent.</li>
+    <li><a href="../mvcc-read-view/index.html">MVCC và read view</a>: row chưa commit thì người khác không thấy.</li>
+    <li><a href="../innodb-locking-deadlock/index.html">Locking và deadlock</a>: <code>FOR UPDATE SKIP LOCKED</code>.</li>
+  </ul></div>
+  <div><h4>Trạng thái</h4><p>Level 2 (prov.) cho outbox và relay; Level 1 cho saga, vì chỉ ở mức khái niệm. Nội dung lấy từ manual MySQL 8.4 và tài liệu Debezium. Các widget là mô hình, chưa đo (E30–E32).</p></div>
+</div>
+<details class="mobile-toc"><summary>Mục lục</summary><ol><li><a href="#s1">Bản chất vấn đề</a></li><li><a href="#s2">Cơ chế hoạt động</a></li><li><a href="#s3">Vì sao thiết kế như vậy</a></li><li><a href="#s4">Ví dụ</a></li><li><a href="#s5">Thí nghiệm</a></li><li><a href="#s6">Ảnh hưởng khi chạy production</a></li><li><a href="#s7">Hiểu lầm thường gặp</a></li><li><a href="#s8">Câu hỏi ôn tập</a></li><li><a href="#s9">Bài toán thực tế</a></li><li><a href="#s10">Câu hỏi còn mở</a></li><li><a href="#s11">Tài liệu tham khảo</a></li></ol></details>
+</div>
+
+<!-- 1 -->
+<section id="s1">
+<header><span class="num">01</span><h2>Bản chất vấn đề</h2></header>
+<div class="prose">
+<p>Service đơn hàng nhận <code>POST /orders</code>. Nó lưu đơn vào MySQL, rồi gửi event <code>OrderCreated</code> lên broker (Kafka, RabbitMQ, Redis Streams). Service kho hàng nghe event để giữ hàng; service email nghe để gửi xác nhận. Việc lưu và việc gửi là hai lần ghi vào hai hệ thống khác nhau. Cách làm này gọi là ghi đôi (dual write).</p>
+<p>Giữa hai lần ghi, process có thể chết, broker có thể không nhận, hoặc <code>COMMIT</code> có thể thất bại. Khi đó hai hệ thống lệch nhau theo một trong hai hướng:</p>
+<ul>
+<li><strong>Mất event:</strong> đơn có trong database, nhưng không ai được báo. Kho không giữ hàng, khách không nhận email.</li>
+<li><strong>Event ma:</strong> event đã gửi, nhưng đơn không có trong database (transaction bị rollback). Kho giữ hàng cho một đơn không tồn tại.</li>
+</ul>
+<p>Đổi thứ tự không giúp được: gửi trước thì có event ma, lưu trước thì mất event. Gửi bên trong transaction cũng không: broker không biết transaction của MySQL, nên nó không rollback theo. Bảng dưới chạy từng cách với từng loại lỗi. Chọn một ô để xem diễn biến.</p>
+</div>
+<div class="frame" id="dual">
+  <div class="ph"><strong>Lưu đơn và gửi event: mỗi cách hỏng ở đâu</strong><span class="meta" id="dwMeta"></span></div>
+  <div class="bd">
+    <div class="tablewrap" style="margin:0"><table class="mx" id="dwTable"></table></div>
+    <div class="trace" id="dwTrace" aria-live="polite"></div>
+    <div class="desc" aria-live="polite" id="dwDesc"></div>
+    <div class="legend"><span><i class="lg-row"></i>khớp: có đơn thì có event, không đơn thì không event</span><span><i class="lg-hot"></i>mất event</span><span><i class="lg-miss"></i>event ma</span></div>
+    <p class="fine">Mỗi ô chạy một mô hình nhỏ của đúng một lỗi tại đúng một chỗ. "Khớp" ở dòng outbox nghĩa là event tới nơi, có thể trễ và có thể tới hai lần. Chưa đo (E30).</p>
+  </div>
+</div>
+</section>
+
+<!-- 2 -->
+<section id="s2">
+<header><span class="num">02</span><h2>Cơ chế hoạt động</h2></header>
+<div class="prose">
+<h3>Outbox: biến hai lần ghi thành một</h3>
+<p>Ý chính: thay vì gửi event lên broker, service ghi event vào một bảng <code>outbox</code> trong cùng database, cùng transaction với đơn hàng. Một tiến trình khác, gọi là relay, đọc bảng này và gửi lên broker.</p>
+<p>Đơn hàng và event giờ là hai row trong một transaction MySQL. Hoặc cả hai được commit, hoặc không row nào. Phần còn lại là chuyển event từ bảng lên broker. Phần này không cần nhanh, nhưng phải chắc: relay cứ thử lại cho tới khi broker nhận, rồi mới đánh dấu event là đã gửi.</p>
+<p>Cái giá của sự chắc chắn này là event có thể tới hai lần. Relay gửi xong, chết trước khi kịp đánh dấu, khởi động lại và gửi lần nữa. Outbox cho at-least-once, nên consumer phải idempotent, ví dụ lưu <code>event_id</code> đã xử lý cùng transaction với kết quả (xem <a href="../idempotency-retries/index.html">trang idempotency</a>).</p>
+</div>
+
+<div class="prose">
+<h3>Relay kiểu polling, và cái bẫy của con trỏ theo id</h3>
+<p>Ý chính: không được đọc outbox theo kiểu "lấy các id lớn hơn id lớn nhất đã gửi". Id được cấp lúc <code>INSERT</code>, còn row chỉ hiện ra lúc <code>COMMIT</code>. Transaction lấy id nhỏ hơn có thể commit muộn hơn, và relay sẽ bỏ qua nó mãi mãi.</p>
+<p>Relay polling chạy một vòng lặp: đọc các event chưa gửi, gửi lên broker, đánh dấu đã gửi, nghỉ một chút, lặp lại. Cách dễ nghĩ ra nhất là nhớ id lớn nhất đã gửi (một con trỏ, high-water mark) rồi lần sau đọc <code>WHERE id &gt; con_trỏ</code>. Bấm qua các bước để xem nó làm mất event thế nào.</p>
+</div>
+<div class="frame" id="gapStep"></div>
+<div class="note"><strong>Lỗi hay gặp:</strong> dùng <code>AUTO_INCREMENT</code> hoặc <code>created_at</code> làm con trỏ cho relay. Cả hai đều được gán trước lúc commit, nên thứ tự của chúng không phải thứ tự commit. Quy tắc: relay đọc theo trạng thái (<code>WHERE sent_at IS NULL</code>, có index), hoặc xoá row sau khi gửi, hoặc đọc binlog, vì binlog ghi theo đúng thứ tự commit.</div>
+<div class="prose">
+<p><strong>Nhiều relay cùng chạy.</strong> Để relay không phải là một điểm chết duy nhất, có thể chạy hai hoặc ba bản. Mỗi bản lấy một lô bằng <code>SELECT … WHERE sent_at IS NULL ORDER BY id LIMIT 100 FOR UPDATE SKIP LOCKED</code>: row đã bị bản khác khoá thì bỏ qua thay vì chờ. Đổi lại, thứ tự toàn cục mất đi. Hai event của cùng một đơn có thể được hai relay gửi theo thứ tự ngược. Nếu thứ tự trong một đơn quan trọng, gom theo khoá (<code>aggregate_id</code>): mỗi đơn chỉ do một relay phụ trách, và dùng chính khoá đó làm partition key trên broker.</p>
+</div>
+
+<div class="prose">
+<h3>Polling tốn gì</h3>
+<p>Ý chính: polling cộng thêm độ trễ khoảng một nửa chu kỳ nghỉ, và tạo truy vấn đều đặn lên database kể cả khi không có event nào.</p>
+</div>
+<div class="frame" id="poll">
+  <div class="ph"><strong>Chu kỳ polling, độ trễ và tải lên database</strong><span class="meta" id="plMeta"></span></div>
+  <div class="bd">
+    <div class="calc">
+      <label>Chu kỳ nghỉ (ms)<input id="plI" type="number" min="10" max="60000" value="500"></label>
+      <label>Kích thước lô<input id="plB" type="number" min="1" max="5000" value="100"></label>
+      <label>Thời gian gửi một lô (ms)<input id="plP" type="number" min="1" max="5000" value="20"></label>
+      <label>Event mới mỗi giây<input id="plL" type="number" min="0" max="100000" value="300"></label>
+      <label>Số relay<input id="plR" type="number" min="1" max="16" value="1"></label>
+    </div>
+    <svg id="plSvg" viewBox="0 0 680 120" role="img" aria-label="So sánh lượng event mới với số event relay gửi được mỗi giây"></svg>
+    <div class="stats" id="plStats"></div>
+    <div class="desc" aria-live="polite" id="plDesc"></div>
+    <p class="fine">Mô hình: relay nghỉ hết chu kỳ, rồi lấy từng lô và gửi, lô nào đầy thì lấy tiếp ngay không nghỉ. Nhiều relay chia đều event nhờ SKIP LOCKED. Độ trễ thêm trung bình khoảng nửa vòng cộng thời gian gửi một lô. Bỏ qua thời gian truy vấn. Chưa đo (E32).</p>
+  </div>
+</div>
+
+<div class="prose">
+<h3>CDC: đọc binlog thay vì đọc bảng</h3>
+<p>Ý chính: thay vì hỏi bảng outbox liên tục, relay đọc binlog của MySQL, nơi mọi thay đổi đã commit được ghi theo thứ tự commit. Không còn bẫy con trỏ, không còn polling.</p>
+<p>Binlog (binary log) là nhật ký MySQL ghi lại mọi thay đổi đã commit, vốn dùng cho replication. Trên MySQL 8.4, binlog bật mặc định và ghi theo từng row (<code>binlog_format = ROW</code>). Một công cụ CDC (change data capture) như Debezium tự nhận là một replica, đọc binlog, lọc các <code>INSERT</code> vào bảng outbox và gửi lên Kafka. Nó lưu vị trí đã đọc trong binlog (theo GTID hoặc tên file và offset), nên khởi động lại thì đọc tiếp đúng chỗ.</p>
+<p>Vì event đã nằm trong binlog, row outbox không cần ở lại bảng. Debezium bỏ qua sự kiện <code>DELETE</code> trên outbox, nên có thể xoá row ngay sau khi chèn, hoặc dọn định kỳ. Cái giá là thêm một hệ thống phải vận hành (Kafka Connect, Debezium), binlog phải giữ đủ lâu để relay đọc kịp, và đổi schema bảng outbox phải cẩn thận.</p>
+</div>
+
+<div class="prose">
+<h3>Saga: khi một nghiệp vụ trải qua nhiều service</h3>
+<p>Ý chính: không có transaction nào bao được nhiều service. Saga chia nghiệp vụ thành chuỗi transaction cục bộ, mỗi bước có một bước bù trừ. Khi một bước thất bại, các bước bù trừ chạy ngược lại để đưa hệ thống về trạng thái hợp lý.</p>
+<p>Ví dụ đặt hàng: tạo đơn (service đơn), trừ tiền (service thanh toán), giữ hàng (service kho), tạo vận đơn (service giao hàng). Nếu giữ hàng thất bại, saga hoàn tiền rồi huỷ đơn. Bù trừ không phải rollback: tiền đã trừ thật, khách có thể đã thấy, nên bước bù là một nghiệp vụ mới (hoàn tiền), với log và email riêng.</p>
+<p>Hai cách tổ chức: <strong>điều phối tập trung</strong> (orchestration), một service giữ trạng thái saga và ra lệnh từng bước; và <strong>tự phối hợp</strong> (choreography), mỗi service nghe event của bước trước và tự làm bước của mình. Mỗi bước gửi lệnh hay event qua outbox, và mỗi bước phải idempotent, vì lệnh có thể tới hai lần. Chọn bước thất bại rồi bấm qua để xem.</p>
+</div>
+<div class="frame" id="saga"></div>
+<div class="note"><strong>Lỗi hay gặp:</strong> nghĩ saga cho tính chất như một transaction. Saga có tính nguyên tử theo nghĩa "cuối cùng hoặc xong hết, hoặc được bù hết", nhưng không có isolation. Trong lúc saga chạy, người khác thấy được trạng thái nửa chừng: đơn "đang xử lý", tiền đã trừ mà hàng chưa giữ. Quy tắc: thiết kế các trạng thái trung gian để người dùng và service khác hiểu được (<code>PENDING</code>, <code>CANCELLED</code>), và làm bước bù trừ idempotent, thử lại được tới khi xong.</div>
+</section>
+
+<!-- 3 -->
+<section id="s3">
+<header><span class="num">03</span><h2>Vì sao thiết kế như vậy</h2></header>
+<div class="prose">
+<p><strong>Vì sao không dùng transaction phân tán (XA, two-phase commit)?</strong> MySQL hỗ trợ XA, nhưng phần lớn broker phổ biến thì không tham gia được. Kể cả khi được, 2PC giữ khoá trên mọi bên trong lúc chờ bên điều phối, và một bên chết ở giữa có thể để các bên kia kẹt. Outbox đổi tính nhất quán tức thời lấy tính nhất quán sau cùng: event tới trễ một chút, nhưng chắc chắn tới, và chỉ cần một transaction cục bộ.</p>
+<p><strong>Vì sao relay dùng at-least-once mà không cố exactly-once?</strong> Để đánh dấu "đã gửi" cùng lúc với việc broker nhận thì lại cần một transaction trải hai hệ thống, đúng thứ ta đang tránh. Nên relay chọn gửi trước, đánh dấu sau, và chấp nhận trùng. Trùng thì consumer loại được bằng <code>event_id</code>; mất thì không ai tìm lại được.</p>
+<p><strong>Vì sao saga không có isolation?</strong> Isolation cần giữ khoá hoặc giữ ảnh chụp cho tới khi cả nghiệp vụ xong. Với saga kéo dài nhiều giây hay nhiều giờ qua nhiều service, giữ khoá như vậy là không chấp nhận được. Saga chọn để mỗi bước commit ngay, và bù lại bằng thiết kế nghiệp vụ.</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th></th><th>Polling bảng outbox</th><th>CDC từ binlog</th></tr></thead>
+<tbody>
+<tr><td>Độ trễ thêm</td><td>Khoảng nửa chu kỳ nghỉ</td><td>Thường dưới một giây, theo tốc độ đọc binlog</td></tr>
+<tr><td>Tải lên database</td><td>Truy vấn đều đặn, kể cả khi rảnh; thêm câu đánh dấu đã gửi</td><td>Như một replica đọc binlog</td></tr>
+<tr><td>Thứ tự</td><td>Theo <code>id</code>; mất khi có nhiều relay trừ khi chia theo khoá</td><td>Theo thứ tự commit</td></tr>
+<tr><td>Bẫy bỏ sót</td><td>Có, nếu dùng con trỏ theo id hoặc thời gian</td><td>Không</td></tr>
+<tr><td>Dọn bảng</td><td>Xoá row đã gửi định kỳ</td><td>Có thể xoá ngay; binlog giữ event</td></tr>
+<tr><td>Vận hành</td><td>Chỉ là code trong service</td><td>Thêm Debezium, Kafka Connect, theo dõi vị trí binlog</td></tr>
+</tbody></table></div>
+<div class="tablewrap"><table>
+<thead><tr><th></th><th>Điều phối tập trung</th><th>Tự phối hợp</th></tr></thead>
+<tbody>
+<tr><td>Ai biết cả quy trình</td><td>Service điều phối, có bảng trạng thái saga</td><td>Không ai; quy trình nằm rải rác trong các consumer</td></tr>
+<tr><td>Thêm một bước</td><td>Sửa một chỗ</td><td>Sửa nhiều service, dễ sót</td></tr>
+<tr><td>Theo dõi một saga đang kẹt</td><td>Đọc bảng trạng thái</td><td>Ghép log từ nhiều service</td></tr>
+<tr><td>Phụ thuộc</td><td>Điều phối phụ thuộc mọi service</td><td>Service phụ thuộc event của nhau</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- 4 -->
+<section id="s4">
+<header><span class="num">04</span><h2>Ví dụ</h2></header>
+<div class="prose"><p>Viết theo manual MySQL 8.4 và API mysql2; chưa chạy trên lab.</p><h3>Bảng outbox</h3></div>
+<pre><code>CREATE TABLE outbox (
+  id             BIGINT AUTO_INCREMENT PRIMARY KEY,
+  event_id       BINARY(16)   NOT NULL UNIQUE,     -- UUID, consumer dùng để loại trùng
+  aggregate_type VARCHAR(64)  NOT NULL,            -- 'order'
+  aggregate_id   VARCHAR(64)  NOT NULL,            -- '1042', cũng là partition key
+  type           VARCHAR(64)  NOT NULL,            -- 'OrderCreated'
+  payload        JSON         NOT NULL,
+  created_at     DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  sent_at        DATETIME(3)  NULL,
+  KEY idx_unsent (sent_at, id)                     -- relay tìm row chưa gửi
+);</code></pre>
+
+<div class="prose"><h3>Ghi đơn và event trong một transaction</h3></div>
+<pre><code>await conn.beginTransaction();
+const [r] = await conn.execute&lt;ResultSetHeader&gt;(
+  'INSERT INTO orders (customer_id, total) VALUES (?, ?)', [customerId, total]);
+await conn.execute(
+  'INSERT INTO outbox (event_id, aggregate_type, aggregate_id, type, payload) VALUES (UUID_TO_BIN(UUID()), ?, ?, ?, ?)',
+  ['order', String(r.insertId), 'OrderCreated', JSON.stringify({ orderId: r.insertId, total })]);
+await conn.commit();          // không gọi broker ở đây</code></pre>
+
+<div class="prose"><h3>Relay polling, nhiều bản chạy song song</h3></div>
+<pre><code>async function relayOnce(batch = 100) {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [rows] = await conn.execute&lt;RowDataPacket[]&gt;(
+      `SELECT id, event_id, aggregate_id, type, payload FROM outbox
+        WHERE sent_at IS NULL ORDER BY id LIMIT ${batch}
+        FOR UPDATE SKIP LOCKED`);
+    for (const e of rows) {
+      await broker.publish(e.type, e.payload, { key: e.aggregate_id, id: e.event_id });
+    }
+    if (rows.length) {
+      await conn.query('UPDATE outbox SET sent_at = NOW(3) WHERE id IN (?)', [rows.map(r =&gt; r.id)]);
+    }
+    await conn.commit();      // chết trước dòng này: lô được gửi lại, consumer loại trùng
+    return rows.length;
+  } catch (e) { await conn.rollback(); throw e; } finally { conn.release(); }
+}
+
+// vòng lặp: lô đầy thì chạy tiếp ngay, lô vơi thì nghỉ
+for (;;) { const n = await relayOnce(); if (n &lt; 100) await sleep(500); }
+
+// dọn bảng, chạy mỗi giờ: xoá theo từng lô nhỏ để không giữ khoá lâu
+// DELETE FROM outbox WHERE sent_at &lt; NOW() - INTERVAL 7 DAY ORDER BY id LIMIT 5000;</code></pre>
+<p class="prose">Relay giữ transaction và khoá trên lô trong lúc gửi lên broker. Lô nhỏ và broker chậm thì ổn; broker treo thì các row bị khoá tới timeout. Đặt timeout cho lệnh <code>publish</code> ngắn hơn <code>innodb_lock_wait_timeout</code>.</p>
+
+<div class="prose"><h3>Xem event outbox trong binlog</h3></div>
+<pre><code>SHOW VARIABLES LIKE 'binlog_format';      -- ROW (mặc định 8.4, biến này đã deprecated)
+SHOW BINARY LOG STATUS;                    -- 8.4: thay cho SHOW MASTER STATUS
+-- ngoài shell:
+-- mysqlbinlog --base64-output=DECODE-ROWS -v binlog.000003 | grep -A12 'outbox'</code></pre>
+</section>
+
+<!-- 5 -->
+<section id="s5">
+<header><span class="num">05</span><h2>Thí nghiệm</h2></header>
+<div class="prose"><p>Chạy trên lab MySQL 8.4. Broker có thể là một bảng hoặc một endpoint HTTP ghi log; điều cần đo là số event so với số đơn. Viết dự đoán trước. E30 và E31 là phần "chiến lược phục hồi sau lỗi" mà Month 3 yêu cầu ghi lại.</p></div>
+<details><summary>E30. Ghi đôi dưới lỗi</summary>
+<p><strong>Câu hỏi.</strong> Tạo 1.000 đơn với mỗi cách trong bảng phần 01, giết process ngẫu nhiên giữa hai bước với xác suất 5%, cho broker từ chối 2% lần gửi. Cuối cùng có bao nhiêu đơn không có event, bao nhiêu event không có đơn, bao nhiêu event trùng?</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e30/prediction.md</code></p>
+<p><strong>Chạy.</strong> Script Node với các điểm chết và lỗi giả lập; đối soát bằng một câu join giữa <code>orders</code> và bảng ghi event đã nhận.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+<details><summary>E31. Bẫy con trỏ theo id</summary>
+<p><strong>Câu hỏi.</strong> Tái hiện đúng kịch bản trong widget phần 02 bằng hai session: event nào bị relay theo con trỏ bỏ sót? Sau đó chạy hai relay dùng <code>sent_at IS NULL … SKIP LOCKED</code> trong lúc 8 client chèn liên tục, và giết một relay giữa lúc gửi: có event nào mất, bao nhiêu event bị gửi hai lần?</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e31/prediction.md</code></p>
+<p><strong>Chạy.</strong> Hai <code>./lab.sh shell</code> cho phần đầu; script Node cho phần sau.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+<details><summary>E32. Độ trễ và tải của polling</summary>
+<p><strong>Câu hỏi.</strong> Với chu kỳ 100 ms và 1 s, ở 10 và 1.000 event mỗi giây: độ trễ từ commit tới lúc broker nhận (p50, p99) là bao nhiêu, và database nhận bao nhiêu truy vấn mỗi giây khi không có event? So với máy tính ở phần 02.</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e32/prediction.md</code></p>
+<p><strong>Chạy.</strong> Relay ở phần 04, ghi thời điểm commit vào payload; đọc <code>Com_select</code> và <code>Com_update</code> trước và sau.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+</section>
+
+<!-- 6 -->
+<section id="s6">
+<header><span class="num">06</span><h2>Ảnh hưởng khi chạy production</h2></header>
+<div class="prose">
+<h3>Khi nào dùng gì</h3>
+<ul>
+<li>Mỗi khi một thay đổi trong database cần báo cho hệ thống khác: dùng outbox. Không gửi broker trực tiếp từ trong code xử lý request.</li>
+<li>Lượng event vừa phải, chấp nhận trễ vài trăm mili giây: relay polling trong chính service. Đơn giản nhất để vận hành.</li>
+<li>Lượng event lớn, cần trễ thấp, hoặc đã có Kafka Connect: CDC từ binlog.</li>
+<li>Nghiệp vụ trải nhiều service và có bước có thể thất bại: saga, mỗi bước gửi qua outbox. Bắt đầu với điều phối tập trung khi quy trình có từ bốn bước trở lên.</li>
+<li>Chỉ cần làm việc nền trong cùng service (gửi email sau khi tạo đơn): vẫn là outbox, chỉ là relay đẩy vào hàng đợi việc (ví dụ BullMQ) thay vì broker.</li>
+</ul>
+<h3>Cái giá</h3>
+<ul>
+<li>Thêm một <code>INSERT</code> và một index cho mỗi transaction có event; thêm câu đánh dấu và câu dọn bảng.</li>
+<li>Event tới trễ và có thể trùng; mọi consumer phải idempotent.</li>
+<li>Bảng outbox phình to nếu relay chết hoặc job dọn không chạy. Bảng lớn với nhiều row đã xoá làm câu polling chậm dần.</li>
+<li>CDC: thêm hệ thống để vận hành; binlog phải giữ đủ lâu (<code>binlog_expire_logs_seconds</code>) để relay bắt kịp sau sự cố.</li>
+</ul>
+<h3>Nhận ra trên production bằng gì</h3>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Triệu chứng</th><th>Xem ở đâu</th></tr></thead>
+<tbody>
+<tr><td>Event tới chậm</td><td>Tuổi của event chưa gửi lâu nhất: <code>SELECT NOW(3) - MIN(created_at) FROM outbox WHERE sent_at IS NULL</code>; đặt cảnh báo trên con số này</td></tr>
+<tr><td>Đơn có mà kho không biết</td><td>Đối soát: đơn trong 1 giờ qua không có event tương ứng ở consumer</td></tr>
+<tr><td>Relay chậm dần</td><td>Số row trong outbox; <code>EXPLAIN</code> của câu polling có dùng <code>idx_unsent</code> không</td></tr>
+<tr><td>CDC tụt lại</td><td>Độ trễ của connector so với binlog hiện tại; file binlog sắp bị xoá mà connector chưa đọc</td></tr>
+<tr><td>Saga kẹt</td><td>Bảng trạng thái saga: số saga ở một bước quá lâu; số bước bù trừ thất bại</td></tr>
+</tbody></table></div>
+<div class="senior"><h4>Góc nhìn senior: event là API công khai</h4><p>Khi đã có outbox, việc dễ quên là coi payload của event như một API: nó có consumer ở team khác, có version, và không được đổi tuỳ tiện. Senior tách event nội bộ (bản chụp row) khỏi event công khai (một hợp đồng ổn định), ghi <code>type</code> có version (<code>OrderCreated.v1</code>), và chỉ thêm trường mới chứ không đổi nghĩa trường cũ. Một outbox hoạt động hoàn hảo vẫn làm hỏng hệ thống nếu payload thay đổi mà consumer không biết.</p></div>
+<div class="prose">
+<h3>Checklist khi review code có gửi event</h3>
+<ul>
+<li>Có lời gọi broker nào nằm trong code xử lý request, cạnh một <code>COMMIT</code> không? Nếu có, đó là ghi đôi.</li>
+<li>Event được ghi vào outbox trong cùng transaction với thay đổi nó mô tả?</li>
+<li>Relay đọc theo trạng thái hay theo con trỏ id/thời gian?</li>
+<li>Event có <code>event_id</code> để consumer loại trùng? Partition key có giữ thứ tự cần thiết?</li>
+<li>Có cảnh báo trên tuổi event chưa gửi lâu nhất, và có job dọn bảng?</li>
+<li>Với saga: mỗi bước có bước bù trừ, bước bù trừ idempotent, và trạng thái trung gian có tên rõ ràng?</li>
+</ul>
+</div>
+</section>
+
+<!-- 7 -->
+<section id="s7">
+<header><span class="num">07</span><h2>Hiểu lầm thường gặp</h2></header>
+<div class="prose"><ul>
+<li><strong>Hiểu lầm:</strong> gửi event sau khi commit là đủ an toàn. <strong>Vì sao sai:</strong> process chết hoặc broker lỗi sau commit thì event mất (<a href="#s1">phần 01</a>). <strong>Quy tắc:</strong> event đi qua outbox.</li>
+<li><strong>Hiểu lầm:</strong> gửi event bên trong transaction thì rollback sẽ huỷ được event. <strong>Vì sao sai:</strong> broker không biết transaction của MySQL; event đã gửi là đã gửi. <strong>Quy tắc:</strong> không gọi hệ thống ngoài trong transaction để "đồng bộ" với nó.</li>
+<li><strong>Hiểu lầm:</strong> relay đọc <code>id &gt; id_cuối</code> là đúng vì id tăng dần. <strong>Vì sao sai:</strong> id tăng theo thứ tự chèn, không theo thứ tự commit (<a href="#s2">phần 02</a>). <strong>Quy tắc:</strong> đọc theo trạng thái hoặc đọc binlog.</li>
+<li><strong>Hiểu lầm:</strong> có outbox thì consumer nhận đúng một lần. <strong>Vì sao sai:</strong> relay gửi xong rồi chết trước khi đánh dấu thì gửi lại. <strong>Quy tắc:</strong> consumer idempotent theo <code>event_id</code>.</li>
+<li><strong>Hiểu lầm:</strong> bước bù trừ của saga là rollback. <strong>Vì sao sai:</strong> các bước trước đã commit và có thể đã được người khác thấy. <strong>Quy tắc:</strong> bù trừ là một nghiệp vụ mới, idempotent, thử lại tới khi xong.</li>
+</ul></div>
+</section>
+
+<!-- 8 -->
+<section id="s8">
+<header><span class="num">08</span><h2>Câu hỏi ôn tập</h2></header>
+<p class="prose">Viết ngày 2026-10-20. Đánh số Q53 đến Q58.</p>
+<details><summary><span class="tag">Giải thích</span>Q53. Hai hướng lệch của ghi đôi</summary>
+<p>Kể tên hai hướng lệch giữa database và broker khi ghi đôi, và với mỗi hướng, một thứ tự thao tác cùng một lỗi gây ra nó.</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Mất event: commit trước rồi gửi, process chết hoặc broker lỗi sau commit. Event ma: gửi trước rồi commit, hoặc gửi trong transaction, sau đó commit thất bại hoặc process chết trước commit.</p></details></details>
+<details><summary><span class="tag">Dự đoán</span>Q54. Relay theo con trỏ</summary>
+<p>Relay nhớ <code>last_id = 40</code>. T1 chèn outbox id 41 rồi đang chạy tiếp; T2 chèn id 42 rồi commit; relay chạy <code>WHERE id &gt; 40</code>; T1 commit. Relay gửi những event nào trong lần đó và các lần sau?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Lần đó relay chỉ thấy 42, vì 41 chưa commit nên không hiện trong ảnh chụp của nó. Nó gửi 42 và đặt <code>last_id = 42</code>. Các lần sau đọc <code>id &gt; 42</code>, nên 41 không bao giờ được gửi.</p></details></details>
+<details><summary><span class="tag">Chẩn đoán</span>Q55. Kho thỉnh thoảng giữ hàng hai lần</summary>
+<p>Service kho thỉnh thoảng giữ hàng hai lần cho cùng một đơn, đúng vào những lúc relay outbox được deploy lại. Vì sao, và sửa ở đâu?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Relay bị dừng sau khi gửi lô lên broker nhưng trước khi commit câu đánh dấu đã gửi. Khi chạy lại, nó gửi lại cả lô. Đây là hành vi đúng của outbox (at-least-once). Sửa ở consumer: lưu <code>event_id</code> đã xử lý cùng transaction với việc giữ hàng, gặp lại thì bỏ qua. Có thể giảm tần suất bằng cách dừng relay êm (graceful shutdown), nhưng không loại hẳn được.</p></details></details>
+<details><summary><span class="tag">Giải thích</span>Q56. Polling hay CDC</summary>
+<p>Team có 50 event mỗi giây, chấp nhận trễ 1 giây, chưa có Kafka Connect. Chọn polling hay CDC, và chu kỳ bao nhiêu?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Polling trong service là đủ: 50 event mỗi giây với lô 100 thì một relay dư sức. Chu kỳ khoảng 200 đến 500 ms cho độ trễ thêm trung bình 100 đến 250 ms, và 2 đến 5 truy vấn mỗi giây khi rảnh. CDC chỉ đáng khi lượng event hoặc yêu cầu độ trễ vượt xa mức này, hoặc khi đã có hạ tầng sẵn.</p></details></details>
+<details><summary><span class="tag">Dự đoán</span>Q57. Saga thất bại ở bước ba</summary>
+<p>Saga đặt hàng: tạo đơn, trừ tiền, giữ hàng, tạo vận đơn. Giữ hàng thất bại vì hết hàng. Những bước nào chạy tiếp, theo thứ tự nào, và đơn kết thúc ở trạng thái gì?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Không tạo vận đơn. Chạy bù trừ ngược lại cho các bước đã xong: hoàn tiền, rồi huỷ đơn. Giữ hàng thất bại nên không cần bù. Đơn kết thúc ở <code>CANCELLED</code> (không bị xoá), có lý do "hết hàng", và khách thấy một lần trừ tiền và một lần hoàn tiền.</p></details></details>
+<details><summary><span class="tag">Chẩn đoán</span>Q58. Bảng outbox 40 triệu row</summary>
+<p>Câu polling của relay từ 2 ms tăng lên 800 ms trong ba tháng. Bảng outbox có 40 triệu row, gần như tất cả đã gửi. Vì sao, và làm gì?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Job dọn không chạy, hoặc chưa bao giờ có. Câu polling có thể không dùng được index trên <code>sent_at</code> (thiếu index, hoặc index chỉ trên <code>id</code>), nên phải quét qua hàng triệu row đã gửi. Kiểm tra <code>EXPLAIN</code>, thêm <code>(sent_at, id)</code> nếu thiếu, rồi xoá row cũ theo từng lô nhỏ. Đặt cảnh báo trên số row và trên tuổi event chưa gửi lâu nhất.</p></details></details>
+</section>
+
+<!-- 9 -->
+<section id="s9">
+<header><span class="num">09</span><h2>Bài toán thực tế</h2></header>
+<div class="prose"><p>Ba tình huống giống việc thật. Đọc đề, tự viết lời giải ra giấy (phương án, con số, đánh đổi), rồi mới mở lời giải. Gợi ý chỉ mở khi bí. Lời giải là lập luận từ tài liệu, không phải số đo; con số trong đó là ước lượng. Viết ngày 2026-10-20.</p></div>
+
+<div class="case" id="c7">
+<h3>C7. 0,1% đơn không có email xác nhận, và team muốn "thêm retry"</h3>
+<p class="src">Dựa trên: phần 01–02 của trang này; <a href="../idempotency-retries/index.html">Idempotency và retry</a>.</p>
+<dl>
+<dt>Bối cảnh</dt><dd><p>Service đơn hàng (NestJS, MySQL 8.4) nhận khoảng 200 đơn mỗi giây lúc sale. Sau khi commit đơn, code gọi <code>producer.send('orders', OrderCreated)</code> lên Kafka. Ba consumer nghe topic này: email, kho, analytics. Đối soát cho thấy:</p>
+<ul>
+<li>0,1% đơn không có email xác nhận và không được giữ hàng; các đơn này tập trung vào giờ deploy.</li>
+<li>Vài lần mỗi tuần, kho giữ hàng cho một đơn không tồn tại. Nguồn: luồng tạo đơn từ trang admin gửi event <em>trước</em> khi commit.</li>
+<li>Thỉnh thoảng kho nhận <code>OrderCancelled</code> trước <code>OrderCreated</code> của cùng một đơn.</li>
+</ul>
+<p>Team đề xuất: bọc <code>send</code> trong vòng thử lại 3 lần.</p></dd>
+<dt>Yêu cầu</dt><dd>Không mất event. Không có event ma. Event tới consumer trong 2 giây ở p99. Trong cùng một đơn, event tới theo đúng thứ tự.</dd>
+<dt>Ràng buộc</dt><dd>Đã có Kafka. Chưa có Kafka Connect hay Debezium. Team 3 người. Binlog đang bật. Không được dừng hệ thống để chuyển đổi.</dd>
+<dt>Nhiệm vụ</dt><dd>Đánh giá đề xuất của team. Thiết kế lại, chọn polling hay CDC. Lập kế hoạch chuyển đổi, và kế hoạch bù cho các đơn đã mất event.</dd>
+</dl>
+<details class="hint"><summary>Gợi ý</summary><ul>
+<li>Retry giúp được loại lỗi nào, và không giúp được loại nào? Vì sao lỗi tập trung vào giờ deploy?</li>
+<li>Thứ tự trong cùng một đơn phụ thuộc vào partition key và vào số relay.</li>
+<li>Trước khi bật outbox, consumer phải chịu được điều gì?</li>
+</ul></details>
+<details class="answer"><summary>Xem lời giải</summary>
+<h4 class="ah">1. Làm rõ đề bài</h4>
+<ul>
+<li><strong>Mất event lúc deploy:</strong> pod nhận <code>SIGTERM</code>, đơn đã commit, <code>send</code> chưa kịp chạy hoặc chưa được Kafka xác nhận. Retry 3 lần không giúp, vì process đã chết. Retry chỉ che lỗi tạm thời của broker.</li>
+<li><strong>Event ma:</strong> đây là ghi đôi theo thứ tự "gửi trước, commit sau". Retry làm tệ hơn, vì có thể gửi nhiều lần cho một đơn rồi rollback.</li>
+<li><strong>Sai thứ tự:</strong> cần biết partition key đang là gì. Nếu key rỗng, Kafka rải event lên nhiều partition, và thứ tự giữa các partition không được bảo đảm.</li>
+<li>Consumer đã idempotent chưa? Giả định chưa. Đây là điều kiện phải làm trước, vì outbox giao at-least-once.</li>
+</ul>
+<h4 class="ah">2. Ước lượng</h4>
+<ul>
+<li>Đỉnh khoảng 250 event mỗi giây (tạo, huỷ, cập nhật). Trung bình cả ngày giả sử 50 event mỗi giây, tức khoảng 4,3 triệu row outbox mỗi ngày.</li>
+<li>Payload khoảng 1 KB. Giữ row đã gửi 24 giờ thì bảng khoảng 4–5 GB kể cả index; phải có job dọn từ ngày đầu.</li>
+<li>Relay polling: lô 200 event, gửi lên Kafka theo lô mất khoảng 10–20 ms, nên một relay xử lý cỡ hàng nghìn event mỗi giây. Chu kỳ nghỉ 200 ms thêm trung bình khoảng 100 ms độ trễ: đủ cho mục tiêu 2 giây.</li>
+</ul>
+<h4 class="ah">3. Các phương án</h4>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>A. Retry 3 lần (đề xuất của team)</td><td>Sửa ít</td><td>Không sửa mất event khi process chết; làm event ma tệ hơn</td></tr>
+<tr><td>B. Outbox, relay polling trong service</td><td>Chỉ là code và một bảng; team 3 người vận hành được</td><td>Thêm tải polling; tự lo dọn bảng và theo dõi lag</td></tr>
+<tr><td>C. Outbox, Debezium đọc binlog</td><td>Trễ thấp, thứ tự theo commit, không polling</td><td>Phải dựng và vận hành Kafka Connect; quá nặng cho team hiện tại</td></tr>
+<tr><td>D. CDC thẳng từ bảng <code>orders</code>, không outbox</td><td>Không cần bảng mới</td><td>Consumer phụ thuộc schema nội bộ; đổi cột là vỡ consumer</td></tr>
+<tr><td>E. Kafka transaction</td><td>Ghi nhiều topic nguyên tử</td><td>Chỉ trong Kafka, không bao được MySQL</td></tr>
+</tbody></table></div>
+<h4 class="ah">4. Đánh đổi và quyết định</h4>
+<p>Chọn B, thiết kế để thay bằng C sau này mà không đổi gì phía consumer.</p>
+<ul>
+<li>B giải quyết cả ba triệu chứng và vừa sức team. Bảng outbox dùng đúng tên cột mặc định của Debezium (<code>id</code>, <code>aggregatetype</code>, <code>aggregateid</code>, <code>type</code>, <code>payload</code>), nên khi lên C chỉ cần thay relay.</li>
+<li><strong>Thứ tự:</strong> partition key trên Kafka là <code>order_id</code>. Chạy một relay hoạt động, có bản dự phòng. Relay chính giữ một named lock của MySQL (<code>GET_LOCK('outbox_relay', 0)</code>); bản dự phòng chỉ chạy khi lấy được lock. Lock gắn với một connection, nên relay giữ một connection riêng cho nó, không lấy từ pool. Một relay đủ thông lượng, và giữ thứ tự theo <code>id</code> trong cùng một đơn, vì event "huỷ" luôn được tạo sau khi event "tạo" đã commit.</li>
+<li>Khi nào đổi ý: lượng event vượt vài nghìn mỗi giây, hoặc công ty dựng Kafka Connect cho việc khác. Khi đó chuyển sang C.</li>
+</ul>
+<h4 class="ah">5. Triển khai</h4>
+<ol class="list">
+<li><strong>Consumer idempotent trước:</strong> mỗi event có <code>event_id</code> (UUID). Email, kho, analytics lưu <code>event_id</code> đã xử lý cùng transaction với kết quả. Luồng cũ cũng bắt đầu gửi <code>event_id</code>; từ bước 2, nó dùng đúng <code>event_id</code> của row outbox tương ứng.</li>
+<li><strong>Ghi outbox trong transaction</strong> ở mọi đường tạo đơn, kể cả admin. Relay chạy chế độ "bóng": gửi lên một topic phụ <code>orders.shadow</code>. So số event mỗi giờ giữa hai luồng trong một tuần.</li>
+<li><strong>Chuyển, theo đúng thứ tự:</strong> trước hết cho relay gửi lên topic thật, trong khi code vẫn gửi trực tiếp. Lúc này mỗi event tới hai lần, và consumer loại được vì hai luồng dùng chung <code>event_id</code>. Sau đó mới tắt <code>producer.send</code> trực tiếp. Làm ngược lại thì trong khoảng giữa hai bước, event không đi theo luồng nào và bị mất.</li>
+<li><strong>Bù dữ liệu cũ:</strong> đối soát 30 ngày gần nhất: đơn không có email hoặc không được giữ hàng. Chèn event bù vào outbox với <code>type</code> có cờ <code>replay</code>, để consumer email quyết định có gửi lại hay chỉ ghi nhận.</li>
+<li><strong>Dọn bảng:</strong> job mỗi giờ xoá row đã gửi quá 24 giờ, mỗi lần 5.000 row.</li>
+</ol>
+<h4 class="ah">6. Rủi ro và cách kiểm chứng</h4>
+<ul>
+<li><strong>Relay chính treo nhưng vẫn giữ lock:</strong> named lock gắn với connection; đặt timeout cho connection và health check, để lock được nhả khi process treo.</li>
+<li><strong>Kafka chết lâu:</strong> outbox dài ra; đó là hành vi mong muốn (đệm), không phải lỗi. Cảnh báo theo tuổi event chưa gửi lâu nhất, ngưỡng 30 giây.</li>
+<li><strong>Kiểm chứng:</strong> trong tuần chạy bóng, số event bằng số đơn. Sau khi chuyển, đối soát hằng ngày đơn với email và giữ hàng phải lệch 0. Test deploy: rolling restart trong lúc chạy tải, đếm event mất (phải bằng 0).</li>
+<li><strong>Đường lui:</strong> cờ quay lại luồng gửi trực tiếp; consumer idempotent nên không hại.</li>
+</ul>
+<h4 class="ah">7. Lỗi hay gặp với bài này</h4>
+<ul>
+<li>Coi retry là cách sửa mất event.</li>
+<li>Bỏ sót đường tạo đơn từ admin hoặc từ job.</li>
+<li>Chạy nhiều relay với <code>SKIP LOCKED</code> rồi ngạc nhiên vì thứ tự trong một đơn bị đảo.</li>
+<li>Bật outbox khi consumer chưa idempotent.</li>
+<li>Cho consumer đọc thẳng bảng <code>orders</code> qua CDC, khoá chặt schema nội bộ.</li>
+</ul>
+</details>
+</div>
+
+<div class="case" id="c8">
+<h3>C8. Relay outbox chậm dần sau 8 tháng</h3>
+<p class="src">Dựa trên: phần 02, 04 và 06 của trang này; <a href="../innodb-locking-deadlock/index.html">Locking và deadlock</a>.</p>
+<dl>
+<dt>Bối cảnh</dt><dd><p>Outbox polling đã chạy 8 tháng. Bảng có 80 triệu row (payload nhỏ, khoảng 25 GB), 99,9% đã gửi; chưa từng có job dọn. Buffer pool 32 GB. Index: <code>PRIMARY (id)</code> và <code>KEY (created_at)</code>. Ba relay chạy song song, mỗi relay lặp lại:</p>
+<pre><code>START TRANSACTION;
+SELECT * FROM outbox WHERE sent_at IS NULL ORDER BY id LIMIT 500 FOR UPDATE SKIP LOCKED;
+-- gửi từng event lên broker, mỗi lần khoảng 5 ms
+UPDATE outbox SET sent_at = NOW() WHERE id IN (...);
+COMMIT;
+-- nghỉ 100 ms</code></pre>
+<p>Giờ cao điểm: tuổi event chưa gửi lâu nhất lên 15 phút. CPU của MySQL 70%. Slow log đầy câu polling, mỗi câu 8–15 giây, <code>rows_examined</code> khoảng 80 triệu. Thỉnh thoảng <code>INSERT</code> vào outbox của API tạo đơn bị lỗi 1205.</p></dd>
+<dt>Yêu cầu</dt><dd>Lag dưới 5 giây ở p99. CPU MySQL dưới 40%. Không mất event trong lúc sửa.</dd>
+<dt>Ràng buộc</dt><dd>Không downtime. MySQL 8.4. Đỉnh khoảng 300 event mỗi giây.</dd>
+<dt>Nhiệm vụ</dt><dd>Chẩn đoán từng triệu chứng. Đề xuất cách sửa theo thứ tự. Nói cách dọn 80 triệu row an toàn.</dd>
+</dl>
+<details class="hint"><summary>Gợi ý</summary><ul>
+<li>Câu polling dùng index nào để tìm row có <code>sent_at IS NULL</code>? Nó đi qua bao nhiêu row trước khi gặp row chưa gửi?</li>
+<li>Câu khoá đi qua row nào thì khoá row đó. Điều này giải thích lỗi 1205 thế nào?</li>
+<li>Có đáng dựng index trên 80 triệu row sắp bị xoá không?</li>
+</ul></details>
+<details class="answer"><summary>Xem lời giải</summary>
+<h4 class="ah">1. Làm rõ đề bài: chẩn đoán</h4>
+<ul>
+<li><strong>Câu polling chậm:</strong> không có index trên <code>sent_at</code>. Với <code>ORDER BY id</code>, MySQL quét PRIMARY từ đầu, đi qua gần 80 triệu row đã gửi rồi mới tới các row chưa gửi ở cuối. <code>rows_examined</code> khoảng 80 triệu khớp với điều đó. Quét chừng ấy row trong 8–15 giây chỉ được vì phần lớn bảng nằm trong buffer pool, và đó cũng là chỗ CPU 70% đi vào.</li>
+<li><strong>Lỗi 1205 ở API:</strong> câu khoá dưới REPEATABLE READ khoá mọi entry nó quét qua, kèm khoảng trống phía trước. Khi hàng chờ ngắn (ngoài giờ đỉnh), câu quét tới tận cuối PRIMARY và khoá cả khoảng sau row cuối cùng (supremum), đúng chỗ mọi row mới được chèn vào. Mỗi <code>INSERT</code> của API phải chờ relay commit: 8–15 giây truy vấn cộng 2,5 giây gửi. Ba relay nối nhau có lúc vượt 50 giây, thành lỗi 1205. Đây là suy luận từ trang locking; hành vi chính xác khi có <code>SKIP LOCKED</code> chưa được kiểm chứng (câu hỏi 25), nên phải xác nhận bằng <code>data_locks</code>.</li>
+<li><strong>Ba relay không nhanh hơn một:</strong> chúng quét cùng một vùng và vướng khoá của nhau.</li>
+<li><strong>Giữ khoá lâu:</strong> gửi từng event 5 ms × 500 = 2,5 giây, trong lúc vẫn giữ khoá và transaction.</li>
+</ul>
+<h4 class="ah">2. Ước lượng</h4>
+<ul>
+<li>Hiện tại: mỗi vòng khoảng 12 giây truy vấn cộng 2,5 giây gửi cộng 0,1 giây nghỉ, cho tối đa 500 event. Khoảng 35 event mỗi giây cho một relay; ba relay vướng nhau nên không cộng lên được. Ở đỉnh 300 event mỗi giây, hàng chờ tăng thêm khoảng 265 event mỗi giây, nên vài phút đỉnh là đủ đẩy tuổi event lên 15 phút. Tám tháng trước, bảng còn nhỏ và câu truy vấn nhanh, nên không ai thấy.</li>
+<li>Sau khi sửa: câu polling có index chỉ đọc vài trăm entry, khoảng vài ms. Gửi theo lô lên broker khoảng 20 ms. Một relay đạt cỡ hàng nghìn event mỗi giây.</li>
+<li>Dọn 80 triệu row bằng <code>DELETE</code> theo lô 5.000 row: 16.000 lô. Mỗi lô giả sử 0,3–0,5 giây cộng nghỉ, tổng vài giờ, và sinh nhiều undo, redo, binlog; replica có thể trễ.</li>
+</ul>
+<h4 class="ah">3. Các phương án</h4>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>A. Thêm index <code>(sent_at, id)</code> trên bảng hiện tại</td><td>Sửa thẳng câu polling; thêm index là thao tác online</td><td>Dựng index trên bảng 25 GB tốn I/O hàng chục phút tới hàng giờ, cho dữ liệu sắp xoá</td></tr>
+<tr><td>B. Xoá theo lô trên bảng hiện tại</td><td>Không đổi code</td><td>Vài giờ ghi nặng; vẫn cần A</td></tr>
+<tr><td>C. Đổi sang bảng mới nhỏ</td><td>Bảng mới có index đúng ngay; bảng cũ chỉ cần xả nốt vài nghìn row chưa gửi rồi bỏ</td><td>Cần một giai đoạn relay đọc cả hai bảng</td></tr>
+<tr><td>D. Đổi bảng cũ sang partition theo ngày</td><td>Dọn bằng drop partition, rất rẻ</td><td>Đổi bảng có sẵn sang partition phải dựng lại cả bảng; khoá chính phải chứa cột partition</td></tr>
+<tr><td>E. Thêm relay</td><td>Không</td><td>Làm tranh chấp khoá tệ hơn</td></tr>
+<tr><td>F. Nhận lô bằng lease, không giữ khoá khi gửi</td><td>Transaction ngắn; không giữ khoá trong 2,5 giây</td><td>Thêm cột <code>claimed_by</code>, <code>claimed_until</code></td></tr>
+<tr><td>G. Chuyển sang CDC</td><td>Hết polling</td><td>Dự án lớn; không cứu được giờ cao điểm tuần này</td></tr>
+</tbody></table></div>
+<h4 class="ah">4. Đánh đổi và quyết định</h4>
+<p>Điểm mấu chốt: 99,9% bảng là rác. Đừng tốn công dựng index hay xoá từng row cho dữ liệu sắp bỏ. Chuyển sang bảng mới, rồi bỏ bảng cũ.</p>
+<ol class="list">
+<li><strong>Cứu ngay trong ngày, không đổi schema:</strong> thêm điều kiện <code>created_at &gt; NOW() - INTERVAL 1 DAY</code> vào câu polling, để MySQL đi theo index <code>created_at</code> có sẵn và chỉ quét các row gần đây. Xem <code>EXPLAIN</code>; nếu optimizer vẫn quét PRIMARY vì <code>ORDER BY id</code>, thêm <code>FORCE INDEX (created_at)</code>. Trước đó, đếm một lần số row chưa gửi cũ hơn 1 ngày để chắc không bỏ sót. Giảm còn một relay, và gửi theo lô lên broker thay vì từng event.</li>
+<li><strong>Bảng mới <code>outbox_v2</code></strong> có <code>KEY (sent_at, id)</code>. App ghi vào bảng mới (bật cờ). Relay đọc cả hai bảng trong giai đoạn chuyển.</li>
+<li><strong>Xả bảng cũ</strong> bằng index <code>created_at</code> có sẵn, vì các row chưa gửi đều mới: <code>WHERE created_at &gt; NOW() - INTERVAL 1 DAY AND sent_at IS NULL</code>. Khi bảng cũ không còn row chưa gửi, relay thôi đọc nó.</li>
+<li><strong>Bỏ bảng cũ</strong> ngoài giờ cao điểm: <code>RENAME</code> sang tên lưu trữ, giữ vài ngày, rồi <code>DROP</code>.</li>
+<li><strong>Relay mới</strong> dùng F: transaction nhận lô (đặt <code>claimed_until</code>), commit, gửi, rồi đánh dấu đã gửi. Relay chạy ở READ COMMITTED để bớt khoá khoảng trống.</li>
+<li><strong>Job dọn</strong> hằng giờ trên <code>outbox_v2</code>, cùng cảnh báo trên tuổi event và số row.</li>
+</ol>
+<p>Khi nào đổi ý: nếu không thể sửa code ghi trong tuần này, làm A trước (online) như giải pháp tạm. D đáng làm khi thiết kế bảng mới từ đầu, không đáng khi phải dựng lại 80 triệu row.</p>
+<h4 class="ah">5. Triển khai</h4>
+<pre><code>CREATE TABLE outbox_v2 (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  aggregatetype VARCHAR(64) NOT NULL, aggregateid VARCHAR(64) NOT NULL,
+  type VARCHAR(64) NOT NULL, payload JSON NOT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  claimed_by VARCHAR(64) NULL, claimed_until DATETIME(3) NULL,
+  sent_at DATETIME(3) NULL,
+  KEY idx_unsent (sent_at, id)
+);
+
+-- relay, READ COMMITTED
+UPDATE outbox_v2 SET claimed_by = :me, claimed_until = NOW(3) + INTERVAL 30 SECOND
+ WHERE sent_at IS NULL AND (claimed_until IS NULL OR claimed_until &lt; NOW(3))
+ ORDER BY id LIMIT 500;                              -- autocommit: khoá chỉ trong câu này
+SELECT * FROM outbox_v2 WHERE claimed_by = :me AND sent_at IS NULL ORDER BY id;
+-- gửi cả lô lên broker
+UPDATE outbox_v2 SET sent_at = NOW(3) WHERE claimed_by = :me AND sent_at IS NULL;</code></pre>
+<p>Relay chết sau khi nhận lô: sau 30 giây lease hết hạn, relay khác nhận lại và gửi lại. Đây vẫn là at-least-once như trước.</p>
+<h4 class="ah">6. Rủi ro và cách kiểm chứng</h4>
+<ul>
+<li><strong>Mất event lúc chuyển bảng:</strong> bất biến là mọi row ở cả hai bảng cuối cùng đều có <code>sent_at</code>. Kiểm tra bằng số row chưa gửi ở bảng cũ phải về 0 trước khi bỏ nó.</li>
+<li><strong>Đo trước và sau:</strong> <code>rows_examined</code> của câu polling trong <code>performance_schema.events_statements_summary_by_digest</code>; số lần chờ khoá trên outbox; CPU; tuổi event chưa gửi lâu nhất.</li>
+<li><strong>Đường lui:</strong> cờ ghi quay lại bảng cũ; relay cũ vẫn giữ trong code một thời gian.</li>
+<li><strong><code>DROP</code> một bảng lớn</strong> vẫn có thể làm hệ thống khựng; làm ngoài giờ cao điểm và theo dõi.</li>
+</ul>
+<h4 class="ah">7. Lỗi hay gặp với bài này</h4>
+<ul>
+<li>Chạy <code>DELETE FROM outbox WHERE sent_at IS NOT NULL</code> một phát: undo khổng lồ, khoá lâu, replica trễ nhiều giờ.</li>
+<li>Thêm relay khi vấn đề là tranh chấp khoá.</li>
+<li>Tăng kích thước lô, làm transaction giữ khoá lâu hơn.</li>
+<li>Đổi bảng nóng sang partition bằng một câu <code>ALTER</code> giữa giờ làm việc.</li>
+<li>Chỉ thêm index mà vẫn giữ khoá trong lúc gửi lên broker.</li>
+</ul>
+</details>
+</div>
+
+<div class="case" id="c9">
+<h3>C9. Combo vé máy bay và khách sạn: trừ tiền mà không có vé</h3>
+<p class="src">Dựa trên: phần 02–03 của trang này (saga); <a href="../idempotency-retries/index.html">Idempotency và retry</a>.</p>
+<dl>
+<dt>Bối cảnh</dt><dd><p>App du lịch bán combo vé máy bay và khách sạn. Toàn bộ luồng chạy trong một request HTTP:</p>
+<ol class="list">
+<li>Trừ tiền thẻ (capture ngay).</li>
+<li>Gọi API hãng bay để xuất vé. Mất 5–40 giây; đôi khi timeout mà không rõ vé đã xuất chưa.</li>
+<li>Gọi API khách sạn để đặt phòng.</li>
+</ol>
+<p>Bước nào lỗi thì khối <code>catch</code> gọi hoàn tiền. Sự cố: request bị cắt sau 60 giây khi đang chờ hãng bay, khách bị trừ tiền mà không có vé, không có hoàn tiền. Một lần khác, vé đã xuất nhưng khách sạn hết phòng; hệ thống hoàn toàn bộ tiền, nhưng huỷ vé đã xuất tốn phí 500.000 đồng mỗi vé.</p></dd>
+<dt>Yêu cầu</dt><dd>Không có đơn nào bị trừ tiền mà không có kết quả rõ trong 15 phút. Giảm tối đa phí huỷ. Khách luôn thấy đơn đang ở bước nào.</dd>
+<dt>Ràng buộc</dt><dd>Thẻ hỗ trợ authorize (giữ tiền, có thể huỷ) rồi capture. Hãng bay có "giữ chỗ" (miễn phí, tự hết hạn sau 15 phút, huỷ được) và "xuất vé" (không hoàn). Khách sạn huỷ miễn phí trong 24 giờ. Mọi API đều có endpoint tra trạng thái theo mã tham chiếu do mình gửi.</dd>
+<dt>Nhiệm vụ</dt><dd>Thiết kế saga: thứ tự các bước, bước bù trừ, các trạng thái, cách xử lý kết quả không rõ, và chọn điều phối tập trung hay tự phối hợp.</dd>
+</dl>
+<details class="hint"><summary>Gợi ý</summary><ul>
+<li>Xếp các bước theo giá của việc bù trừ. Bước nào không bù được thì nên đứng ở đâu?</li>
+<li>Timeout có phải là thất bại không?</li>
+<li>Process bị kill giữa chừng thì ai nhớ saga đang ở đâu?</li>
+</ul></details>
+<details class="answer"><summary>Xem lời giải</summary>
+<h4 class="ah">1. Làm rõ đề bài</h4>
+<p>Ý tưởng chính: xếp các bước sao cho bước không thể bù trừ (bước "điểm không quay lại", pivot) đứng sau mọi bước có thể bù. Trước pivot, lỗi thì bù trừ. Sau pivot, chỉ đi tiếp, thử lại tới khi xong.</p>
+<ul>
+<li>Authorize giữ tiền được bao lâu? Phụ thuộc ngân hàng, thường vài ngày; giả định đủ cho saga 15 phút.</li>
+<li>Giữ chỗ 15 phút có gia hạn được không? Giả định không; hết hạn thì giữ lại.</li>
+<li>Khách sạn hết phòng thì có phương án thay thế không? Ngoài phạm vi; coi là thất bại.</li>
+</ul>
+<h4 class="ah">2. Ước lượng</h4>
+<ul>
+<li>Ngân sách thời gian: giữ chỗ 15 phút phải bao trọn authorize (2–5 giây), đặt phòng (2–10 giây), xuất vé (5–40 giây). Đủ rộng, kể cả vài lần thử lại.</li>
+<li>Giá của sai lầm: xuất vé rồi mới thất bại tốn 500.000 đồng; capture rồi hoàn tiền tốn phí thẻ và làm khách khó chịu; huỷ authorize và huỷ giữ chỗ gần như không tốn gì.</li>
+<li>Request 60 giây không chứa nổi một bước có thể mất 40 giây cộng thử lại. Saga phải chạy nền, request chỉ trả <code>202 Accepted</code>.</li>
+</ul>
+<h4 class="ah">3. Các phương án</h4>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>A. Giữ thứ tự hiện tại, chỉ chạy nền</td><td>Ít thay đổi</td><td>Bước không bù được (capture, xuất vé) vẫn đứng trước</td></tr>
+<tr><td>B. Giữ trước, chốt sau: authorize → giữ chỗ → đặt phòng → xuất vé → capture</td><td>Mọi lỗi trước khi xuất vé đều bù miễn phí</td><td>Nhiều bước và trạng thái hơn</td></tr>
+<tr><td>C. Điều phối tập trung (bảng trạng thái saga và một worker)</td><td>Một nơi biết cả quy trình; dễ theo dõi saga kẹt</td><td>Điều phối phụ thuộc mọi service</td></tr>
+<tr><td>D. Tự phối hợp bằng event</td><td>Service độc lập hơn</td><td>Quy trình 5 bước có timeout rải khắp nơi; khó biết một đơn đang kẹt ở đâu</td></tr>
+<tr><td>E. Coi timeout là thất bại và bù ngay</td><td>Đơn giản</td><td>Nếu thật ra đã thành công, bù sai: huỷ giữ chỗ của vé đã xuất, hoặc hoàn tiền cho đơn đã có vé</td></tr>
+</tbody></table></div>
+<h4 class="ah">4. Đánh đổi và quyết định</h4>
+<p>Chọn B với C. Xử lý timeout bằng trạng thái "không rõ" và tra lại, không bằng bù trừ (loại E).</p>
+<ul>
+<li>Pivot là "xuất vé". Mọi thứ trước đó đều huỷ miễn phí. Capture đứng sau pivot và là bước đi tiếp: thử lại tới khi xong.</li>
+<li>Điều phối tập trung, vì quy trình có thứ tự chặt, có hạn giờ (giữ chỗ 15 phút), và cần trả lời "đơn này đang ở đâu".</li>
+<li>Mỗi lệnh gửi ra ngoài mang mã tham chiếu <code>saga_id:bước</code>, dùng làm idempotency key nếu bên kia hỗ trợ, và làm khoá để tra trạng thái nếu không.</li>
+</ul>
+<p>Khi nào đổi ý: nếu hãng bay không có giữ chỗ, xuất vé phải là bước cuối cùng sau mọi thứ khác, kể cả capture được bảo đảm bằng authorize. Nếu số bước ít (2) và không có hạn giờ, tự phối hợp bằng event là đủ.</p>
+<h4 class="ah">5. Triển khai</h4>
+<div class="tablewrap"><table>
+<thead><tr><th>Bước</th><th>Lệnh</th><th>Bù trừ</th><th>Khi không rõ kết quả</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>Authorize thẻ</td><td>Huỷ authorize</td><td>Tra theo mã; không rõ quá 2 phút thì huỷ theo mã (idempotent)</td></tr>
+<tr><td>2</td><td>Giữ chỗ máy bay</td><td>Huỷ giữ chỗ</td><td>Tra theo mã; giữ chỗ tự hết hạn sau 15 phút nên an toàn</td></tr>
+<tr><td>3</td><td>Đặt phòng</td><td>Huỷ phòng (miễn phí trong 24 giờ)</td><td>Tra theo mã</td></tr>
+<tr><td>4 (pivot)</td><td>Xuất vé</td><td>Không có: từ đây chỉ đi tiếp</td><td>Tra tới khi rõ; không bao giờ coi là thất bại khi chưa rõ</td></tr>
+<tr><td>5</td><td>Capture thẻ</td><td>Không có</td><td>Thử lại với cùng mã tới khi xong; quá hạn thì chuyển người xử lý</td></tr>
+</tbody></table></div>
+<ul>
+<li><strong>Bảng <code>sagas</code>:</strong> <code>id</code>, <code>state</code> (<code>AUTHORIZING</code>, <code>HOLDING</code>, <code>BOOKING_HOTEL</code>, <code>ISSUING</code>, <code>CAPTURING</code>, <code>CONFIRMED</code>, <code>COMPENSATING</code>, <code>CANCELLED</code>, <code>NEEDS_HUMAN</code>), <code>step_deadline</code>, <code>attempts</code>. Mỗi lần chuyển trạng thái là một câu ghi có điều kiện: <code>UPDATE sagas SET state = 'ISSUING' WHERE id = ? AND state = 'BOOKING_HOTEL'</code>.</li>
+<li><strong>Worker</strong> (BullMQ) xử lý từng bước. Lệnh gửi ra ngoài đi qua outbox, để "chuyển trạng thái" và "gửi lệnh" không thành ghi đôi.</li>
+<li><strong>Khách sạn hết phòng:</strong> chuyển <code>COMPENSATING</code>, huỷ giữ chỗ, huỷ authorize, rồi <code>CANCELLED</code>. Khách không mất đồng nào, không có vé bị huỷ.</li>
+<li><strong>Xuất vé timeout:</strong> giữ ở <code>ISSUING</code> và tra mỗi 30 giây. Đã xuất thì sang <code>CAPTURING</code>. Chưa xuất và giữ chỗ còn hạn thì thử xuất lại cùng mã. Giữ chỗ hết hạn thì bù trừ.</li>
+<li><strong>Giao diện</strong> đọc <code>state</code> và hiện "Đang giữ chỗ", "Đang xuất vé", "Đã huỷ, tiền không bị trừ".</li>
+</ul>
+<h4 class="ah">6. Rủi ro và cách kiểm chứng</h4>
+<ul>
+<li><strong>Bù trừ thất bại</strong> (API huỷ lỗi): thử lại có backoff; quá giới hạn thì <code>NEEDS_HUMAN</code> và cảnh báo.</li>
+<li><strong>Authorize hết hạn</strong> trước khi capture: hiếm với saga 15 phút, nhưng phải có cảnh báo.</li>
+<li><strong>Metric:</strong> số saga theo trạng thái và tuổi; số lần vào <code>NEEDS_HUMAN</code>; tổng phí huỷ vé mỗi tháng (mục tiêu gần 0).</li>
+<li><strong>Test:</strong> giả lập lỗi và timeout ở từng bước của từng API (fault injection), kể cả "đã làm nhưng trả timeout". Giết worker ở mọi trạng thái. Trạng thái cuối phải luôn đúng và không bao giờ có tiền bị capture khi chưa có vé.</li>
+</ul>
+<h4 class="ah">7. Lỗi hay gặp với bài này</h4>
+<ul>
+<li>Dùng <code>try/catch</code> trong một request làm saga: process chết là quên mọi thứ.</li>
+<li>Đặt bước không hoàn được (capture, xuất vé) lên đầu.</li>
+<li>Coi timeout là thất bại và bù trừ ngay.</li>
+<li>Bước bù trừ không idempotent, nên khi thử lại thì hoàn tiền hai lần.</li>
+<li>Không lưu trạng thái saga vào database.</li>
+</ul>
+</details>
+</div>
+</section>
+
+<!-- 10 -->
+<section id="s10">
+<header><span class="num">10</span><h2>Câu hỏi còn mở</h2></header>
+<p class="prose">Số thứ tự trùng với Open questions trong <code>.claude/docs/LEARNING_LOG.md</code>. Log là bản gốc.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>#</th><th>Câu hỏi</th><th>Trạng thái</th></tr></thead>
+<tbody>
+<tr><td>25</td><td>Relay chạy <code>FOR UPDATE SKIP LOCKED</code> trên <code>WHERE sent_at IS NULL ORDER BY id</code>, dưới REPEATABLE READ: nó đặt gap lock và next-key lock nào trên <code>idx_unsent</code>, và có chặn các <code>INSERT</code> mới vào outbox không? Có nên chạy relay ở READ COMMITTED?</td><td>Mở. Đọc <code>data_locks</code> trong E31.</td></tr>
+<tr><td>26</td><td>Với binlog ROW và <code>binlog_row_image = FULL</code>, mỗi event outbox payload 2KB thêm bao nhiêu byte binlog, và chèn rồi xoá ngay trong cùng transaction thì gấp đôi không?</td><td>Mở. Đo bằng kích thước binlog trước và sau 10.000 event.</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- 11 -->
+<section id="s11">
+<header><span class="num">11</span><h2>Tài liệu tham khảo</h2></header>
+<div class="prose"><ul>
+<li>MySQL 8.4, <a href="https://dev.mysql.com/doc/refman/8.4/en/replication-options-binary-log.html">Binary Logging Options and Variables</a>: binlog bật mặc định, <code>binlog_format</code> mặc định ROW và đã deprecated</li>
+<li>MySQL 8.4, <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-locking-reads.html">Locking Reads</a>: <code>SKIP LOCKED</code>; <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-auto-increment-handling.html">AUTO_INCREMENT Handling in InnoDB</a>: id cấp lúc chèn</li>
+<li>Debezium, <a href="https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html">Outbox Event Router</a>: cột mặc định, định tuyến theo <code>aggregatetype</code>, bỏ qua <code>DELETE</code>, dùng id để loại trùng</li>
+<li>Chris Richardson, microservices.io: các mẫu Transactional outbox, Polling publisher, Transaction log tailing, Saga</li>
+<li>Hector Garcia-Molina, Kenneth Salem, <em>Sagas</em>, SIGMOD 1987</li>
+<li>Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, chương 11 (change data capture)</li>
+</ul></div>
+<h3>Mức kiểm chứng</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>Khẳng định</th><th>Nguồn</th></tr></thead>
+<tbody>
+<tr><td>Binlog bật mặc định, ROW mặc định, <code>binlog_format</code> deprecated trên 8.4</td><td>manual 8.4</td></tr>
+<tr><td>Debezium outbox: cột mặc định, topic <code>outbox.event.&lt;aggregatetype&gt;</code>, bỏ qua DELETE</td><td>tài liệu Debezium</td></tr>
+<tr><td>Id AUTO_INCREMENT được cấp lúc chèn, nên thứ tự id khác thứ tự commit</td><td>suy ra từ manual (auto-increment, consistent read); chưa tái hiện (E31)</td></tr>
+<tr><td>Bảng lỗi của ghi đôi phần 01</td><td>mô hình; chưa đo (E30)</td></tr>
+<tr><td>Độ trễ polling khoảng nửa chu kỳ; tải khi rảnh</td><td>mô hình; chưa đo (E32)</td></tr>
+<tr><td>Saga, bù trừ, không có isolation</td><td>đọc tài liệu; mức khái niệm</td></tr>
+</tbody></table></div>
+</section>
+</main>
+
+</div>
+
+<script>
+const DEFS=`<defs><marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>`;
+function B(x,y,w,h,cls,t,sub){
+  const tx=x+w/2;
+  return `<g class="n ${cls||''}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="5"/>`+
+  `<text class="tb" x="${tx}" y="${y+(sub?h/2-8:h/2)}" text-anchor="middle" dominant-baseline="central">${t}</text>`+
+  (sub?`<text class="ts" x="${tx}" y="${y+h/2+10}" text-anchor="middle" dominant-baseline="central">${sub}</text>`:'')+`</g>`;
+}
+const A=(d,cls)=>`<path d="${d}" class="edge ${cls||''}" marker-end="url(#arw)"/>`;
+const T=(x,y,t,anchor,cls)=>`<text class="${cls||'lbl'}" x="${x}" y="${y}" text-anchor="${anchor||'start'}">${t}</text>`;
+const $=id=>document.getElementById(id);
+const fmt=n=>(Math.round(n*10)/10).toLocaleString('vi-VN');
+function stepper(id,{title,vb,draw,extra,legend}){
+  const el=$(id);
+  el.innerHTML=`<div class="ph"><strong>${title}</strong><span class="meta"></span></div><div class="bd">${extra||''}
+  <h4 class="st-t"></h4><svg viewBox="${vb}" role="img"></svg>
+  <div class="desc" aria-live="polite"><div class="st-d"></div><pre hidden></pre></div>
+  <div class="nav"><button data-d="-1">Trước</button><button data-d="1" class="primary">Tiếp</button></div>${legend||''}</div>`;
+  const svg=el.querySelector('svg'),t=el.querySelector('.st-t'),d=el.querySelector('.st-d'),pre=el.querySelector('pre'),meta=el.querySelector('.meta');
+  const [pv,nx]=el.querySelectorAll('.nav button');let i=0,steps=[];
+  function render(){const s=steps[i];svg.innerHTML=DEFS+draw(s,i);svg.setAttribute('aria-label',s.t);t.textContent=s.t;d.textContent=s.d;
+    pre.hidden=!s.c;pre.textContent=s.c||'';meta.textContent=`bước ${i+1} / ${steps.length}`;pv.disabled=i===0;nx.disabled=i===steps.length-1;}
+  const go=k=>{i=Math.max(0,Math.min(steps.length-1,i+k));render();};
+  pv.onclick=()=>go(-1);nx.onclick=()=>go(1);
+  el.tabIndex=0;el.addEventListener('keydown',e=>{if(e.target.closest('select,input'))return;if(e.key==='ArrowRight')go(1);if(e.key==='ArrowLeft')go(-1);});
+  return {set(s){steps=s;i=0;render();}};
+}
+
+/* ---------- 01: dual-write matrix ---------- */
+// each design is a list of ops; a failure turns one op into an error or kills the process after an op
+const DW={
+  dbFirst:{name:'Commit đơn, rồi gửi broker',ops:['commit','publish']},
+  pubFirst:{name:'Gửi broker, rồi commit đơn',ops:['publish','commit']},
+  inTx:{name:'Gửi broker bên trong transaction',ops:['insert','publish','commit']},
+  outbox:{name:'Outbox: đơn và event cùng commit',ops:['commitOutbox']}
+};
+const FAIL=[{k:'crash',n:'Process chết giữa hai bước'},{k:'broker',n:'Broker không nhận'},{k:'commit',n:'COMMIT thất bại'}];
+function runDW(dk,fk){
+  const ops=DW[dk].ops;let order=false,inflight=false,event=0,outbox=false;const L=[];
+  // crash point: after the first op that touches an outside system or commits
+  const crashAfter=dk==='inTx'?1:0;
+  for(let i=0;i<ops.length;i++){
+    const op=ops[i];
+    if(op==='insert'){inflight=true;L.push('BEGIN; INSERT đơn (chưa commit)');}
+    if(op==='publish'){
+      if(fk==='broker'){L.push('gửi broker → lỗi');
+        if(inflight){L.push('ROLLBACK, trả lỗi cho client');inflight=false;}else L.push('trả lỗi cho client');break;}
+      event++;L.push('gửi broker → broker đã nhận event');}
+    if(op==='commit'){
+      if(fk==='commit'){L.push('COMMIT → lỗi (mất kết nối, deadlock)');inflight=false;L.push('đơn không được lưu, trả lỗi cho client');break;}
+      order=true;inflight=false;L.push('COMMIT đơn');}
+    if(op==='commitOutbox'){
+      if(fk==='commit'){L.push('BEGIN; INSERT đơn; INSERT outbox; COMMIT → lỗi');L.push('không có đơn, không có event trong outbox');break;}
+      order=true;outbox=true;L.push('BEGIN; INSERT đơn; INSERT outbox; COMMIT');}
+    if(fk==='crash'&&i===crashAfter){L.push('✗ process chết');if(inflight){L.push('transaction chưa commit tự rollback');inflight=false;}break;}
+  }
+  if(dk==='outbox'&&outbox){
+    L.push('— relay (tiến trình riêng) —');
+    if(fk==='broker'){L.push('relay gửi → lỗi; event vẫn trong outbox');L.push('relay thử lại sau 500 ms → broker nhận');}
+    else L.push('relay đọc outbox, gửi → broker nhận');
+    event++;L.push('relay đánh dấu đã gửi');
+  }
+  const kind=order===(event>0)?'ok':(order?'lost':'ghost');
+  L.push(`Kết quả: đơn ${order?'có':'không có'}, event ${event?'có':'không có'}.`);
+  return {kind,L,order,event};
+}
+let dwSel={d:'dbFirst',f:'crash'};
+const KTXT={ok:'khớp',lost:'mất event',ghost:'event ma'};
+function dwBuild(){
+  let h='<thead><tr><th>Cách làm</th>'+FAIL.map(f=>`<th>${f.n}</th>`).join('')+'</tr></thead><tbody>',bad=0;
+  for(const [dk,D] of Object.entries(DW)){h+=`<tr><td>${D.name}</td>`;
+    for(const f of FAIL){const r=runDW(dk,f.k);if(r.kind!=='ok')bad++;
+      h+=`<td><button class="${r.kind}" data-d="${dk}" data-f="${f.k}" aria-pressed="false">${KTXT[r.kind]}</button></td>`;}
+    h+='</tr>';}
+  $('dwTable').innerHTML=h+'</tbody>';
+  $('dwTable').querySelectorAll('button').forEach(b=>b.onclick=()=>{dwSel={d:b.dataset.d,f:b.dataset.f};dwShow();});
+  $('dwMeta').textContent=`${bad} / 12 ô lệch`;
+}
+function dwShow(){
+  $('dwTable').querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.d===dwSel.d&&b.dataset.f===dwSel.f));
+  const r=runDW(dwSel.d,dwSel.f);$('dwTrace').textContent=r.L.join('\n');
+  $('dwDesc').textContent={
+    dbFirst:'Đơn được commit trước. Mọi lỗi xảy ra sau commit (process chết, broker không nhận) để lại một đơn mà không ai được báo. Thử lại trong code request không cứu được trường hợp process chết.',
+    pubFirst:'Event đi trước. Mọi lỗi làm đơn không được lưu sau đó để lại một event cho đơn không tồn tại. Consumer sẽ giữ hàng, gửi email cho một đơn ma.',
+    inTx:'Gửi trong transaction trông có vẻ an toàn, nhưng broker không tham gia transaction. Nếu transaction rollback vì process chết hay COMMIT lỗi, event đã gửi vẫn ở đó.',
+    outbox:'Đơn và event là hai row trong một transaction: cùng có hoặc cùng không. Relay chuyển event lên broker sau, thử lại tới khi được. Event có thể tới trễ và có thể tới hai lần, nhưng không mất và không có event ma.'
+  }[dwSel.d];
+}
+dwBuild();dwShow();
+
+/* ---------- 02: high-water-mark gap stepper ---------- */
+const gapW=stepper('gapStep',{title:'Relay theo con trỏ id bỏ sót một event',vb:'0 0 680 210',
+  legend:`<div class="legend"><span><i class="lg-dim"></i>đã chèn, chưa commit (relay không thấy)</span><span><i class="lg-row"></i>đã commit, chưa gửi</span><span><i class="lg-path"></i>đã gửi</span><span><i class="lg-miss"></i>bị bỏ sót vĩnh viễn</span><span><i class="lg-key"></i>con trỏ của relay</span></div>`,
+  draw:(s)=>{
+    let g=T(20,24,'bảng outbox (theo id)','start','tb');
+    const ids=[40,41,42,43];
+    ids.forEach((id,k)=>{const st=s.r[id];if(!st)return;const x=20+k*120;
+      g+=B(x,40,108,58,st,`id ${id}`,{dim:'chưa commit',row:'chưa gửi',path:'đã gửi',miss:'bỏ sót'}[st]+(s.who&&s.who[id]?` · ${s.who[id]}`:''));});
+    if(s.cur){const cx=20+ids.indexOf(s.cur)*120+54;
+      g+=`<line class="cur" x1="${cx}" y1="106" x2="${cx}" y2="126"/>`+T(cx,142,`last_id = ${s.cur}`,'middle','tm');}
+    g+=B(520,108,140,46,'struct','Relay',s.rel||'nghỉ');
+    if(s.q)g+=T(20,190,s.q,'start','tm');
+    return g;}});
+gapW.set([
+ {t:'Trạng thái ban đầu',d:'Relay đã gửi tới id 40 và nhớ last_id = 40. Lần polling sau nó sẽ đọc các row có id > 40.',r:{40:'path'},cur:40},
+ {t:'T1 chèn event, lấy id 41',d:'Transaction T1 tạo một đơn và chèn event vào outbox. InnoDB cấp id 41 ngay lúc INSERT. T1 còn phải làm thêm vài việc nên chưa commit.',r:{40:'path',41:'dim'},who:{41:'T1'},cur:40},
+ {t:'T2 chèn event id 42 và commit',d:'Transaction T2 bắt đầu sau T1 nhưng ngắn hơn. Nó chèn event, nhận id 42, rồi commit ngay.',r:{40:'path',41:'dim',42:'row'},who:{41:'T1',42:'T2'},cur:40},
+ {t:'Relay đọc id > 40',d:'Relay chạy câu polling. Row 41 chưa commit nên câu đọc của relay không thấy nó. Relay chỉ thấy 42.',r:{40:'path',41:'dim',42:'row'},who:{41:'T1',42:'T2'},cur:40,rel:'đọc id > 40',q:'SELECT … FROM outbox WHERE id > 40 ORDER BY id;   -- trả về: 42'},
+ {t:'Relay gửi 42 và dời con trỏ',d:'Relay gửi event 42 lên broker, rồi đặt last_id = 42. Theo con trỏ, mọi thứ tới 42 đã xong.',r:{40:'path',41:'dim',42:'path'},who:{41:'T1'},cur:42,rel:'last_id = 42'},
+ {t:'T1 commit',d:'Giờ T1 mới commit. Row 41 đã hiện ra, chờ được gửi. Nhưng nó nằm sau con trỏ.',r:{40:'path',41:'row',42:'path'},cur:42},
+ {t:'Event 41 bị bỏ sót mãi mãi',d:'Mọi lần polling sau đều đọc id > 42. Row 41 không bao giờ được đọc. Đơn của T1 tồn tại mà không service nào được báo. Không có lỗi nào xuất hiện ở đâu.',r:{40:'path',41:'miss',42:'path',43:'row'},cur:42,rel:'đọc id > 42',q:'SELECT … FROM outbox WHERE id > 42 ORDER BY id;   -- 43, 44, … không bao giờ 41'},
+ {t:'Cách sửa: đọc theo trạng thái',d:'Relay đọc mọi row chưa gửi, không nhớ con trỏ: WHERE sent_at IS NULL. Row 41 chưa gửi thì lần polling nào cũng thấy nó, dù nó commit muộn tới đâu. Một index trên (sent_at, id) giữ câu này nhanh.',r:{40:'path',41:'row',42:'path',43:'row'},cur:null,rel:'đọc chưa gửi',q:'SELECT … FROM outbox WHERE sent_at IS NULL ORDER BY id LIMIT 100;   -- 41, 43'}
+]);
+
+/* ---------- 02: polling calculator ---------- */
+function pl(){
+  const num=(id,a,b,d)=>{let v=parseFloat($(id).value);return isNaN(v)?d:Math.max(a,Math.min(b,v));};
+  const I=num('plI',10,60000,500),Bt=Math.round(num('plB',1,5000,100)),P=num('plP',1,5000,20),lam=num('plL',0,100000,300),R=Math.round(num('plR',1,16,1));
+  // relay cycle: sleep I, then drain the backlog in batches of B (P ms each) without sleeping while batches are full
+  const lamR=lam/R, maxRate=R*Bt/P*1000, ok=lamR<Bt/P*1000;
+  let C=I+P,n=1;
+  if(ok){for(let k=0;k<50;k++){n=Math.max(1,Math.ceil(lamR*C/1000/Bt));C=I+n*P;}}
+  const perCycle=lamR*C/1000, lat=ok?C/2+P:Infinity, idleQps=R*1000/I;
+  const W=470,x0=140,mx=Math.max(lam,maxRate)*1.05||1;
+  const bar=(y,v,cls,label)=>{const w=Math.max(2,v/mx*W);return `<g class="n ${cls}"><rect x="${x0}" y="${y}" width="${w}" height="24" rx="3"/></g>`+T(x0+w+6,y+17,fmt(v),'start','tm');};
+  let g=T(10,34,'Event mới / giây','start','t')+bar(20,lam,ok?'row':'miss');
+  g+=T(10,80,'Relay gửi tối đa','start','t')+bar(66,maxRate,'path');
+  $('plSvg').innerHTML=g;
+  $('plStats').innerHTML=[['Độ trễ thêm trung bình',ok?fmt(lat)+' ms':'tăng mãi',ok?'':'bad'],['Truy vấn polling / giây khi rảnh',fmt(idleQps),''],['Event mỗi lần relay thức dậy',fmt(perCycle),''],['Relay theo kịp',ok?'có':'không',ok?'good':'bad']]
+    .map(([k,v,c])=>`<div class="stat"><span>${k}</span><b${c?` class="${c}"`:''}>${v}</b></div>`).join('');
+  $('plDesc').textContent=ok?`Mỗi relay nghỉ ${fmt(I)} ms, thức dậy thấy khoảng ${fmt(perCycle)} event, gửi chúng trong ${n} lô rồi nghỉ tiếp. Một vòng mất khoảng ${fmt(C)} ms. Event tới ở thời điểm ngẫu nhiên trong vòng, nên chờ trung bình nửa vòng cộng thời gian gửi. Giảm chu kỳ nghỉ thì giảm độ trễ, nhưng database nhận thêm truy vấn kể cả khi không có event.`
+    :`Event mới tới nhanh hơn relay gửi được (${fmt(maxRate)} mỗi giây). Bảng outbox dài ra, độ trễ tăng không giới hạn. Tăng kích thước lô, thêm relay (với SKIP LOCKED), hoặc chuyển sang CDC.`;
+  $('plMeta').textContent=`${R} relay`;
+}
+['plI','plB','plP','plL','plR'].forEach(id=>$(id).addEventListener('input',pl));pl();
+
+/* ---------- 02: saga stepper ---------- */
+const SAGA=[{k:'order',n:'Tạo đơn',svc:'Đơn hàng',fwd:'đơn PENDING',comp:'huỷ đơn',compS:'CANCELLED'},
+  {k:'pay',n:'Trừ tiền',svc:'Thanh toán',fwd:'đã trừ 500k',comp:'hoàn tiền',compS:'đã hoàn 500k'},
+  {k:'stock',n:'Giữ hàng',svc:'Kho',fwd:'đã giữ 2 món',comp:'nhả hàng',compS:'đã nhả'},
+  {k:'ship',n:'Tạo vận đơn',svc:'Giao hàng',fwd:'vận đơn tạo',comp:'',compS:''}];
+function sagaSteps(fail){
+  const st=SAGA.map(()=>({c:'dim',s:'chưa chạy'}));const S=[];
+  const snap=(t,d,c,ar)=>S.push({t,d,c,st:st.map(x=>({...x})),ar});
+  snap('Bắt đầu saga','Khách đặt hàng. Điều phối saga ghi trạng thái "bước 1" vào bảng của nó, rồi gửi lệnh cho từng service qua outbox. Mỗi bước là một transaction cục bộ trong database của service đó.');
+  const fi=SAGA.findIndex(x=>x.k===fail);
+  for(let i=0;i<SAGA.length;i++){
+    if(i===fi){st[i]={c:'miss',s:'thất bại'};snap(`${SAGA[i].n} thất bại`,`${SAGA[i].svc} không làm được bước này (ví dụ hết hàng). Transaction cục bộ của nó rollback, nên bước này không cần bù. Nhưng các bước trước đã commit và không thể rollback.`,'',i);break;}
+    st[i]={c:'row',s:SAGA[i].fwd};
+    snap(`${SAGA[i].n}`,`${SAGA[i].svc} nhận lệnh, làm trong một transaction cục bộ và commit. Kết quả này người khác thấy được ngay: đó là lý do saga không có isolation.`+(i===0?' Đơn ở trạng thái PENDING để khách biết là chưa xong.':''),'',i);
+  }
+  if(fi<0){snap('Saga hoàn tất','Mọi bước thành công. Điều phối chuyển đơn sang CONFIRMED.','');return S;}
+  for(let j=fi-1;j>=0;j--){
+    st[j]={c:'hot',s:SAGA[j].compS};
+    snap(`Bù trừ: ${SAGA[j].comp}`,`Điều phối gửi lệnh "${SAGA[j].comp}" cho ${SAGA[j].svc}. Đây là một nghiệp vụ mới, không phải rollback: ví dụ hoàn tiền tạo một giao dịch hoàn tiền riêng. Lệnh này phải idempotent và được thử lại tới khi xong.`,'',j);
+  }
+  snap('Saga kết thúc bằng bù trừ',`Hệ thống về trạng thái hợp lý: đơn CANCELLED, tiền đã hoàn, không có gì bị giữ. Nhưng lịch sử vẫn còn: khách thấy một lần trừ và một lần hoàn.`,'');
+  return S;
+}
+const sagaW=stepper('saga',{title:'Saga đặt hàng với điều phối tập trung',vb:'0 0 680 160',
+  extra:`<div class="calc"><label>Bước thất bại<select id="sgF"><option value="none">Không bước nào</option><option value="pay">Trừ tiền</option><option value="stock" selected>Giữ hàng</option><option value="ship">Tạo vận đơn</option></select></label></div>`,
+  legend:`<div class="legend"><span><i class="lg-row"></i>đã commit</span><span><i class="lg-miss"></i>thất bại, đã rollback cục bộ</span><span><i class="lg-hot"></i>đã bù trừ</span><span><i class="lg-dim"></i>chưa chạy</span></div>`,
+  draw:(s)=>{let g=B(250,4,180,34,'struct','Điều phối saga','');
+    s.st.forEach((x,i)=>{const X=10+i*168;g+=B(X,70,156,56,x.c,SAGA[i].svc,x.s);
+      if(s.ar===i)g+=A(`M340 38 L${X+78} 68`,x.c==='hot'?'hot':(x.c==='miss'?'miss':'path'));});
+    return g;}});
+function sagaSet(){sagaW.set(sagaSteps($('sgF').value));}
+$('sgF').addEventListener('change',sagaSet);sagaSet();
+</script>
+</body>
+</html>
