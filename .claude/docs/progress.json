@@ -245,6 +245,13 @@
   "sessions": [
     {
       "date": "2026-10-20",
+      "title": "Caching and invalidation",
+      "artifact": "../topics/caching-invalidation/index.html",
+      "planned": false,
+      "feeds": "Month 3"
+    },
+    {
+      "date": "2026-10-20",
       "title": "Capacity estimation",
       "artifact": "../topics/capacity-estimation/index.html",
       "planned": false,
@@ -370,6 +377,12 @@
       "date": "2026-10-20",
       "work": "Capacity estimation (QPS, storage, latency numbers, Little's law, utilization and queueing) — documentation only, written ahead of Month 5; no measurements",
       "artifact": "topics/capacity-estimation",
+      "feeds": "Month 5"
+    },
+    {
+      "date": "2026-10-20",
+      "work": "Caching and invalidation (cache patterns, write-path races, version/lease, stampede, jitter, hit ratio, Redis eviction) — documentation only, written ahead of Month 5; no measurements",
+      "artifact": "topics/caching-invalidation",
       "feeds": "Month 5"
     }
   ],
@@ -774,10 +787,38 @@
         "provisional": true,
         "evidence": "same, §02–§03",
         "date": "2026-10-20"
+      },
+      {
+        "topic": "Cache patterns (cache-aside, read-through, write-through, write-behind) and the cost of each",
+        "level": 2,
+        "provisional": true,
+        "evidence": "caching-invalidation §02",
+        "date": "2026-10-20"
+      },
+      {
+        "topic": "Write-path races (set after write, delete before write, write then delete, version/lease, double delete) and stale fills from replicas",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §01–§03",
+        "date": "2026-10-20"
+      },
+      {
+        "topic": "Cache stampede and mass expiry: single flight, stale-while-revalidate, XFetch, TTL jitter",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §02",
+        "date": "2026-10-20"
+      },
+      {
+        "topic": "Hit ratio vs database load; Redis eviction policies and maxmemory",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §02",
+        "date": "2026-10-20"
       }
     ],
     "levels": {
-      "2": 52,
+      "2": 56,
       "1": 2
     }
   }
