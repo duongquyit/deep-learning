@@ -574,7 +574,7 @@ await queue.add('import', { importId }, {
   PRIMARY KEY (file_id, line_no), KEY idx_ref (ref)
 );
 CREATE TABLE reconciliation_results (
-  file_id BIGINT, line_no INT, transaction_id BIGINT NULL, status ENUM('matched','unmatched','amount_mismatch'),
+  file_id BIGINT, line_no INT, transaction_id BIGINT NULL, status ENUM('matched','unmatched','amount_mismatch','duplicate_ref'),
   PRIMARY KEY (file_id, line_no),
   UNIQUE KEY uq_txn (transaction_id)        -- một giao dịch chỉ khớp một dòng
 );
@@ -586,11 +586,13 @@ SELECT b.file_id, b.line_no, t.id,
   FROM bank_lines b LEFT JOIN transactions t ON t.ref = b.ref
  WHERE b.file_id = ? AND b.line_no BETWEEN ? AND ?
 ON DUPLICATE KEY UPDATE status = status;          -- chạy lại: giữ nguyên row đã có
+-- (khoảng dòng đã loại các mã trùng, xem đoạn dưới)
 
 UPDATE transactions t JOIN reconciliation_results r ON r.transaction_id = t.id
    SET t.recon_status = 'matched'
  WHERE r.file_id = ? AND r.line_no BETWEEN ? AND ? AND r.status = 'matched'
    AND t.recon_status = 'pending';                 -- có điều kiện: chạy lại không đổi gì</code></pre>
+<p><strong>Cẩn thận với <code>ON DUPLICATE KEY UPDATE</code>:</strong> nó bắt trùng trên <em>mọi</em> khoá unique, kể cả <code>uq_txn</code>. Nếu hai dòng sao kê có cùng mã tham chiếu (ngân hàng gửi trùng, hai ngân hàng cùng mã, hoặc giao dịch đã khớp ở đêm trước), dòng sau đụng <code>uq_txn</code>. Câu lệnh khi đó sửa row của dòng trước, còn dòng sau không có kết quả nào, và không có lỗi nào báo ra. Vì vậy, trước bước so khớp, đánh dấu <code>duplicate_ref</code> cho các mã xuất hiện hơn một lần trong file hoặc đã có trong <code>reconciliation_results</code>, để kế toán xem tay, và loại chúng khỏi câu so khớp.</p>
 <ul>
 <li><strong>Worker:</strong> đọc file bằng stream parser và <code>await</code> giữa các lô, để event loop không bị chặn. Việc so khớp nằm trong SQL, nên Node gần như không tốn CPU.</li>
 <li><strong>Deploy:</strong> job con ngắn, nên <code>worker.close()</code> đợi xong trong vài giây.</li>
@@ -598,7 +600,7 @@ UPDATE transactions t JOIN reconciliation_results r ON r.transaction_id = t.id
 </ul>
 <h4 class="ah">6. Rủi ro và cách kiểm chứng</h4>
 <ul>
-<li><strong>Bất biến:</strong> mỗi file, số dòng bằng tổng <code>matched</code>, <code>unmatched</code>, <code>amount_mismatch</code>. Khoá <code>uq_txn</code> chặn một giao dịch khớp hai lần ngay ở database.</li>
+<li><strong>Bất biến:</strong> mỗi file, số dòng bằng tổng <code>matched</code>, <code>unmatched</code>, <code>amount_mismatch</code>, <code>duplicate_ref</code>. Đây là lưới bắt lỗi ở đoạn trên: một dòng mất kết quả sẽ làm hai số lệch nhau. Khoá <code>uq_txn</code> bảo đảm một giao dịch không khớp với hai dòng.</li>
 <li><strong>Tranh khoá với app:</strong> <code>UPDATE … JOIN</code> theo khoảng 20.000 dòng chỉ chạm các giao dịch khớp, ban đêm ít ai sửa chúng. Vẫn theo dõi <code>Innodb_row_lock_waits</code>.</li>
 <li><strong>Replica trễ</strong> vì ghi dồn: giới hạn số job con chạy cùng lúc, và tạm dừng khi <code>Seconds_Behind_Source</code> vượt ngưỡng.</li>
 <li><strong>Diễn tập:</strong> chạy trên bản sao dữ liệu thật; giết worker ngẫu nhiên 3 lần; kết quả phải giống hệt lần chạy không có sự cố.</li>
@@ -610,6 +612,7 @@ UPDATE transactions t JOIN reconciliation_results r ON r.transaction_id = t.id
 <li>Xử lý từng dòng với autocommit.</li>
 <li>Đọc cả file 600 MB vào bộ nhớ và parse đồng bộ.</li>
 <li>Câu cập nhật trạng thái không có điều kiện, nên chạy lại là ghi trùng.</li>
+<li>Dùng <code>ON DUPLICATE KEY UPDATE</code> trên bảng có hơn một khoá unique mà không nghĩ tới khoá thứ hai.</li>
 <li>Chạy quá nhiều job con cùng lúc, làm database của app chậm theo.</li>
 </ul>
 </details>
@@ -663,11 +666,12 @@ UPDATE transactions t JOIN reconciliation_results r ON r.transaction_id = t.id
   PRIMARY KEY (campaign_id, user_id), KEY idx_status (campaign_id, status)
 );</code></pre>
 <ol class="list">
-<li><strong>Bắt đầu:</strong> <code>queue.add('campaign-runner', { campaignId }, { jobId: `campaign:${id}` })</code>. <code>jobId</code> cố định nên không có hai runner cho một chiến dịch.</li>
+<li><strong>Bắt đầu:</strong> <code>queue.add('campaign-runner', { campaignId }, { jobId: `campaign-${id}`, removeOnComplete: true, removeOnFail: true })</code>. Trong lúc runner còn trong Redis, thêm lại cùng <code>jobId</code> sẽ bị bỏ qua, nên không có hai runner cho một chiến dịch. Runner kết thúc thì job bị xoá, nên lúc tiếp tục thêm lại được. <code>jobId</code> không được chứa dấu <code>:</code>; bản 6.3.17 báo lỗi <code>Custom Id cannot contain :</code>.</li>
 <li><strong>Mỗi vòng</strong> (mỗi giây): nếu <code>campaigns.status = 'paused'</code> thì kết thúc job. Nếu không, lấy 100 người <code>pending</code>, loại những ai có trong bảng huỷ đăng ký (đánh dấu <code>skipped</code>), đánh dấu số còn lại là <code>sending</code>, commit.</li>
 <li>Gửi một lệnh tới nhà cung cấp. Thành công: <code>sent</code>. Timeout: <code>unknown</code>, không gửi lại. <code>429</code>: chờ theo <code>Retry-After</code>, đưa nhóm này về <code>pending</code> (chắc chắn chưa gửi), giảm nhịp.</li>
 <li><strong>Tiếp tục:</strong> đặt <code>status = 'running'</code> và thêm lại job runner. Runner đi tiếp từ các row <code>pending</code>.</li>
 <li><strong>Runner chết:</strong> row ở <code>sending</code> quá 2 phút được chuyển thành <code>unknown</code>, không gửi lại.</li>
+<li><strong>Deploy:</strong> runner chạy cả tiếng, nên <code>worker.close()</code> sẽ đợi rất lâu. Runner kiểm tra cờ "đang tắt" sau mỗi vòng; có cờ thì kết thúc job. Một job lặp mỗi phút thêm runner cho chiến dịch nào đang <code>running</code> mà chưa có runner; thêm trùng thì BullMQ bỏ qua. Job này cũng đưa runner trở lại sau khi nó chết.</li>
 </ol>
 <p>Runner chủ yếu chờ mạng và chờ nhịp, nên không chặn event loop. Mỗi vòng ngắn hơn nhiều so với 30 giây lock.</p>
 <h4 class="ah">6. Rủi ro và cách kiểm chứng</h4>
@@ -713,8 +717,8 @@ UPDATE transactions t JOIN reconciliation_results r ON r.transaction_id = t.id
 <h4 class="ah">2. Ước lượng</h4>
 <ul>
 <li>CPU cần ở đỉnh: 6 đơn mỗi giây × 5,5 giây CPU ≈ 33 vCPU.</li>
-<li>Cụm hiện có: 3 pod × 2 vCPU = 6 vCPU, mà còn làm việc khác.</li>
-<li>Trong 30 phút đỉnh, hàng chờ tăng khoảng (33 − 6) × 1.800 ≈ 48.600 giây CPU việc tồn, tức hàng nghìn PDF. Không cách sắp xếp nào trong worker cứu được: đây là bài toán dung lượng, không chỉ là bài toán stalled.</li>
+<li>Cụm hiện có: 3 pod × 2 vCPU = 6 vCPU, mà còn làm việc khác. Tệ hơn: mỗi pod chạy một process Node, và code đồng bộ chỉ chạy trên một luồng, nên PDF thực tế chỉ dùng được khoảng 3 vCPU. Sandboxed processor chạy PDF trong process con, nhờ đó mới dùng được cả 2 vCPU mỗi pod.</li>
+<li>Trong 30 phút đỉnh, hàng chờ tăng khoảng (33 − 3) × 1.800 ≈ 54.000 giây CPU việc tồn, tức gần 10.000 PDF. Không cách sắp xếp nào trong worker cứu được: đây là bài toán dung lượng, không chỉ là bài toán stalled.</li>
 </ul>
 <h4 class="ah">3. Các phương án</h4>
 <div class="tablewrap"><table>
@@ -735,9 +739,9 @@ UPDATE transactions t JOIN reconciliation_results r ON r.transaction_id = t.id
 </ul>
 <h4 class="ah">5. Triển khai</h4>
 <ol class="list">
-<li><code>orders-post-process</code> chỉ còn việc nhẹ: cộng điểm, rồi thêm job <code>invoice-pdf</code> với <code>jobId: invoice:${orderId}</code>.</li>
+<li><code>orders-post-process</code> chỉ còn việc nhẹ: cộng điểm, rồi thêm job <code>invoice-pdf</code> với <code>jobId: invoice-${orderId}</code> (không dùng dấu <code>:</code>, như ở C11).</li>
 <li>Cộng điểm idempotent: <code>INSERT INTO loyalty_ledger (order_id, kind, points) VALUES (?, 'purchase', ?)</code> với <code>UNIQUE (order_id, kind)</code>, cùng transaction với <code>UPDATE users SET points = points + ?</code>. Lỗi 1062 nghĩa là đã cộng rồi.</li>
-<li><code>invoice-pdf</code>: sandboxed processor, mỗi pod concurrency bằng số vCPU; tạo PDF, lưu vào object storage, rồi thêm job <code>invoice-email</code> với <code>jobId: invoice-email:${orderId}</code>.</li>
+<li><code>invoice-pdf</code>: sandboxed processor, mỗi pod concurrency bằng số vCPU; tạo PDF, lưu vào object storage, rồi thêm job <code>invoice-email</code> với <code>jobId: invoice-email-${orderId}</code>.</li>
 <li>Gửi email idempotent: bảng <code>sent_emails (order_id, kind)</code> với <code>UNIQUE</code>, ghi trước khi gọi nhà cung cấp, vì với hoá đơn, mất một email ít hại hơn gửi trùng (khách tải lại được trong trang đơn hàng).</li>
 <li>Đo độ trễ event loop bằng <code>monitorEventLoopDelay</code> ở cả hai loại worker, cảnh báo khi p99 vượt 1 giây.</li>
 </ol>
