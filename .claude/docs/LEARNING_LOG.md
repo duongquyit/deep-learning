@@ -47,6 +47,10 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 | Index Condition Pushdown, `Using index condition` vs `Using where` | 2 (prov.) | same, §04 | 2026-10-19 | Exercise E10: `Handler_read_next` and page reads with ICP on and off |
 | Optimizer estimates: index dives, cardinality, histograms, why an index is skipped | 2 (prov.) | same, §05 | 2026-10-19 | Exercise E12: find the range→ALL threshold on the lab and check whether the choice was right by latency |
 | Reading MySQL `EXPLAIN` / `EXPLAIN ANALYZE` (`type`, `key_len`, `rows`, `filtered`, `Extra`) | 2 (prov.) | same, §06 | 2026-10-19 | Read plans for queries I did not write, including a join, and explain every estimate-vs-actual gap |
+| Write cost per statement: which trees an INSERT / UPDATE / DELETE touches, delete-mark + insert on secondary keys | 2 (prov.) | [index-write-cost](../topics/index-write-cost/index.html) §01–§02 | 2026-10-19 | Exercise E13: insert time and size with 0, 2, 5, 8 secondary indexes, explained tree by tree |
+| Page fill under sequential vs random inserts, page merge and `MERGE_THRESHOLD` | 2 (prov.) | same, §02 | 2026-10-19 | Exercises E8 and E15: rows per leaf for each PK type; merge counters and file size after a large delete |
+| Change buffer (what it defers, which indexes, 8.4 default `none`) | 2 (prov.) | same, §02 | 2026-10-19 | Exercise E14: insert time and buffer-pool reads with change buffering `all` vs `none` |
+| PK choice and its effect on every index (BIGINT, UUIDv4 text/binary, UUIDv7) | 2 (prov.) | same, §02 | 2026-10-19 | Exercises E5 and E8, then justify a PK choice for a real table at work with numbers |
 
 "(prov.)" = provisional. Every row above rests on one artifact I wrote myself, with no measurement behind it. Week 1 of Month 1 includes a baseline assessment (TECHNICAL_GROWTH.md Section 11) that should confirm or cut these.
 
@@ -55,7 +59,7 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 1. **The research is PostgreSQL-shaped; the program is MySQL 8.4.** Heap, TID/`ctid`, `VACUUM`, visibility map, clock-sweep, `INCLUDE`, HOT, `fillfactor`, 8KB pages — all PostgreSQL. ROADMAP.md Month 1 and TECHNICAL_GROWTH.md Track A commit to MySQL 8.4/InnoDB, where the equivalents are different in kind, not just in name: rows live in the clustered index leaf, secondary index leaves hold the PK, old versions go to the undo log, pages are 16KB, and there is no Index Only Scan / visibility map at all. The contrast boxes in the page flag this but do not resolve it. *2026-10-19: the clustered-vs-secondary page is the first one built InnoDB-first with PostgreSQL as the comparison. That is a step toward the second option, not a decision; nothing has been run on MySQL yet.* **Decide in Week 1:** either redo the mechanism sections against InnoDB, or keep PostgreSQL deliberately as the comparison exercise Track A allows and make MySQL the primary. Do not leave both half-learned.
 2. Does a `LIMIT 20` actually stop the index scan early, or does the plan materialise more rows first? The §07 trace assumes early exit.
 3. The §07 numbers (50M rows, ~6.5GB table, ~1.6GB index, 24 page accesses) are estimates, not measurements. Which of them survive contact with a real table?
-4. InnoDB change buffer and adaptive hash index were named but not explained. When does each actually help, and when does it hurt?
+4. InnoDB change buffer and adaptive hash index were named but not explained. When does each actually help, and when does it hurt? *Partly answered 2026-10-19 by the index-write-cost page: what the change buffer defers, that it never applies to PRIMARY or unique indexes, and that 8.4 turned it off by default (`innodb_change_buffering = none`, with adaptive hash index also off). No measurement yet (E14); adaptive hash index still not covered.*
 5. The B+tree playground splits at 3 keys per node for visibility. Does anything in my mental model secretly depend on that small fan-out rather than the real ~400?
 6. The clustered-vs-secondary size calculator assumes ~69% leaf fill and a 5-byte InnoDB record header, and ignores the page directory. How far off is it on a real table (E5)?
 7. The page states that InnoDB's extra cost on a secondary-index lookup is mostly buffer-pool hits (CPU and latches), not I/O. At what hit ratio does that stop being true?
@@ -63,6 +67,9 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 9. The sandbox optimizer gave up `idx_total` at about 10% of the table *by estimate*, when only about 5% of rows matched (range estimates were roughly 2× too high). Was full scan actually faster at that point? Needs latency on both sides of the threshold (E12).
 10. MySQL printed `Using index condition` for `user_id = 42 AND status = 'paid'` on `(user_id, status, created_at)`, where both conditions are already satisfied by the `ref` key. Why is the ENUM equality kept as a pushed condition?
 11. The 8.4 manual (Range Optimization) says that after a range operator on a key part the optimizer "considers no more key parts", yet the 8.0.46 sandbox printed `key_len = 5` and an interval `(41 <= user_id <= 43 AND status = 'paid')` with `used_key_parts: ["user_id"]`. Which describes 8.4, and does the extra key part in the interval ever narrow the scan beyond the edges? E9 checks it.
+12. With UUIDv7 generated on several app servers whose clocks differ by a few milliseconds, do PRIMARY pages still end up as full as with AUTO_INCREMENT? A variant of E8 would show it.
+13. Does InnoDB's "split at the insertion point" heuristic still fire when several sessions insert interleaved AUTO_INCREMENT values into the same last page?
+14. On 8.4 with change buffering off, how much slower do inserts get once the secondary indexes outgrow the buffer pool? E14.
 
 ## Pending verification (from the session's own exercise list)
 
@@ -81,8 +88,42 @@ These are written in the page as exercises; none have been run yet.
 - **E10** — ICP on vs off for `user_id BETWEEN 41 AND 43 AND status = 'paid'`: `Handler_read_next` and `./lab.sh reads`; repeat with a wide range.
 - **E11** — `(user_id, status, created_at)` vs `(user_id, created_at, status)` for an equality + range + `ORDER BY … DESC LIMIT 20` query, with a normal user and a 2,000-order user.
 - **E12** — The range→ALL threshold for `total > X` on the lab, latency on both sides with and without `FORCE INDEX`; histogram on a non-indexed column and its effect on `filtered`.
+- **E13** — Insert 1M rows into copies of `orders` with 0, 2, 5 and 8 secondary indexes; insert time and per-index size, compared with the size calculator on the index-write-cost page.
+- **E14** — Change buffering `all` vs `none` with a 128MB buffer pool and indexes far larger than it: insert time, `Innodb_buffer_pool_reads`, `ibuf_merges`, and who pays for the merge.
+- **E15** — Delete 60% of a 5M-row table: merge counters, `n_leaf_pages` and `.ibd` size before, after purge, after `OPTIMIZE TABLE`.
+- **Q17–Q22** — The six recall questions in section 08 of the index-write-cost page.
 - **Q11–Q16** — The six recall questions in section 08 of the composite-index page (answers are on the page, hidden).
 - **Q1–Q5** — The five check questions at the end of the page (leftmost prefix, `COUNT(*)` and the visibility map, full scan polluting the cache, TOAST, a `sessions` table updated 5,000×/sec). Answer in writing before looking anything up, then verify.
+
+---
+
+## 2026-10-19 — Index write cost (InnoDB)
+
+**Topic and objective.** Month 1 Week 3 topic, written ahead as documentation only (labs come later): what each index costs on the write path. Which trees an `INSERT`, `UPDATE` or `DELETE` touches and how; page split and page fill under sequential vs random keys; page merge; the change buffer and its 8.4 default; PK choice (BIGINT, UUIDv4 as text or binary, UUIDv7) and its effect on every secondary index.
+
+**Output.** [topics/index-write-cost/index.html](../topics/index-write-cost/index.html) — an interactive page in the fixed 10-section structure. Widgets: a statement-by-index-set explorer (7 statements × 0/2/5/8 secondary indexes, showing for each tree whether it gets an insert, an in-place update or a delete-mark plus insert), a leaf-split simulator with 8-key pages in three key orders (ascending, near-ascending UUIDv7, random UUIDv4), a 7-step change-buffer stepper (off vs on, merge on read), and a size calculator by PK type and index count. Prediction templates for E13–E15 under `lab/mysql/experiments/`.
+
+**What it covers.**
+
+- Every `INSERT` adds one entry to every tree. An `UPDATE` rewrites PRIMARY in place when the row does not grow, and touches a secondary index only when one of its columns changes; then it delete-marks the old entry and inserts a new one. Changing the PK rewrites every secondary index. `DELETE` delete-marks everywhere; purge removes later.
+- Unique indexes (PRIMARY included) must read the leaf to check for duplicates before inserting, so they can never defer the read.
+- The 8.4 manual: sequential inserts leave pages about 15/16 full, random inserts 1/2 to 15/16; 1/16 is reserved for updates. Each secondary index has its own insert order, so an AUTO_INCREMENT PK does not make `idx_user_id` sequential.
+- `MERGE_THRESHOLD` (default 50) and merge-split churn; freed pages return to the tablespace, not to the OS.
+- Change buffer: defers insert, delete-mark and purge on non-unique secondary leaves that are not in the buffer pool; merged on read, in the background and at slow shutdown. **8.4 changed the default of `innodb_change_buffering` from `all` to `none`.**
+- PK choice: bytes copied into every secondary entry and insert order into PRIMARY. MySQL has no UUIDv7 function; `UUID_TO_BIN(UUID(), 1)` makes v1 time-ordered.
+- Comparison with PostgreSQL's heap and with LSM trees.
+
+**Initial understanding.** TODO — what did I believe about index write cost before this page? No prior belief was stated; the page was requested as part of building Phase 1 documentation ahead of the labs.
+
+**Mistakes and misconceptions corrected.** TODO — only I know which. Traps the page writes down: counting bytes changed instead of indexes containing the changed column; assuming a sequential PK makes every index sequential; assuming the change buffer still hides secondary-index reads on 8.4; expecting a large delete to shrink the file.
+
+**Experiments and results.** None. The split simulator and the size calculator are models built from the manual, labelled as such on the page. E8 (already scripted), E13, E14 and E15 are what would turn them into measurements.
+
+**Competency level.** Level 2 provisional on four new matrix rows. Nothing above 2 until E8 and E13–E15 run.
+
+**Remaining questions.** Open questions 4 (partly answered), 12, 13 and 14.
+
+**Next step.** Continue Phase 1 documentation: buffer pool, redo and undo, which the write-cost page leans on for "dirty page" and "redo". In the lab phase: script E13–E15 in `lab.sh` and run them together with E8 in Week 3.
 
 ---
 

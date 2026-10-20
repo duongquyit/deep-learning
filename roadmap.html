@@ -596,7 +596,7 @@ footer.page-foot a{color:var(--text-1)}
         },
         {
           "n": 3,
-          "status": " ",
+          "status": "~",
           "start": "2026-11-02",
           "end": "2026-11-08",
           "title": "Writes: index maintenance on insert/update/delete, page splits, change buffer, sequential vs random primary keys (auto-increment vs UUIDv4 vs UUIDv7), measuring insert throughput and storage with 0, 2, 5, and 8 secondary indexes."
@@ -810,6 +810,13 @@ footer.page-foot a{color:var(--text-1)}
   "sessions": [
     {
       "date": "2026-10-19",
+      "title": "Index write cost (InnoDB)",
+      "artifact": "../topics/index-write-cost/index.html",
+      "planned": true,
+      "feeds": ""
+    },
+    {
+      "date": "2026-10-19",
       "title": "Composite index and query plans (MySQL)",
       "artifact": "../topics/composite-index-query-plan/index.html",
       "planned": true,
@@ -1001,10 +1008,38 @@ footer.page-foot a{color:var(--text-1)}
         "provisional": true,
         "evidence": "same, §06",
         "date": "2026-10-19"
+      },
+      {
+        "topic": "Write cost per statement: which trees an INSERT / UPDATE / DELETE touches, delete-mark + insert on secondary keys",
+        "level": 2,
+        "provisional": true,
+        "evidence": "index-write-cost §01–§02",
+        "date": "2026-10-19"
+      },
+      {
+        "topic": "Page fill under sequential vs random inserts, page merge and MERGE_THRESHOLD",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §02",
+        "date": "2026-10-19"
+      },
+      {
+        "topic": "Change buffer (what it defers, which indexes, 8.4 default none)",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §02",
+        "date": "2026-10-19"
+      },
+      {
+        "topic": "PK choice and its effect on every index (BIGINT, UUIDv4 text/binary, UUIDv7)",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §02",
+        "date": "2026-10-19"
       }
     ],
     "levels": {
-      "2": 18,
+      "2": 22,
       "1": 1
     }
   }
