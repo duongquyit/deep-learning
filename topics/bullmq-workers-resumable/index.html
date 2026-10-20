@@ -1,0 +1,744 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>BullMQ và batch chạy tiếp được</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F2F4F6; --surface:#FFFFFF; --ink:#18203A; --ink-2:#56607A; --ink-3:#8A93A8;
+  --rule:#CCD3DD; --rule-strong:#8C96AB;
+  --struct:#3446B8; --struct-bg:#E6E9FA;            /* cấu trúc index, chrome của trang */
+  --row:#16795F;    --row-bg:#DDF2EA;               /* dữ liệu row thật */
+  --hot:#9A5F00;    --hot-bg:#FCEFD2; --hot-line:#E3A21A;  /* bị ghi, bị chạm, bị lọc */
+  --miss:#B5302B;   --miss-bg:#FBE1DF;              /* đọc từ disk, việc thừa, lỗi */
+  --path:#0B7A8A;   --path-bg:#D8F1F3;              /* đường đi hoặc khoảng đang đọc */
+  --key:#A8327A;    --key-bg:#F8E0EE;               /* con trỏ: PK, TID */
+  --ram:#5B4BB0;    --ram-bg:#E7E3FA;               /* hit trong buffer pool */
+  --grid:rgba(52,70,184,.06);
+  --r-s:4px; --r-m:8px;
+  --sans:"Instrument Sans",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --paper:#0F1320; --surface:#171C2B; --ink:#E6E9F2; --ink-2:#A3ABC0; --ink-3:#6E7790;
+  --rule:#2C3448; --rule-strong:#55607A;
+  --struct:#97A3FF; --struct-bg:#232A55;
+  --row:#5FD0AE;    --row-bg:#123A31;
+  --hot:#F2BE5C;    --hot-bg:#3B2C0E; --hot-line:#E3A21A;
+  --miss:#FF8A84;   --miss-bg:#3E1A1A;
+  --path:#5ED3E0;   --path-bg:#113A40;
+  --key:#F28DC4;    --key-bg:#3E1A2E;
+  --ram:#B7A8FF;    --ram-bg:#2A2350;
+  --grid:rgba(151,163,255,.05);
+}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important;animation:none!important}}
+body{margin:0;color:var(--ink);font:400 17px/1.65 var(--sans);
+  background-color:var(--paper);
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:24px 24px}
+a{color:var(--struct)}
+:focus-visible{outline:2px solid var(--struct);outline-offset:2px}
+
+/* layout */
+.shell{display:grid;grid-template-columns:230px minmax(0,1fr);gap:56px;max-width:1180px;margin:0 auto;padding:0 32px}
+nav.toc{position:sticky;top:0;align-self:start;height:100vh;padding:48px 0;overflow:auto}
+nav.toc p{font-weight:600;margin:0 0 12px;font-size:15px}
+nav.toc ol,.mobile-toc ol{list-style:none;margin:0;padding:0;counter-reset:s}
+nav.toc li,.mobile-toc li{counter-increment:s;margin:0}
+nav.toc a,.mobile-toc a{display:grid;grid-template-columns:28px 1fr;padding:5px 0;color:var(--ink-2);text-decoration:none;font-size:14.5px;line-height:1.4}
+nav.toc a::before,.mobile-toc a::before{content:counter(s,decimal-leading-zero);font:500 12px/1.9 var(--mono);color:var(--ink-3)}
+nav.toc a:hover,nav.toc a.on{color:var(--struct)}
+main{min-width:0;padding:56px 0 120px}
+.prose{max-width:720px}
+section{padding-top:72px}
+section>header{display:grid;grid-template-columns:auto 1fr;gap:0 18px;align-items:baseline;max-width:720px;margin-bottom:12px}
+section>header .num{font:500 15px var(--mono);color:var(--struct);border:1.5px solid var(--struct);border-radius:var(--r-s);padding:2px 7px;transform:translateY(-4px)}
+h1,h2,h3,h4{line-height:1.2;letter-spacing:-.015em;margin:0}
+h1{font-size:clamp(2.3rem,5.4vw,3.9rem);font-weight:700;letter-spacing:-.03em;line-height:1.02;max-width:14ch;margin-bottom:20px}
+.lede{font-size:19px;color:var(--ink-2);max-width:56ch;margin-bottom:28px}
+h2{font-size:clamp(1.6rem,3vw,2.1rem);font-weight:650}
+h3{font-size:1.2rem;font-weight:600;margin:36px 0 8px}
+p{margin:0 0 14px}
+ul,ol.list{margin:0 0 16px;padding-left:22px}
+li{margin:4px 0}
+code{font:0.88em var(--mono);background:var(--struct-bg);color:var(--ink);padding:1px 5px;border-radius:3px}
+pre{font:13.5px/1.6 var(--mono);background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:var(--r-s);padding:14px 16px;overflow-x:auto;margin:0 0 18px;max-width:720px}
+pre code{background:none;padding:0}
+.tablewrap{overflow-x:auto;max-width:720px;margin:0 0 20px}
+table{border-collapse:collapse;width:100%;max-width:720px;margin:0 0 20px;font-size:15px;background:var(--surface)}
+.tablewrap table{margin:0;min-width:560px}
+th,td{text-align:left;padding:9px 12px;border:1px solid var(--rule);vertical-align:top}
+th{font-weight:600;background:var(--struct-bg)}
+
+/* widget frame: styled like a page, header strip = page header */
+.frame{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);margin:22px 0 28px;max-width:920px;overflow:hidden}
+.frame>.ph{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:9px 16px;border-bottom:1px solid var(--rule);background:var(--struct-bg);font-size:14px}
+.frame>.ph strong{font-weight:600}
+.frame>.ph .meta{margin-left:auto;font:500 12.5px var(--mono);color:var(--ink-2)}
+.frame .bd{padding:16px;min-width:0}
+.frame svg{display:block;width:100%;height:auto}
+.st-t{font:600 16px var(--sans);margin:0 0 8px}
+.desc{background:var(--paper);border-radius:var(--r-s);padding:12px 14px;margin-top:12px;min-height:84px;font-size:15.5px;color:var(--ink-2)}
+.desc pre{margin:10px 0 0;font-size:12.5px;border-left-color:var(--rule-strong)}
+.nav{display:flex;gap:8px;margin-top:12px;align-items:center}
+button{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 14px;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--struct);color:var(--struct)}
+button:disabled{opacity:.4;cursor:default}
+button.primary,button[aria-pressed="true"]{background:var(--struct);border-color:var(--struct);color:var(--surface)}
+button.primary:hover:not(:disabled),button[aria-pressed="true"]:hover{color:var(--surface);filter:brightness(1.1)}
+input,select{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 10px}
+input[type=number]{width:84px}
+input[type=range],input[type=checkbox]{accent-color:var(--struct)}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-top:12px}
+.stat{background:var(--paper);border-radius:var(--r-s);padding:8px 12px}
+.stat span{display:block;font-size:13px;color:var(--ink-2)}
+.stat b{font:600 20px var(--sans);font-variant-numeric:tabular-nums}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;color:var(--ink-2);margin-top:12px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:14px;height:14px;border-radius:3px;border:2px solid;display:inline-block}
+.fine{font-size:13.5px;color:var(--ink-2);margin:10px 0 0}  /* chú thích nhỏ dưới widget */
+
+/* svg text */
+.tb{font:600 14px var(--sans)} .t{font:400 13px var(--sans)} .ts{font:400 12px var(--sans)} .tm{font:500 12.5px var(--mono)}
+.lbl{fill:var(--ink-2);font:400 12.5px var(--sans)}
+
+/* callouts */
+.note{border-left:3px solid var(--hot-line);background:var(--hot-bg);padding:12px 16px;border-radius:0 var(--r-s) var(--r-s) 0;margin:18px 0;max-width:720px;font-size:16px}
+.note strong{color:var(--hot)}
+.senior{border:1.5px solid var(--struct);border-radius:var(--r-m);padding:14px 18px;margin:22px 0;max-width:720px;background:var(--surface)}
+.senior h4{font-size:16px;margin-bottom:6px;color:var(--struct)}
+.senior p:last-child,.senior ul:last-child{margin-bottom:0}
+details{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-s);padding:10px 14px;margin:10px 0;max-width:720px}
+details summary{cursor:pointer;font-weight:600}
+details[open] summary{margin-bottom:8px}
+details.answer{background:var(--paper);border-style:dashed;margin:10px 0 0}
+details.answer summary{font-weight:500;color:var(--struct)}
+.tag{display:inline-block;font:500 12px var(--sans);color:var(--ink-2);border:1px solid var(--rule-strong);border-radius:999px;padding:0 8px;margin-right:6px;vertical-align:1px}
+
+/* hero brief: mục tiêu, cần biết trước, trạng thái */
+.brief{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px 24px;background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);padding:14px 18px;max-width:920px;margin:0 0 8px;font-size:15px}
+.brief h4{font-size:14px;color:var(--struct);margin:0 0 4px}
+.brief ul{margin:0;padding-left:18px}
+.brief p{margin:0}
+
+.mobile-toc{display:none}
+@media (max-width:900px){
+  .shell{grid-template-columns:1fr;padding:0 16px;gap:0}
+  nav.toc{display:none}
+  .mobile-toc{display:block;margin-top:20px}
+  main{padding-top:32px}
+  .frame .bd{padding:12px}
+  body{font-size:16px}
+}
+
+
+/* ---- page widgets ---- */
+.n rect{fill:var(--surface);stroke:var(--rule-strong);stroke-width:1}
+.n text{fill:var(--ink)}
+.n.struct rect{fill:var(--struct-bg);stroke:var(--struct)} .n.struct text{fill:var(--struct)}
+.n.row rect{fill:var(--row-bg);stroke:var(--row);stroke-width:1.6} .n.row text{fill:var(--row)}
+.n.hot rect{fill:var(--hot-bg);stroke:var(--hot);stroke-width:2} .n.hot text{fill:var(--hot)}
+.n.miss rect{fill:var(--miss-bg);stroke:var(--miss);stroke-width:2} .n.miss text{fill:var(--miss)}
+.n.path rect{fill:var(--path-bg);stroke:var(--path);stroke-width:2.4} .n.path text{fill:var(--path)}
+.n.key rect{fill:var(--key-bg);stroke:var(--key);stroke-width:2} .n.key text{fill:var(--key)}
+.n.dim rect{fill:var(--paper);stroke:var(--rule)} .n.dim text{fill:var(--ink-3)}
+.edge{stroke:var(--rule-strong);stroke-width:1.2;fill:none}
+.edge.on{stroke:var(--path);stroke-width:2.6}
+.seg{stroke:none} .seg.run{fill:var(--path)} .seg.block{fill:var(--hot-line)} .seg.lock{fill:var(--key)} .seg.dead{fill:var(--miss)}
+.seg.new{fill:var(--row)} .seg.redo{fill:var(--hot-line)} .seg.lost{fill:var(--miss)}
+.tick{stroke:var(--struct);stroke-width:1.5;stroke-dasharray:3 3}
+.mark{fill:var(--miss)} .mark.ok{fill:var(--row)}
+.axis{stroke:var(--rule-strong);stroke-width:1}
+.lg-run{border-color:var(--path);background:var(--path)} .lg-block{border-color:var(--hot-line);background:var(--hot-line)}
+.lg-lock{border-color:var(--key);background:var(--key)} .lg-dead{border-color:var(--miss);background:var(--miss)}
+.lg-new{border-color:var(--row);background:var(--row)} .lg-tick{border-color:var(--struct);border-style:dashed;background:transparent}
+.lg-path{border-color:var(--path);background:var(--path-bg)} .lg-row{border-color:var(--row);background:var(--row-bg)}
+.lg-miss{border-color:var(--miss);background:var(--miss-bg)} .lg-hot{border-color:var(--hot);background:var(--hot-bg)}
+.calc{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px 14px;margin-bottom:12px}
+.calc label{display:flex;flex-direction:column;gap:4px;font-size:13.5px;color:var(--ink-2)}
+.calc label.chk{flex-direction:row;align-items:center;gap:8px}
+.calc input[type=text]{width:100%}
+.stat b.bad{color:var(--miss)} .stat b.good{color:var(--row)}
+.log{font:12.5px/1.6 var(--mono);background:var(--paper);border-radius:var(--r-s);padding:8px 12px;margin:10px 0 0;min-height:60px;list-style:none}
+.log li{margin:0}
+.btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+</style>
+</head>
+<body>
+
+<div class="shell">
+<nav class="toc" aria-label="Mục lục">
+  <p>BullMQ và batch chạy tiếp được</p>
+  <ol>
+    <li><a href="#s1">Bản chất vấn đề</a></li>
+    <li><a href="#s2">Cơ chế hoạt động</a></li>
+    <li><a href="#s3">Vì sao thiết kế như vậy</a></li>
+    <li><a href="#s4">Ví dụ</a></li>
+    <li><a href="#s5">Thí nghiệm</a></li>
+    <li><a href="#s6">Ảnh hưởng khi chạy production</a></li>
+    <li><a href="#s7">Hiểu lầm thường gặp</a></li>
+    <li><a href="#s8">Câu hỏi ôn tập</a></li>
+    <li><a href="#s9">Câu hỏi còn mở</a></li>
+    <li><a href="#s10">Tài liệu tham khảo</a></li>
+  </ol>
+</nav>
+
+<main>
+<div class="hero">
+<h1>BullMQ worker và batch chạy tiếp được</h1>
+<p class="lede">Nhập một file 200.000 dòng không thể làm trong một request HTTP, nên ta đẩy nó cho worker chạy nền. Worker có thể chết giữa chừng, bị deploy lại, hoặc bận tới mức không kịp báo "tôi còn sống". Bài này đi qua vòng đời của một job trong BullMQ, vì sao một job có thể bị chạy hai lần cùng lúc, và cách chia việc thành từng lô có checkpoint để chạy lại từ chỗ dừng thay vì từ đầu.</p>
+<div class="brief">
+  <div><h4>Mục tiêu</h4><ul>
+    <li>Kể được các trạng thái của một job BullMQ và điều gì chuyển job giữa chúng: hoàn tất, lỗi còn lượt thử, hết lượt, worker chết.</li>
+    <li>Giải thích được lock và kiểm tra stalled job, và dự đoán khi nào một job bị worker khác lấy lại trong lúc worker đầu vẫn chạy.</li>
+    <li>Thiết kế được một batch chạy tiếp được: chia lô, checkpoint đặt ở đâu, và vì sao mỗi lô vẫn phải idempotent.</li>
+    <li>Cấu hình được worker cho production: concurrency, việc nặng CPU, tắt êm khi deploy, Redis không được xoá key.</li>
+  </ul></div>
+  <div><h4>Cần biết trước</h4><ul>
+    <li><a href="../idempotency-retries/index.html">Idempotency và retry</a>: at-least-once, backoff, DLQ.</li>
+    <li><a href="../transactional-outbox/index.html">Transactional outbox</a>: đẩy job từ một transaction mà không ghi đôi.</li>
+  </ul></div>
+  <div><h4>Trạng thái</h4><p>Level 2 (prov.). Các giá trị mặc định và luật chuyển trạng thái đọc từ mã nguồn BullMQ 6.3.17. Widget là mô hình theo các luật đó, chưa đo (E33–E35).</p></div>
+</div>
+<details class="mobile-toc"><summary>Mục lục</summary><ol><li><a href="#s1">Bản chất vấn đề</a></li><li><a href="#s2">Cơ chế hoạt động</a></li><li><a href="#s3">Vì sao thiết kế như vậy</a></li><li><a href="#s4">Ví dụ</a></li><li><a href="#s5">Thí nghiệm</a></li><li><a href="#s6">Ảnh hưởng khi chạy production</a></li><li><a href="#s7">Hiểu lầm thường gặp</a></li><li><a href="#s8">Câu hỏi ôn tập</a></li><li><a href="#s9">Câu hỏi còn mở</a></li><li><a href="#s10">Tài liệu tham khảo</a></li></ol></details>
+</div>
+
+<!-- 1 -->
+<section id="s1">
+<header><span class="num">01</span><h2>Bản chất vấn đề</h2></header>
+<div class="prose">
+<p>Người dùng tải lên file CSV 200.000 dòng giao dịch. Mỗi dòng phải được kiểm tra, chuẩn hoá, loại trùng, rồi ghi vào MySQL và cộng vào số dư. Làm trong request thì quá 30 giây và bị cắt. Nên API chỉ lưu file, tạo một job, và trả <code>202 Accepted</code>. Một worker chạy nền lấy job ra và làm.</p>
+<p>BullMQ là thư viện hàng đợi việc cho Node, lưu job trong Redis. Nó lo việc lưu job, chia job cho các worker, thử lại khi lỗi, và phát hiện worker chết. Nhưng nó không biết job của bạn đang làm tới dòng thứ mấy. Khi một job bị chạy lại, nó chạy lại từ đầu, trừ khi chính code của bạn biết chạy tiếp.</p>
+<p>Mỗi job đi qua một số trạng thái. Hình dung một tiệm sửa xe: xe chờ ở bãi (<code>wait</code>), đang nằm trên cầu nâng (<code>active</code>), hẹn quay lại sau (<code>delayed</code>), giao cho khách (<code>completed</code>), hoặc trả lại vì không sửa được (<code>failed</code>). Bấm các nút dưới đây để đẩy một job đi qua vòng đời của nó, với <code>attempts: 3</code> và <code>maxStalledCount: 1</code>.</p>
+</div>
+<div class="frame" id="life">
+  <div class="ph"><strong>Vòng đời của một job</strong><span class="meta" id="lfMeta"></span></div>
+  <div class="bd">
+    <svg id="lfSvg" viewBox="0 0 680 230" role="img" aria-label="Sơ đồ trạng thái của một job BullMQ, trạng thái hiện tại được tô màu"></svg>
+    <div class="btns" id="lfBtns"></div>
+    <div class="stats" id="lfStats"></div>
+    <ul class="log" id="lfLog" aria-live="polite"></ul>
+    <div class="legend"><span><i class="lg-path"></i>trạng thái hiện tại</span><span><i class="lg-row"></i>xong</span><span><i class="lg-miss"></i>thất bại</span><span><i class="lg-hot"></i>chờ thử lại</span></div>
+    <p class="fine">Luật lấy từ mã nguồn BullMQ 6.3.17: lỗi còn lượt thử thì sang <code>delayed</code> theo backoff; <code>UnrecoverableError</code> thì thất bại ngay; job bị coi là stalled thì quay về <code>wait</code> và tăng bộ đếm stalled, quá <code>maxStalledCount</code> thì thất bại với lý do "job stalled more than allowable limit". Bỏ qua <code>prioritized</code>, <code>waiting-children</code> và <code>paused</code>.</p>
+  </div>
+</div>
+</section>
+
+<!-- 2 -->
+<section id="s2">
+<header><span class="num">02</span><h2>Cơ chế hoạt động</h2></header>
+<div class="prose">
+<h3>Lock và stalled job</h3>
+<p>Ý chính: worker giữ job bằng một lock có hạn 30 giây trong Redis, và tự gia hạn mỗi 15 giây. Nếu lock hết hạn, BullMQ cho rằng worker đã chết và đưa job về hàng chờ cho worker khác. Worker chưa chết mà chỉ bận cũng bị coi như đã chết.</p>
+<p>Khi worker lấy một job, nó đặt key lock của job với thời hạn <code>lockDuration</code> (mặc định 30.000 ms). Một timer gia hạn lock mỗi <code>lockRenewTime</code>, mặc định bằng một nửa <code>lockDuration</code>. Song song, mỗi <code>stalledInterval</code> (mặc định 30.000 ms) một worker chạy kiểm tra stalled job theo hai lượt:</p>
+<ol class="list">
+<li>Mọi job đang <code>active</code> được đưa vào một tập "nghi ngờ".</li>
+<li>Mỗi lần gia hạn lock thành công, job được gỡ khỏi tập này.</li>
+<li>Ở lần kiểm tra sau, job nào vẫn còn trong tập <em>và</em> đã mất lock thì bị coi là stalled: rời <code>active</code>, quay về <code>wait</code>, bộ đếm stalled tăng 1. Vượt <code>maxStalledCount</code> (mặc định 1) thì job thất bại.</li>
+</ol>
+<p>Node chạy JavaScript trên một luồng. Timer gia hạn lock chỉ chạy được khi luồng đó rảnh. Nếu code của job chạy một vòng lặp đồng bộ dài (parse cả file, tính toán nặng), timer bị chặn, lock hết hạn, và job bị đưa cho worker khác trong khi worker đầu vẫn đang chạy nó. Chỉnh thời gian chặn dưới đây để xem.</p>
+</div>
+<div class="frame" id="stall">
+  <div class="ph"><strong>Lock, gia hạn và kiểm tra stalled theo thời gian</strong><span class="meta" id="stMeta"></span></div>
+  <div class="bd">
+    <div class="calc">
+      <label>Job cần chạy (giây)<input id="stD" type="number" min="5" max="200" value="90"></label>
+      <label>Event loop bị chặn từ giây<input id="stB" type="number" min="0" max="200" value="20"></label>
+      <label>Bị chặn trong (giây, 0 = không)<input id="stL" type="number" min="0" max="200" value="40"></label>
+      <label>Worker A chết ở giây (0 = không)<input id="stC" type="number" min="0" max="200" value="0"></label>
+    </div>
+    <svg id="stSvg" viewBox="0 0 680 200" role="img" aria-label="Dòng thời gian của các worker chạy job, lock và các lần kiểm tra stalled"></svg>
+    <div class="stats" id="stStats"></div>
+    <ul class="log" id="stLog" aria-live="polite"></ul>
+    <div class="desc" aria-live="polite" id="stDesc"></div>
+    <div class="legend"><span><i class="lg-run"></i>worker đang chạy job</span><span><i class="lg-block"></i>event loop bị chặn (timer không chạy)</span><span><i class="lg-lock"></i>đang giữ lock</span><span><i class="lg-dead"></i>worker chết</span><span><i class="lg-tick"></i>kiểm tra stalled</span></div>
+    <p class="fine">Mặc định của BullMQ 6.3.17: <code>lockDuration</code> 30 s, gia hạn mỗi 15 s, <code>stalledInterval</code> 30 s, <code>maxStalledCount</code> 1. Lần kiểm tra đầu giả định ở giây 10. Worker lấy lại job chạy cùng code, nên cũng bị chặn ở cùng chỗ. Mô hình; chưa đo (E33).</p>
+  </div>
+</div>
+<div class="note"><strong>Lỗi hay gặp:</strong> tăng <code>lockDuration</code> lên 10 phút để "hết bị stalled". Job không còn bị lấy lại nhầm, nhưng khi worker chết thật, job phải chờ 10 phút mới được chạy lại. Quy tắc: không chặn event loop. Việc nặng CPU chạy trong sandboxed processor (process riêng) hoặc <code>worker_threads</code>; vòng lặp dài thì chia nhỏ và <code>await</code> giữa các lô.</div>
+
+<div class="prose">
+<h3>Checkpoint: chạy tiếp từ chỗ dừng</h3>
+<p>Ý chính: chia việc thành lô, mỗi lô một transaction, và lưu vị trí đã xong (checkpoint) <strong>trong cùng transaction</strong> với dữ liệu của lô. Khi job chạy lại, nó đọc checkpoint và bắt đầu từ đó.</p>
+<p>Không có checkpoint, mỗi lần chạy lại bắt đầu từ dòng 1. Các lô đã commit bị làm lại: tốn thời gian, và tạo dữ liệu trùng nếu câu ghi không idempotent. Có checkpoint mà lưu ở Redis (ví dụ <code>job.updateData({ cursor })</code>) sau khi commit MySQL thì vẫn là hai hệ thống: chết đúng giữa hai việc thì lô cuối bị làm lại. Lưu checkpoint trong bảng MySQL của chính lần nhập, cùng transaction với các dòng, thì không có khoảng hở đó.</p>
+<p>Dù checkpoint đặt đúng chỗ, mỗi dòng vẫn nên có khoá tự nhiên, ví dụ <code>UNIQUE (import_id, row_no)</code>. Đó là lưới an toàn cho mọi lần chạy lại mà ta chưa nghĩ tới. Thử các cách lưu và các điểm chết dưới đây.</p>
+</div>
+<div class="frame" id="ckpt">
+  <div class="ph"><strong>Nhập file có worker chết giữa chừng</strong><span class="meta" id="ckMeta"></span></div>
+  <div class="bd">
+    <div class="calc">
+      <label>Lưu checkpoint<select id="ckS">
+        <option value="none">Không có, chạy lại từ đầu</option>
+        <option value="redis" selected>Redis (updateData) sau khi commit lô</option>
+        <option value="same">MySQL, cùng transaction với lô</option>
+      </select></label>
+      <label>Số dòng<input id="ckN" type="number" min="100" max="1000000" value="10000"></label>
+      <label>Kích thước lô<input id="ckB" type="number" min="1" max="100000" value="500"></label>
+      <label>Worker chết ở dòng (cách nhau bằng dấu phẩy)<input id="ckX" type="text" value="3700, 8200"></label>
+      <label class="chk"><input id="ckG" type="checkbox" checked>Chết ngay sau COMMIT của lô đó, trước khi lưu checkpoint</label>
+      <label class="chk"><input id="ckI" type="checkbox">Mỗi dòng có UNIQUE (import_id, row_no)</label>
+    </div>
+    <svg id="ckSvg" viewBox="0 0 680 140" role="img" aria-label="Các lần chạy của job nhập file: phần làm mới, phần làm lại, phần bị rollback"></svg>
+    <div class="stats" id="ckStats"></div>
+    <div class="desc" aria-live="polite" id="ckDesc"></div>
+    <div class="legend"><span><i class="lg-new"></i>dòng ghi lần đầu</span><span><i class="lg-block"></i>dòng làm lại (đã ghi ở lần trước)</span><span><i class="lg-dead"></i>lô đang làm khi chết, bị rollback</span></div>
+    <p class="fine">Mỗi lô là một transaction. "Chết ở dòng r" nghĩa là worker chết khi đang xử lý lô chứa dòng r (lô đó rollback), hoặc, nếu bật ô thứ nhất, ngay sau khi lô đó commit. Mô hình; chưa đo (E34).</p>
+  </div>
+</div>
+<div class="note"><strong>Lỗi hay gặp:</strong> cộng dồn vào số dư trong từng lô (<code>balance = balance + tổng_lô</code>) rồi tin rằng checkpoint sẽ ngăn cộng hai lần. Checkpoint lưu ở Redis thì lô cuối vẫn có thể bị cộng lại. Quy tắc: thao tác cộng dồn phải nằm cùng transaction với checkpoint, hoặc tính lại từ các dòng đã ghi (<code>SUM</code> theo <code>import_id</code>) thay vì cộng dồn.</div>
+
+<div class="prose">
+<h3>Worker trong production</h3>
+<p>Ý chính: một worker là một process Node; mọi job của nó dùng chung một event loop. Cấu hình worker là cân giữa số job chạy song song, việc nặng CPU, và cách tắt khi deploy.</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Chủ đề</th><th>Cách làm</th><th>Vì sao</th></tr></thead>
+<tbody>
+<tr><td><code>concurrency</code></td><td>Số job một worker chạy song song (mặc định 1). Tăng cho job chờ I/O, giữ thấp cho job nặng CPU</td><td>Các job chung một event loop; một job chặn thì mọi job cùng worker mất lock</td></tr>
+<tr><td>Việc nặng CPU</td><td>Sandboxed processor: truyền đường dẫn file processor, BullMQ chạy nó trong process con</td><td>Event loop của worker chính vẫn rảnh để gia hạn lock</td></tr>
+<tr><td>Tắt khi deploy</td><td>Bắt <code>SIGTERM</code>, gọi <code>worker.close()</code>; nó đợi các job đang chạy xong rồi mới đóng</td><td>Không để job bị cắt giữa chừng rồi chờ kiểm tra stalled</td></tr>
+<tr><td>Thời gian tắt</td><td><code>terminationGracePeriodSeconds</code> của Kubernetes lớn hơn thời gian một lô dài nhất</td><td>Hết thời gian thì process bị <code>SIGKILL</code>, như chết thật</td></tr>
+<tr><td>Lỗi không nên thử lại</td><td>Ném <code>UnrecoverableError</code> (file sai định dạng)</td><td>Job thất bại ngay, không tốn lượt thử</td></tr>
+<tr><td>Redis</td><td><code>maxmemory-policy noeviction</code>, bật AOF</td><td>Redis xoá key khi đầy bộ nhớ sẽ xoá job; BullMQ in cảnh báo khi policy khác <code>noeviction</code></td></tr>
+<tr><td>Dọn job cũ</td><td><code>removeOnComplete</code>, <code>removeOnFail</code> theo số lượng hoặc tuổi</td><td>Redis giữ mọi job tới khi bị xoá; nhưng xoá rồi thì <code>jobId</code> cũ dùng lại được</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- 3 -->
+<section id="s3">
+<header><span class="num">03</span><h2>Vì sao thiết kế như vậy</h2></header>
+<div class="prose">
+<p><strong>Vì sao dùng lock có hạn, không hỏi worker còn sống không?</strong> Hệ thống không phân biệt được worker chết với worker chậm hay bị cắt mạng. Lock có hạn biến câu hỏi đó thành một quy tắc đơn giản: không gia hạn kịp thì mất quyền. Cái giá là đôi khi một worker còn sống mất job, và job chạy ở hai nơi. Vì vậy BullMQ, như mọi hàng đợi, cho at-least-once: job có thể chạy nhiều hơn một lần, và code của job phải chịu được điều đó.</p>
+<p><strong>Vì sao kiểm tra stalled theo hai lượt?</strong> Lượt đầu chỉ đánh dấu, lượt sau mới kết luận. Một job vừa được lấy, hoặc lock vừa được gia hạn, sẽ không bị kết luận nhầm vì một lần kiểm tra rơi đúng lúc. Đổi lại, phát hiện worker chết mất từ một tới hai chu kỳ kiểm tra.</p>
+<p><strong>Vì sao <code>maxStalledCount</code> mặc định là 1?</strong> Một job làm worker chết mỗi lần chạy (hết bộ nhớ, lỗi native) mà được thử lại mãi sẽ lần lượt hạ từng worker. Giới hạn thấp chặn vòng lặp đó; job ra <code>failed</code> để người xem.</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th></th><th>BullMQ (Redis)</th><th>Bảng MySQL làm hàng đợi</th><th>Amazon SQS</th></tr></thead>
+<tbody>
+<tr><td>Giữ job khi đang chạy</td><td>Lock có hạn, gia hạn bằng timer</td><td><code>FOR UPDATE SKIP LOCKED</code> trong transaction, hoặc cột <code>locked_until</code></td><td>Visibility timeout, mặc định 30 giây, gia hạn bằng API</td></tr>
+<tr><td>Phát hiện worker chết</td><td>Kiểm tra stalled định kỳ</td><td>Transaction rollback khi mất kết nối; hoặc hết <code>locked_until</code></td><td>Hết visibility timeout, message hiện lại</td></tr>
+<tr><td>Thử lại, backoff</td><td>Có sẵn</td><td>Tự viết</td><td>Có, qua visibility timeout và redrive</td></tr>
+<tr><td>Ghi job cùng transaction với dữ liệu</td><td>Không; cần outbox</td><td>Có, tự nhiên</td><td>Không; cần outbox</td></tr>
+<tr><td>Thông lượng</td><td>Cao</td><td>Vừa; tốn khoá và index</td><td>Cao</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- 4 -->
+<section id="s4">
+<header><span class="num">04</span><h2>Ví dụ</h2></header>
+<div class="prose"><p>Viết theo API BullMQ 6.x và mysql2; chưa chạy trên lab.</p><h3>Bảng theo dõi lần nhập</h3></div>
+<pre><code>CREATE TABLE imports (
+  id         BIGINT PRIMARY KEY,
+  file_path  VARCHAR(512) NOT NULL,
+  total_rows INT NULL,
+  cursor_row INT NOT NULL DEFAULT 0,          -- checkpoint: số dòng đã commit
+  status     ENUM('queued','running','done','failed') NOT NULL DEFAULT 'queued',
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
+);
+CREATE TABLE import_rows (
+  import_id BIGINT NOT NULL,
+  row_no    INT    NOT NULL,
+  account_id BIGINT NOT NULL,
+  amount    BIGINT NOT NULL,                  -- đơn vị nhỏ nhất
+  PRIMARY KEY (import_id, row_no)             -- lưới an toàn cho mọi lần chạy lại
+);</code></pre>
+
+<div class="prose"><h3>Processor chạy tiếp từ checkpoint</h3></div>
+<pre><code>// processor.ts — chạy trong process con (sandboxed) để không chặn event loop của worker
+export default async function (job: Job&lt;{ importId: number }&gt;) {
+  const { importId } = job.data;
+  const [[imp]] = await pool.query&lt;RowDataPacket[]&gt;('SELECT file_path, cursor_row FROM imports WHERE id = ?', [importId]);
+  const BATCH = 500;
+  let row = imp.cursor_row;                         // chạy lại: bắt đầu từ đây
+  for await (const batch of readCsvBatches(imp.file_path, { skip: row, size: BATCH })) {
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      await conn.query(
+        'INSERT INTO import_rows (import_id, row_no, account_id, amount) VALUES ? ' +
+        'ON DUPLICATE KEY UPDATE row_no = row_no',  // dòng đã có: bỏ qua
+        [batch.map((r, i) =&gt; [importId, row + i + 1, r.accountId, r.amount])]);
+      row += batch.length;
+      await conn.execute('UPDATE imports SET cursor_row = ?, status = ? WHERE id = ?', [row, 'running', importId]);
+      await conn.commit();                          // dòng và checkpoint cùng commit
+    } catch (e) { await conn.rollback(); throw e; } finally { conn.release(); }
+    await job.updateProgress(row);                  // chỉ để hiển thị, không dùng để chạy tiếp
+  }
+  await pool.execute('UPDATE imports SET status = ? WHERE id = ?', ['done', importId]);
+}</code></pre>
+
+<div class="prose"><h3>Worker và tắt êm</h3></div>
+<pre><code>const worker = new Worker('imports', path.join(__dirname, 'processor.js'), {
+  connection, concurrency: 2,
+  // lockDuration 30_000, stalledInterval 30_000, maxStalledCount 1 là mặc định
+});
+worker.on('failed', (job, err) =&gt; log.error({ jobId: job?.id, err }, 'import failed'));
+
+process.on('SIGTERM', async () =&gt; {
+  await worker.close();          // đợi job đang chạy xong lô hiện tại và kết thúc
+  process.exit(0);
+});
+
+// tạo job: jobId theo importId để không tạo hai job cho một lần nhập
+await queue.add('import', { importId }, {
+  jobId: `import-${importId}`, attempts: 5,
+  backoff: { type: 'exponential', delay: 5_000, jitter: 1 },
+  removeOnComplete: { age: 7 * 24 * 3600 }, removeOnFail: { age: 30 * 24 * 3600 },
+});</code></pre>
+<p class="prose">Processor trên vẫn có thể chạy dài hơn thời gian tắt cho phép. Khi đó nên kiểm tra một cờ "đang tắt" giữa các lô, dừng sau lô hiện tại, và để job được chạy lại từ checkpoint.</p>
+</section>
+
+<!-- 5 -->
+<section id="s5">
+<header><span class="num">05</span><h2>Thí nghiệm</h2></header>
+<div class="prose"><p>Chạy với Redis và MySQL 8.4 trong Docker. Viết dự đoán trước. E34 là phép thử "worker bị giết giữa chừng" trong tiêu chí hoàn thành của Month 3.</p></div>
+<details><summary>E33. Chặn event loop và stalled job</summary>
+<p><strong>Câu hỏi.</strong> Job chạy 90 giây, trong đó có một vòng lặp đồng bộ 40 giây bắt đầu ở giây 20. Với hai worker và cấu hình mặc định: có sự kiện <code>stalled</code> không, lúc nào, worker B có lấy job không, phần việc chạy mấy lần, và job kết thúc ở trạng thái nào? Làm lại với processor chạy sandboxed.</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e33/prediction.md</code></p>
+<p><strong>Chạy.</strong> Hai process worker, nghe <code>QueueEvents</code> (<code>stalled</code>, <code>failed</code>, <code>completed</code>), mỗi lần chạy job ghi một dòng vào MySQL.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+<details><summary>E34. Giết worker khi đang nhập file</summary>
+<p><strong>Câu hỏi.</strong> Nhập 200.000 dòng, <code>SIGKILL</code> worker 5 lần ở thời điểm ngẫu nhiên. Với ba cách lưu checkpoint, có bao nhiêu dòng trùng (khi bỏ khoá chính <code>(import_id, row_no)</code>), tổng số dòng đã xử lý và tổng thời gian là bao nhiêu? Kết quả cuối có đúng 200.000 dòng và đúng tổng tiền không?</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e34/prediction.md</code></p>
+<p><strong>Chạy.</strong> Script tạo file, một process worker được giám sát (chết thì chạy lại), một script giết ngẫu nhiên; đối soát bằng <code>COUNT(*)</code> và <code>SUM(amount)</code>.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+<details><summary>E35. Tắt êm khi deploy</summary>
+<p><strong>Câu hỏi.</strong> Gửi <code>SIGTERM</code> khi job đang ở giữa một lô 10 giây. Với <code>worker.close()</code> và không có nó: process thoát sau bao lâu, job ở trạng thái gì, lần chạy sau bắt đầu từ dòng nào?</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e35/prediction.md</code></p>
+<p><strong>Chạy.</strong> Như E34, thay <code>SIGKILL</code> bằng <code>SIGTERM</code>; đo thời gian thoát.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+</section>
+
+<!-- 6 -->
+<section id="s6">
+<header><span class="num">06</span><h2>Ảnh hưởng khi chạy production</h2></header>
+<div class="prose">
+<h3>Khi nào dùng gì</h3>
+<ul>
+<li>Việc dài hơn vài giây, hoặc có thể thất bại và cần thử lại: đưa vào job.</li>
+<li>Tạo job như một hệ quả của thay đổi trong database: qua outbox, hoặc làm cho việc tạo job idempotent bằng <code>jobId</code> và để một job dọn dẹp tìm các bản ghi bị sót.</li>
+<li>Việc lớn: một job có checkpoint trong MySQL. Khi cần song song, chia thành nhiều job theo khoảng dòng, mỗi job có checkpoint riêng.</li>
+<li>Lượng job vừa phải và cần ghi job cùng transaction với dữ liệu: cân nhắc bảng MySQL làm hàng đợi thay vì thêm Redis.</li>
+</ul>
+<h3>Cái giá</h3>
+<ul>
+<li>Thêm Redis phải vận hành: bộ nhớ, persistence, <code>noeviction</code>, sao lưu.</li>
+<li>Mọi job phải chịu được việc chạy lại, kể cả chạy song song với chính nó trong một khoảng ngắn.</li>
+<li>Checkpoint thêm một câu <code>UPDATE</code> mỗi lô; lô nhỏ thì chạy lại ít mà tốn nhiều câu ghi.</li>
+</ul>
+<h3>Nhận ra trên production bằng gì</h3>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Triệu chứng</th><th>Xem ở đâu</th></tr></thead>
+<tbody>
+<tr><td>Job bị chạy hai lần</td><td>Sự kiện <code>stalled</code> trong <code>QueueEvents</code>; log "could not renew lock" hoặc "Missing lock" ở worker; độ trễ event loop (<code>perf_hooks.monitorEventLoopDelay</code>)</td></tr>
+<tr><td>Job thất bại với "job stalled more than allowable limit"</td><td>Job làm worker chết hoặc chặn event loop mỗi lần chạy: bộ nhớ của worker, log OOM, đoạn code đồng bộ dài</td></tr>
+<tr><td>Hàng chờ dài ra</td><td>Số job trong <code>wait</code> và tuổi của job cũ nhất; so tốc độ thêm với tốc độ xong</td></tr>
+<tr><td>Job mất không dấu vết</td><td><code>maxmemory-policy</code> của Redis; <code>evicted_keys</code> trong <code>INFO stats</code></td></tr>
+<tr><td>Nhập file sai tổng</td><td>Đối soát <code>COUNT(*)</code>, <code>SUM(amount)</code> theo <code>import_id</code> với số dòng và tổng trong file</td></tr>
+</tbody></table></div>
+<div class="senior"><h4>Góc nhìn senior: định nghĩa "xong" bằng dữ liệu, không bằng trạng thái job</h4><p>Trạng thái <code>completed</code> trong Redis chỉ nói worker đã trả về không lỗi. Nó không nói dữ liệu đúng. Senior lưu trạng thái của lần nhập trong MySQL (<code>imports.status</code>, <code>cursor_row</code>), đối soát số dòng và tổng tiền với file, và coi job BullMQ chỉ là cơ chế đánh thức worker. Nếu Redis mất sạch, một job dọn dẹp quét <code>imports</code> có <code>status = 'running'</code> mà lâu không cập nhật và tạo lại job; checkpoint giúp nó chạy tiếp đúng chỗ.</p></div>
+<div class="prose">
+<h3>Checklist khi review một worker</h3>
+<ul>
+<li>Job chạy hai lần, hoặc hai bản chạy cùng lúc, thì dữ liệu có sai không?</li>
+<li>Có đoạn code đồng bộ nào chạy lâu hơn vài giây không? Nếu có, đã đưa sang sandboxed processor hoặc chia nhỏ?</li>
+<li>Checkpoint nằm cùng transaction với dữ liệu? <code>updateProgress</code> có bị dùng nhầm làm checkpoint?</li>
+<li>Lỗi nào là <code>UnrecoverableError</code>? <code>attempts</code> và backoff có hợp với loại lỗi?</li>
+<li>Có bắt <code>SIGTERM</code> và gọi <code>worker.close()</code>? Thời gian tắt cho phép có dài hơn một lô?</li>
+<li>Redis có <code>noeviction</code>? Job cũ có được dọn?</li>
+</ul>
+</div>
+</section>
+
+<!-- 7 -->
+<section id="s7">
+<header><span class="num">07</span><h2>Hiểu lầm thường gặp</h2></header>
+<div class="prose"><ul>
+<li><strong>Hiểu lầm:</strong> một job chỉ chạy ở một worker tại một thời điểm. <strong>Vì sao sai:</strong> worker mất lock vì chặn event loop vẫn chạy tiếp, trong khi worker khác đã lấy lại job (<a href="#s2">phần 02</a>). <strong>Quy tắc:</strong> job phải chịu được chạy trùng.</li>
+<li><strong>Hiểu lầm:</strong> stalled nghĩa là worker đã chết. <strong>Vì sao sai:</strong> stalled chỉ nghĩa là lock không được gia hạn kịp. <strong>Quy tắc:</strong> khi thấy stalled, nhìn độ trễ event loop trước.</li>
+<li><strong>Hiểu lầm:</strong> <code>job.updateProgress</code> hoặc <code>job.updateData</code> là checkpoint an toàn. <strong>Vì sao sai:</strong> chúng lưu ở Redis, khác chỗ với dữ liệu; chết giữa hai lần ghi thì lệch. <strong>Quy tắc:</strong> checkpoint nằm cùng transaction với dữ liệu.</li>
+<li><strong>Hiểu lầm:</strong> tăng <code>lockDuration</code> là cách sửa stalled. <strong>Vì sao sai:</strong> nó che triệu chứng và làm chậm việc phát hiện worker chết thật. <strong>Quy tắc:</strong> không chặn event loop.</li>
+<li><strong>Hiểu lầm:</strong> <code>jobId</code> chặn trùng mãi mãi. <strong>Vì sao sai:</strong> nó chỉ chặn khi job cũ còn trong Redis; <code>removeOnComplete</code> xoá rồi thì thêm lại được. <strong>Quy tắc:</strong> chống trùng lâu dài nằm ở database.</li>
+</ul></div>
+</section>
+
+<!-- 8 -->
+<section id="s8">
+<header><span class="num">08</span><h2>Câu hỏi ôn tập</h2></header>
+<p class="prose">Viết ngày 2026-10-20. Đánh số Q59 đến Q64.</p>
+<details><summary><span class="tag">Dự đoán</span>Q59. Ba lần lỗi</summary>
+<p>Job có <code>attempts: 3</code>, backoff luỹ thừa 1 giây. Processor ném lỗi thường ở cả ba lần. Job đi qua những trạng thái nào, chờ bao lâu giữa các lần, và kết thúc ở đâu?</p>
+<details class="answer"><summary>Xem đáp án</summary><p><code>wait</code> → <code>active</code> → lỗi → <code>delayed</code> 1 giây → <code>wait</code> → <code>active</code> → lỗi → <code>delayed</code> 2 giây → <code>wait</code> → <code>active</code> → lỗi → <code>failed</code>. BullMQ tính <code>2^(attemptsMade−1) × delay</code>, nên chờ 1 rồi 2 giây; lần thứ ba hết lượt nên không chờ nữa.</p></details></details>
+<details><summary><span class="tag">Giải thích</span>Q60. Vì sao bị chạy hai lần</summary>
+<p>Một job parse JSON 300MB bằng <code>JSON.parse</code> mất 50 giây. Log cho thấy job "stalled" rồi chạy ở worker khác, trong khi worker đầu vẫn ghi dữ liệu. Giải thích theo lock và kiểm tra stalled.</p>
+<details class="answer"><summary>Xem đáp án</summary><p><code>JSON.parse</code> chặn event loop 50 giây. Timer gia hạn lock không chạy, lock 30 giây hết hạn. Lần kiểm tra stalled thấy job vẫn trong tập nghi ngờ và không còn lock, nên đưa về <code>wait</code>; worker khác lấy và chạy từ đầu. Worker đầu không biết, parse xong và ghi tiếp. Khi nó xong, BullMQ từ chối kết quả vì lock không còn, nhưng dữ liệu đã ghi. Sửa: parse dạng stream, hoặc chạy trong sandboxed processor.</p></details></details>
+<details><summary><span class="tag">Dự đoán</span>Q61. Checkpoint trong Redis</summary>
+<p>Lô 500 dòng. Worker commit lô dòng 3.501–4.000 vào MySQL rồi chết trước <code>job.updateData({ cursor: 4000 })</code>. Lần chạy sau bắt đầu từ đâu, và có gì xảy ra với 500 dòng đó?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Checkpoint trong Redis vẫn là 3.500, nên lần sau làm lại lô 3.501–4.000. Nếu có khoá chính <code>(import_id, row_no)</code> với <code>ON DUPLICATE KEY</code>, các dòng bị bỏ qua và chỉ tốn công. Nếu không có, 500 dòng bị ghi hai lần, và nếu lô có cộng dồn số dư thì số dư sai.</p></details></details>
+<details><summary><span class="tag">Chẩn đoán</span>Q62. Mất job sau khi Redis đầy</summary>
+<p>Một đêm Redis dùng hết bộ nhớ. Sáng ra vài lần nhập kẹt ở "queued" mãi, không có job nào trong BullMQ. Chuyện gì xảy ra, và phòng thế nào?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Redis đang chạy với một <code>maxmemory-policy</code> cho phép xoá key (ví dụ <code>allkeys-lru</code>), nên khi đầy nó xoá cả key của job. Phòng: đặt <code>noeviction</code> (Redis sẽ từ chối ghi thay vì xoá), cảnh báo trên bộ nhớ và <code>evicted_keys</code>, dọn job cũ bằng <code>removeOnComplete</code>, và có một job dọn dẹp tạo lại job cho các <code>imports</code> kẹt.</p></details></details>
+<details><summary><span class="tag">Giải thích</span>Q63. Tắt êm</summary>
+<p>Kubernetes gửi <code>SIGTERM</code> và cho 30 giây trước khi <code>SIGKILL</code>. Mỗi lô mất tới 45 giây. Điều gì xảy ra nếu chỉ gọi <code>worker.close()</code>, và nên đổi gì?</p>
+<details class="answer"><summary>Xem đáp án</summary><p><code>worker.close()</code> đợi job chạy xong, nhưng 30 giây sau process bị <code>SIGKILL</code> giữa lô. Lô đó rollback, job chờ kiểm tra stalled rồi chạy lại từ checkpoint. Không sai dữ liệu nếu checkpoint đúng chỗ, nhưng mỗi lần deploy tốn một lô và một chu kỳ stalled. Nên: lô ngắn hơn (dưới 10 giây), kiểm tra cờ "đang tắt" giữa các lô, và đặt thời gian tắt cho phép dài hơn một lô.</p></details></details>
+<details><summary><span class="tag">Chẩn đoán</span>Q64. Tăng concurrency làm mọi thứ tệ hơn</summary>
+<p>Đổi <code>concurrency</code> từ 1 lên 8 cho worker nhập file (mỗi lô có bước tính toán đồng bộ 4 giây). Số sự kiện stalled tăng vọt. Vì sao?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Tám job chung một event loop. Bước đồng bộ của các job chạy nối tiếp nhau, nên event loop có thể bận liên tục hàng chục giây và timer gia hạn lock của mọi job đều bị trễ. Với job nặng CPU, tăng song song bằng nhiều process (nhiều worker hoặc sandboxed processor), không bằng <code>concurrency</code> trong một process.</p></details></details>
+</section>
+
+<!-- 9 -->
+<section id="s9">
+<header><span class="num">09</span><h2>Câu hỏi còn mở</h2></header>
+<p class="prose">Số thứ tự trùng với Open questions trong <code>.claude/docs/LEARNING_LOG.md</code>. Log là bản gốc.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>#</th><th>Câu hỏi</th><th>Trạng thái</th></tr></thead>
+<tbody>
+<tr><td>27</td><td>Trong BullMQ 6.3.17, job vượt <code>maxStalledCount</code> được đưa về <code>wait</code> kèm lý do thất bại hoãn lại (trường <code>defa</code>), thay vì sang thẳng <code>failed</code> như các bản trước. Chính xác thì nó thất bại lúc nào, và listener <code>failed</code> có nhận được không?</td><td>Mở. Đọc thêm mã nguồn <code>moveToActive</code>; quan sát trong E33.</td></tr>
+<tr><td>28</td><td>Worker có heap vài GB thì GC có thể dừng event loop bao lâu, và <code>lockDuration</code> 30 giây còn an toàn không?</td><td>Mở. Đo bằng <code>monitorEventLoopDelay</code> khi chạy E34.</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- 10 -->
+<section id="s10">
+<header><span class="num">10</span><h2>Tài liệu tham khảo</h2></header>
+<div class="prose"><ul>
+<li>BullMQ 6.3.17, mã nguồn: <code>classes/worker.js</code> (mặc định <code>lockDuration</code>, <code>stalledInterval</code>, <code>maxStalledCount</code>, <code>concurrency</code>; <code>close()</code> đợi job đang chạy), <code>moveStalledJobsToWait-9.lua</code>, <code>extendLock-2.lua</code>, <code>backoffs.js</code>, <code>redis-connection.js</code> (cảnh báo <code>noeviction</code>)</li>
+<li><a href="https://docs.bullmq.io/">Tài liệu BullMQ</a>: Workers, Stalled Jobs, Sandboxed processors, Graceful shutdown, Retrying failing jobs</li>
+<li>Node.js, <a href="https://nodejs.org/api/perf_hooks.html">perf_hooks</a>: <code>monitorEventLoopDelay</code></li>
+<li>Redis, <a href="https://redis.io/docs/latest/develop/reference/eviction/">Key eviction</a>: <code>maxmemory-policy</code></li>
+<li>Amazon SQS, Visibility timeout</li>
+</ul></div>
+<h3>Mức kiểm chứng</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>Khẳng định</th><th>Nguồn</th></tr></thead>
+<tbody>
+<tr><td>Mặc định 30 s lock, gia hạn mỗi nửa lock, kiểm tra 30 s, <code>maxStalledCount</code> 1, <code>concurrency</code> 1</td><td>mã nguồn BullMQ 6.3.17</td></tr>
+<tr><td>Kiểm tra stalled hai lượt; gia hạn lock gỡ job khỏi tập nghi ngờ</td><td>mã nguồn (<code>moveStalledJobsToWait</code>, <code>extendLock</code>)</td></tr>
+<tr><td>Vượt giới hạn stalled thì thất bại với "job stalled more than allowable limit"</td><td>mã nguồn; thời điểm thất bại chính xác còn mở (câu hỏi 27)</td></tr>
+<tr><td><code>close()</code> đợi job đang chạy; cảnh báo khi Redis không <code>noeviction</code></td><td>mã nguồn</td></tr>
+<tr><td>Dòng thời gian stalled khi chặn event loop</td><td>mô hình theo các luật trên; chưa đo (E33)</td></tr>
+<tr><td>Số dòng làm lại và trùng theo cách lưu checkpoint</td><td>mô hình; chưa đo (E34)</td></tr>
+</tbody></table></div>
+</section>
+</main>
+
+</div>
+
+<script>
+const DEFS=`<defs><marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>`;
+function B(x,y,w,h,cls,t,sub){
+  const tx=x+w/2;
+  return `<g class="n ${cls||''}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="5"/>`+
+  `<text class="tb" x="${tx}" y="${y+(sub?h/2-8:h/2)}" text-anchor="middle" dominant-baseline="central">${t}</text>`+
+  (sub?`<text class="ts" x="${tx}" y="${y+h/2+10}" text-anchor="middle" dominant-baseline="central">${sub}</text>`:'')+`</g>`;
+}
+const A=(d,cls)=>`<path d="${d}" class="edge ${cls||''}" marker-end="url(#arw)"/>`;
+const T=(x,y,t,anchor,cls)=>`<text class="${cls||'lbl'}" x="${x}" y="${y}" text-anchor="${anchor||'start'}">${t}</text>`;
+const $=id=>document.getElementById(id);
+const fmt=n=>Math.round(n).toLocaleString('vi-VN');
+
+/* ---------- 01: lifecycle simulator ---------- */
+const ATT=3,MAXST=1;
+let LF;
+function lfReset(){LF={st:'wait',made:0,stc:0,log:['Job được thêm vào hàng đợi: wait']};lfDraw();}
+const POS={wait:[20,90],active:[250,90],delayed:[250,10],completed:[500,40],failed:[500,150]};
+const EDGES=[['wait','active','M150 113 L248 113'],['active','completed','M380 103 L498 67'],['active','failed','M380 125 L498 170'],
+  ['active','delayed','M315 88 L315 58'],['delayed','wait','M248 33 L120 88'],['active','wait','M248 128 C200 160 140 160 100 138']];
+function lfDraw(){
+  let g='';
+  EDGES.forEach(([a,b,d])=>{g+=A(d,LF.last&&LF.last[0]===a&&LF.last[1]===b?'on':'');});
+  g+=T(160,180,'stalled','start','ts');
+  for(const [k,[x,y]] of Object.entries(POS)){
+    const cur=LF.st===k;
+    const cls=cur?(k==='completed'?'row':k==='failed'?'miss':k==='delayed'?'hot':'path'):'dim';
+    const sub={wait:'chờ worker',active:'worker đang chạy',delayed:'chờ backoff',completed:'xong',failed:'thất bại'}[k];
+    g+=B(x,y,130,46,cls,k,sub);
+  }
+  $('lfSvg').innerHTML=g;
+  const btns=[
+    ['take','Worker lấy job',LF.st==='wait'],
+    ['ok','Job chạy xong',LF.st==='active'],
+    ['err','Job ném lỗi',LF.st==='active'],
+    ['unrec','Ném UnrecoverableError',LF.st==='active'],
+    ['crash','Worker chết, kiểm tra stalled',LF.st==='active'],
+    ['backoff','Hết thời gian backoff',LF.st==='delayed'],
+    ['reset','Đặt lại',true]
+  ];
+  if(!$('lfBtns').children.length){
+    $('lfBtns').innerHTML=btns.map(([k,t])=>`<button data-k="${k}">${t}</button>`).join('');
+    $('lfBtns').querySelectorAll('button').forEach(b=>b.onclick=()=>lfAct(b.dataset.k));
+  }
+  $('lfBtns').querySelectorAll('button').forEach(b=>{const e=btns.find(x=>x[0]===b.dataset.k);b.disabled=!e[2];});
+  $('lfStats').innerHTML=[['attemptsMade',`${LF.made} / ${ATT}`],['Số lần stalled',`${LF.stc} / ${MAXST}`],['Trạng thái',LF.st]]
+    .map(([k,v])=>`<div class="stat"><span>${k}</span><b>${v}</b></div>`).join('');
+  $('lfLog').innerHTML=LF.log.slice(-6).reverse().map(x=>`<li>${x}</li>`).join('');
+  $('lfMeta').textContent=LF.st;
+}
+function lfAct(k){
+  const go=(to,msg)=>{LF.last=[LF.st,to];LF.st=to;LF.log.push(msg);};
+  if(k==='reset'){LF.last=null;lfReset();return;}
+  if(k==='take')go('active','Worker lấy job, đặt lock 30 s: active');
+  else if(k==='ok')go('completed','Processor trả về: completed');
+  else if(k==='err'){LF.made++;
+    if(LF.made<ATT){const d=Math.pow(2,LF.made-1);go('delayed',`Lỗi ở lần ${LF.made}; còn lượt nên chờ backoff ${d} s: delayed`);}
+    else go('failed',`Lỗi ở lần ${LF.made}; hết ${ATT} lượt: failed`);}
+  else if(k==='unrec'){LF.made++;go('failed','UnrecoverableError: failed ngay, không thử lại');}
+  else if(k==='crash'){LF.stc++;
+    if(LF.stc>MAXST)go('failed',`Lock hết hạn, kiểm tra stalled lần ${LF.stc} > ${MAXST}: "job stalled more than allowable limit"`);
+    else go('wait',`Lock hết hạn, kiểm tra stalled thấy job: quay về wait (stalled ${LF.stc}); attemptsMade không tăng`);}
+  else if(k==='backoff')go('wait','Hết backoff: wait');
+  lfDraw();
+}
+lfReset();
+
+/* ---------- 02: lock / stalled timeline ---------- */
+function stallSim(D,bs,bl,crash){
+  const LD=30,RN=15,SI=30,C0=10,TMAX=400;
+  const workers=[];let lock=null,suspect=false,state='active',stc=0,ev=[],failedAt=null,doneAt=null;
+  const checks=[];
+  function start(name,t){const w={name,s:t,renewNext:t+RN,dead:false,finished:false,end:null,rejected:false};workers.push(w);lock={h:name,exp:t+LD};return w;}
+  const blocked=(w,t)=>bl>0&&t>=w.s+bs&&t<w.s+bs+bl;
+  start('A',0);
+  for(let t=0;t<=TMAX;t++){
+    for(const w of workers){
+      if(w.dead||w.finished)continue;
+      if(w.name==='A'&&crash>0&&t===crash){w.dead=true;w.end=t;ev.push([t,`A chết`]);continue;}
+      if(t>=w.renewNext&&!blocked(w,t)){
+        if(lock&&lock.h===w.name&&lock.exp>t){lock.exp=t+LD;suspect=false;}
+        else if(!w.lostLogged){ev.push([t,`${w.name} gia hạn lock thất bại: lock đã mất`]);w.lostLogged=true;}
+        w.renewNext=t+RN;
+      }
+      if(t===w.s+D){w.finished=true;w.end=t;
+        if(lock&&lock.h===w.name&&lock.exp>t&&state==='active'){state='completed';doneAt=t;lock=null;ev.push([t,`${w.name} chạy xong: completed`]);}
+        else{w.rejected=true;ev.push([t,`${w.name} chạy xong nhưng không còn lock: kết quả bị từ chối, dữ liệu đã ghi vẫn còn`]);}
+      }
+    }
+    if(t>=C0&&(t-C0)%SI===0&&state==='active'){
+      checks.push(t);
+      if(suspect&&(!lock||lock.exp<=t)){
+        stc++;
+        if(stc>MAXST){state='failed';failedAt=t;lock=null;ev.push([t,`kiểm tra stalled: lần ${stc} > ${MAXST}, job thất bại`]);}
+        else{ev.push([t,`kiểm tra stalled: lock đã hết hạn, job về wait`]);const n=String.fromCharCode(65+workers.length);start(n,t);ev.push([t,`${n} lấy job và chạy từ đầu`]);}
+      }
+      if(state==='active')suspect=true;
+    }else if(t>=C0&&(t-C0)%SI===0)checks.push(t);
+    if(state!=='active'&&workers.every(w=>w.dead||w.finished))break;
+  }
+  const end=Math.max(...workers.map(w=>w.end??w.s+D),doneAt??0,failedAt??0)+5;
+  return {workers,ev,checks:checks.filter(c=>c<=end),state,stc,end,bs,bl};
+}
+function st(){
+  const num=(id,a,b,d)=>{let v=parseInt($(id).value,10);return isNaN(v)?d:Math.max(a,Math.min(b,v));};
+  const D=num('stD',5,200,90),bs=num('stB',0,200,20),bl=num('stL',0,200,40),cr=num('stC',0,200,0);
+  const R=stallSim(D,bs,bl,cr);
+  const L=80,W=500,sx=t=>L+t/R.end*W,lh=34,top=24;
+  let g=`<line class="axis" x1="${L}" y1="${top-6}" x2="${L+W}" y2="${top-6}"/>`;
+  for(let t=0;t<=R.end;t+=30)g+=T(sx(t),top-10,`${t}s`,'middle','ts');
+  R.workers.forEach((w,i)=>{const y=top+8+i*lh;g+=T(8,y+14,`Worker ${w.name}`,'start','t');
+    const e=w.end??(w.s+D);
+    g+=`<rect class="seg run" x="${sx(w.s)}" y="${y}" width="${Math.max(1,sx(e)-sx(w.s))}" height="14" rx="2"/>`;
+    if(R.bl>0){const b0=w.s+R.bs,b1=Math.min(e,w.s+R.bs+R.bl);if(b1>b0)g+=`<rect class="seg block" x="${sx(b0)}" y="${y}" width="${sx(b1)-sx(b0)}" height="14"/>`;}
+    if(w.dead)g+=`<rect class="seg dead" x="${sx(e)-3}" y="${y-3}" width="6" height="20"/>`;
+    if(w.rejected)g+=T(sx(e)+4,y+12,'bị từ chối','start','ts');
+  });
+  // lock lane reconstructed from events: approximate by re-running with a trace
+  const ly=top+8+R.workers.length*lh;g+=T(8,ly+14,'Lock','start','t');
+  const trace=lockTrace(D,bs,bl,cr,R.end);
+  trace.forEach(([a,b,h])=>{g+=`<rect class="seg lock" x="${sx(a)}" y="${ly}" width="${Math.max(1,sx(b)-sx(a))}" height="14" rx="2"/>`+T(sx(a)+4,ly+28,h,'start','ts');});
+  R.checks.forEach(c=>{g+=`<line class="tick" x1="${sx(c)}" y1="${top-4}" x2="${sx(c)}" y2="${ly+34}"/>`;});
+  const H=ly+44;$('stSvg').setAttribute('viewBox',`0 0 680 ${H}`);$('stSvg').innerHTML=g;
+  const runs=R.workers.length,rej=R.workers.filter(w=>w.rejected).length;
+  $('stStats').innerHTML=[['Số worker đã chạy job',runs,runs>1?'bad':''],['Lần chạy bị từ chối kết quả',rej,rej?'bad':''],['Số lần stalled',R.stc,''],['Kết cục',R.state,R.state==='completed'?'good':'bad']]
+    .map(([k,v,c])=>`<div class="stat"><span>${k}</span><b${c?` class="${c}"`:''}>${v}</b></div>`).join('');
+  $('stLog').innerHTML=R.ev.slice(-7).reverse().map(([t,x])=>`<li>${t}s: ${x}</li>`).join('');
+  $('stDesc').textContent=runs===1&&R.state==='completed'?'Lock được gia hạn đều đặn mỗi 15 giây, nên mọi lần kiểm tra stalled đều thấy job đã được gỡ khỏi tập nghi ngờ. Job chạy đúng một lần.'
+    :(cr>0&&(bl===0)?`Worker A chết thật. Lock hết hạn tối đa 30 giây sau lần gia hạn cuối; lần kiểm tra kế tiếp thấy job vẫn bị nghi ngờ và mất lock, nên đưa cho worker khác. Phát hiện mất từ một tới hai chu kỳ kiểm tra.`
+    :`Event loop bị chặn nên timer gia hạn lock không chạy. Lock hết hạn trong khi worker vẫn đang làm. Kiểm tra stalled đưa job cho worker khác, và giờ có ${runs} worker cùng chạy một job. Worker mới chạy cùng code nên cũng bị chặn ở cùng chỗ; vượt maxStalledCount thì job thất bại, dù phần việc đã chạy ${runs} lần.`);
+  $('stMeta').textContent=`${R.end}s`;
+}
+function lockTrace(D,bs,bl,crash,end){
+  // replay the same rules, recording who holds a valid lock over time
+  const LD=30,RN=15,SI=30,C0=10;const out=[];let holder='A',exp=LD,from=0,suspect=false,stc=0,state='active';
+  const ws=[{n:'A',s:0,next:RN,dead:false,fin:false}];
+  const blocked=(w,t)=>bl>0&&t>=w.s+bs&&t<w.s+bs+bl;
+  for(let t=0;t<=end;t++){
+    if(holder&&exp<=t){out.push([from,exp,holder]);holder=null;}
+    for(const w of ws){if(w.dead||w.fin)continue;
+      if(w.n==='A'&&crash>0&&t===crash){w.dead=true;continue;}
+      if(t>=w.next&&!blocked(w,t)){if(holder===w.n&&exp>t){exp=t+LD;suspect=false;}w.next=t+RN;}
+      if(t===w.s+D){w.fin=true;if(holder===w.n&&exp>t&&state==='active'){out.push([from,t,holder]);holder=null;state='completed';}}
+    }
+    if(t>=C0&&(t-C0)%SI===0&&state==='active'){
+      if(suspect&&!holder){stc++;if(stc>MAXST)state='failed';else{const n=String.fromCharCode(65+ws.length);ws.push({n,s:t,next:t+RN,dead:false,fin:false});holder=n;exp=t+LD;from=t;}}
+      if(state==='active')suspect=true;
+    }
+  }
+  if(holder)out.push([from,Math.min(exp,end),holder]);
+  return out;
+}
+['stD','stB','stL','stC'].forEach(id=>$(id).addEventListener('change',st));st();
+
+/* ---------- 02: checkpoint calculator ---------- */
+function ck(){
+  const num=(id,a,b,d)=>{let v=parseInt($(id).value,10);return isNaN(v)?d:Math.max(a,Math.min(b,v));};
+  const S=$('ckS').value,N=num('ckN',100,1000000,10000),Bt=num('ckB',1,100000,500),gap=$('ckG').checked,idem=$('ckI').checked;
+  const crashes=$('ckX').value.split(/[,;\s]+/).map(x=>parseInt(x.replace(/\./g,''),10)).filter(x=>!isNaN(x)&&x>0&&x<=N).sort((a,b)=>a-b);
+  let maxDone=0,cp=0,work=0,dup=0,rolled=0;const attempts=[];let ci=0;
+  for(let a=0;a<20;a++){
+    const start=S==='none'?0:cp;
+    while(ci<crashes.length&&crashes[ci]<=start)ci++;
+    const r=ci<crashes.length?crashes[ci]:null;
+    const segs=[];let pos=start,stop=false;
+    while(pos<N&&!stop){
+      const end=Math.min(N,pos+Bt);
+      if(r!==null&&r>pos&&r<=end){
+        if(gap){ // dies right after commit of this batch
+          const redo=Math.max(0,Math.min(end,maxDone)-pos);
+          if(redo>0){segs.push([pos,pos+redo,'redo']);if(!idem)dup+=redo;}
+          if(end>pos+redo)segs.push([pos+redo,end,'new']);
+          work+=end-pos;maxDone=Math.max(maxDone,end);
+          if(S==='same')cp=end;           // checkpoint committed with the batch
+          stop=true;
+        }else{segs.push([pos,r,'lost']);work+=r-pos;rolled+=r-pos;stop=true;}
+        ci++;break;
+      }
+      const redo=Math.max(0,Math.min(end,maxDone)-pos);
+      if(redo>0){segs.push([pos,pos+redo,'redo']);if(!idem)dup+=redo;}
+      if(end>pos+redo)segs.push([pos+redo,end,'new']);
+      work+=end-pos;maxDone=Math.max(maxDone,end);
+      if(S!=='none')cp=end;
+      pos=end;
+    }
+    attempts.push(segs);
+    if(!stop)break;
+  }
+  const L=70,W=590,sx=x=>L+x/N*W,lh=26;
+  let g='';
+  attempts.forEach((segs,i)=>{const y=10+i*lh;g+=T(8,y+13,`Lần ${i+1}`,'start','t');
+    segs.forEach(([a,b,k])=>{g+=`<rect class="seg ${k}" x="${sx(a)}" y="${y}" width="${Math.max(1,sx(b)-sx(a))}" height="16" rx="2"/>`;});});
+  const H=10+attempts.length*lh+18;g+=T(L,H-4,'dòng 1','start','ts')+T(L+W,H-4,`dòng ${fmt(N)}`,'end','ts');
+  $('ckSvg').setAttribute('viewBox',`0 0 680 ${H}`);$('ckSvg').innerHTML=g;
+  const rows=N+dup;
+  $('ckStats').innerHTML=[['Số lần chạy',attempts.length,''],['Dòng đã xử lý',fmt(work),''],['Việc làm thừa',`${Math.round((work-N)/N*100)}%`,work>N*1.2?'bad':''],['Dòng bị ghi trùng',fmt(dup),dup?'bad':'good'],['Dòng trong bảng',fmt(rows),rows===N?'good':'bad']]
+    .map(([k,v,c])=>`<div class="stat"><span>${k}</span><b${c?` class="${c}"`:''}>${v}</b></div>`).join('');
+  const base={none:'Không có checkpoint: mỗi lần chạy lại bắt đầu từ dòng 1 và đi lại mọi lô đã commit.',
+    redis:'Checkpoint lưu ở Redis sau khi lô commit vào MySQL. Hai lần ghi ở hai hệ thống: chết ngay sau commit thì checkpoint còn cũ, và lô đó bị làm lại.',
+    same:'Checkpoint nằm trong transaction của lô: lô commit thì checkpoint commit theo. Lần chạy sau bắt đầu đúng sau lô cuối đã commit; chỉ lô đang dở bị rollback và làm lại.'}[S];
+  $('ckDesc').textContent=base+(dup?` Không có khoá UNIQUE, nên ${fmt(dup)} dòng làm lại bị ghi hai lần.`:(work>N&&idem?' Dòng làm lại bị khoá UNIQUE chặn, nên dữ liệu đúng, chỉ tốn công.':''));
+  $('ckMeta').textContent=`${crashes.length} lần chết`;
+}
+['ckS','ckN','ckB','ckX','ckG','ckI'].forEach(id=>$(id).addEventListener('input',ck));ck();
+</script>
+</body>
+</html>
