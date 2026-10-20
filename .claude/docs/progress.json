@@ -245,6 +245,13 @@
   "sessions": [
     {
       "date": "2026-10-20",
+      "title": "BullMQ workers and resumable batches",
+      "artifact": "../topics/bullmq-workers-resumable/index.html",
+      "planned": false,
+      "feeds": "Month 3"
+    },
+    {
+      "date": "2026-10-20",
       "title": "Transactional outbox",
       "artifact": "../topics/transactional-outbox/index.html",
       "planned": false,
@@ -344,6 +351,12 @@
       "date": "2026-10-20",
       "work": "Transactional outbox (dual write, polling relay and the id-cursor gap, CDC from the binlog, saga at concept level) — documentation only, written ahead of Month 3; no measurements",
       "artifact": "topics/transactional-outbox",
+      "feeds": "Month 3"
+    },
+    {
+      "date": "2026-10-20",
+      "work": "BullMQ workers and resumable batches (job lifecycle, locks and stalled jobs, checkpoints, worker operations) — documentation only, written ahead of Month 3; no measurements",
+      "artifact": "topics/bullmq-workers-resumable",
       "feeds": "Month 3"
     }
   ],
@@ -692,10 +705,38 @@
         "provisional": false,
         "evidence": "same, §02–§03",
         "date": "2026-10-20"
+      },
+      {
+        "topic": "BullMQ job lifecycle: wait, active, delayed, completed, failed; attempts, backoff, UnrecoverableError",
+        "level": 2,
+        "provisional": true,
+        "evidence": "bullmq-workers-resumable §01",
+        "date": "2026-10-20"
+      },
+      {
+        "topic": "Locks and stalled jobs: lock renewal on the event loop, two-pass stalled check, maxStalledCount, why a job can run on two workers at once",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §02",
+        "date": "2026-10-20"
+      },
+      {
+        "topic": "Resumable batches: chunked transactions, checkpoint in the same transaction, natural keys as a safety net",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §02, §04",
+        "date": "2026-10-20"
+      },
+      {
+        "topic": "Worker operations: concurrency vs CPU-bound work, sandboxed processors, graceful shutdown, Redis noeviction",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §02, §06",
+        "date": "2026-10-20"
       }
     ],
     "levels": {
-      "2": 44,
+      "2": 48,
       "1": 2
     }
   }

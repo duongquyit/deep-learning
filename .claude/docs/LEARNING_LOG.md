@@ -74,6 +74,10 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 | Transactional outbox with a polling relay: status-based reads, the id-cursor gap, `SKIP LOCKED` with several relays, ordering by aggregate, cleanup | 2 (prov.) | same, §02, §04 | 2026-10-20 | Exercise E31: reproduce the id-cursor gap, then run two relays under kills and count losses and duplicates |
 | Polling vs CDC from the binlog (latency, load, ordering, operations) | 2 (prov.) | same, §02–§03 | 2026-10-20 | Exercise E32 for polling; read the outbox rows in `mysqlbinlog` output |
 | Saga at concept level: compensations, orchestration vs choreography, no isolation | 1 | same, §02–§03 | 2026-10-20 | Design the compensations for one multi-service flow at work, including the intermediate states users see |
+| BullMQ job lifecycle: wait, active, delayed, completed, failed; attempts, backoff, `UnrecoverableError` | 2 (prov.) | [bullmq-workers-resumable](../topics/bullmq-workers-resumable/index.html) §01 | 2026-10-20 | Exercise E33; then trace a real failed job at work through its states |
+| Locks and stalled jobs: lock renewal on the event loop, two-pass stalled check, `maxStalledCount`, why a job can run on two workers at once | 2 (prov.) | same, §02 | 2026-10-20 | Exercise E33: block the event loop and watch the job move to a second worker |
+| Resumable batches: chunked transactions, checkpoint in the same transaction, natural keys as a safety net | 2 (prov.) | same, §02, §04 | 2026-10-20 | Exercise E34: kill the worker five times during a 200k-row import and reconcile counts and totals *(Month 3 exit criterion)* |
+| Worker operations: concurrency vs CPU-bound work, sandboxed processors, graceful shutdown, Redis `noeviction` | 2 (prov.) | same, §02, §06 | 2026-10-20 | Exercise E35; then review one worker at work against the page's checklist |
 
 "(prov.)" = provisional. Every row above rests on one artifact I wrote myself, with no measurement behind it. Week 1 of Month 1 includes a baseline assessment (TECHNICAL_GROWTH.md Section 11) that should confirm or cut these.
 
@@ -105,6 +109,8 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 24. How long should idempotency keys be kept when the client is a mobile app with an offline queue that may resend days later? Should finished keys (fingerprint and response only) be kept apart from in-flight ones?
 25. Under REPEATABLE READ, which gap and next-key locks does the relay's `FOR UPDATE SKIP LOCKED` on `WHERE sent_at IS NULL ORDER BY id` take on `idx_unsent`, and do they block new inserts into the outbox? Should the relay run at READ COMMITTED? E31.
 26. With ROW binlog and `binlog_row_image = FULL`, how many binlog bytes does one outbox event with a 2KB payload add, and does insert-then-delete in the same transaction double it?
+27. In BullMQ 6.3.17, a job past `maxStalledCount` goes back to `wait` with a deferred failure reason (`defa` field) instead of straight to `failed`, as older versions did. When exactly does it fail, and do `failed` listeners see it? Read `moveToActive`; observe in E33.
+28. How long can GC pause the event loop on a worker with a heap of several GB, and is the default 30 s `lockDuration` still safe? Measure with `monitorEventLoopDelay` during E34.
 
 ## Pending verification (from the session's own exercise list)
 
@@ -153,8 +159,42 @@ These are written in the page as exercises; none have been run yet.
 - **E32** — Polling relay latency (p50/p99) and idle query rate at 100 ms and 1 s sleep, 10 and 1,000 events/s.
 - **Q53–Q58** — The six recall questions in section 08 of the outbox page.
 - **C7–C9** — The three real-world cases in section 09 of the outbox page (lost confirmation emails and a migration to the outbox, a polling relay slowed by an 80M-row table, a flight and hotel saga with an irreversible step). Solve in writing before opening the answers.
+- **E33** — A job that blocks the event loop for 40 s with two workers: `stalled` event, second worker, runs recorded in MySQL, final state; again with a sandboxed processor.
+- **E34** — 200k-row import with 5 random `SIGKILL`s, three checkpoint variants with and without the natural key: rows, duplicates, totals, time. *(Month 3 exit criterion: correct when a worker is killed mid-run.)*
+- **E35** — `SIGTERM` mid-batch with and without `worker.close()`: exit time, job state, resume row.
+- **Q59–Q64** — The six recall questions in section 08 of the BullMQ page.
+- **C10–C12** — The three real-world cases in section 09 of the BullMQ page (a 2M-line nightly reconciliation split into staged, set-based child jobs; a 500k-recipient email campaign under a provider rate limit; a synchronous PDF step causing stalls, duplicate side effects and a CPU shortfall). Solve in writing before opening the answers.
 - **Q11–Q16** — The six recall questions in section 08 of the composite-index page (answers are on the page, hidden).
 - **Q1–Q5** — The five check questions at the end of the page (leftmost prefix, `COUNT(*)` and the visibility map, full scan polluting the cache, TOAST, a `sessions` table updated 5,000×/sec). Answer in writing before looking anything up, then verify.
+
+---
+
+## 2026-10-20 — BullMQ workers and resumable batches
+
+**Topic and objective.** Month 3 topic, written ahead as documentation only (Phase 3 of the documentation plan, last of four): how a BullMQ job moves between states, how locks and the stalled check decide a worker is gone, why that can run one job on two workers at once, and how to make a large import resume from where it stopped.
+
+**Output.** [topics/bullmq-workers-resumable/index.html](../topics/bullmq-workers-resumable/index.html) — 10 sections. Widgets: a job lifecycle simulator (wait, active, delayed, completed, failed; attempts 3, `maxStalledCount` 1; buttons for success, error, `UnrecoverableError`, worker death, backoff expiry); a lock and stalled-check timeline (job length, event-loop block, worker crash → lock lane, checks, second worker, rejected completions, final state); a checkpoint calculator for an import with crashes (none / Redis after commit / MySQL same transaction, crash after commit, natural key) showing redone rows, duplicates and wasted work per run. Prediction templates for E33–E35.
+
+**Cases added (same day).** Section 09 "Bài toán thực tế" with cases C10–C12, each a shown problem and a hidden senior-style answer. The answers are reasoning from reading, not measurements; Redis memory per job in C11 is an estimate.
+
+**What it covers.**
+
+- Defaults and rules read from the BullMQ 6.3.17 source: `lockDuration` 30 s renewed every half of it, `stalledInterval` 30 s, `maxStalledCount` 1, `concurrency` 1; two-pass stalled check (active jobs marked, `extendLock` unmarks, still marked without a lock → stalled, back to `wait`, counter incremented, failure past the limit with "job stalled more than allowable limit"); `close()` waits for active jobs; warning when Redis is not `noeviction`; exponential backoff formula.
+- Blocking the event loop stops lock renewal; the job moves to a second worker while the first still writes, and the first worker's completion is rejected.
+- Resumable imports: chunked transactions, checkpoint in MySQL in the same transaction, `job.updateData`/`updateProgress` are not safe checkpoints, `(import_id, row_no)` as a safety net, accumulations belong with the checkpoint.
+- Operations: concurrency vs CPU-bound work, sandboxed processors, SIGTERM and grace period, `UnrecoverableError`, `removeOnComplete` vs `jobId` dedup, comparison with a MySQL-table queue and SQS visibility timeout.
+
+**Initial understanding.** TODO — what did I believe about background workers and BullMQ before this page? No prior belief was stated in the session.
+
+**Mistakes and misconceptions corrected.** TODO — only I know which. Traps the page writes down: a job runs on one worker at a time; stalled means the worker died; `updateProgress`/`updateData` is a safe checkpoint; raising `lockDuration` fixes stalls; `jobId` prevents duplicates forever.
+
+**Experiments and results.** None. The lifecycle and timeline follow rules read from the source but are models; nothing ran against Redis. E33–E35 are the measurements; E34 is the Month 3 exit criterion about a worker killed mid-run.
+
+**Competency level.** Level 2 provisional on four new matrix rows.
+
+**Remaining questions.** Open questions 27 and 28.
+
+**Next step.** Phase 3 of the documentation plan is complete. Next per the plan's priority order: topic 18 (online schema migration) and topic 22 (replication and read-your-writes), or Phase 2 (Month 2) which was skipped.
 
 ---
 
