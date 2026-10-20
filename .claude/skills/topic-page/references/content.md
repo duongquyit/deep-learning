@@ -1,14 +1,14 @@
 # Content conventions
 
 Every topic page follows one fixed document structure, agreed with the author
-on 2026-10-19. The sections, their order and their headings are the same on
+on 2026-10-19 and extended with section 9 (Bài toán thực tế) on 2026-10-20. The sections, their order and their headings are the same on
 every page, so a reader always knows where to look, and so recall, open
 questions and experiments can be tracked across topics.
 
 ## Document structure
 
-Eleven parts, in this order. Parts 1 to 10 are numbered sections (`01` to
-`10`) with exactly these Vietnamese headings; the topic goes in the text, not
+Twelve parts, in this order. Parts 1 to 11 are numbered sections (`01` to
+`11`) with exactly these Vietnamese headings; the topic goes in the text, not
 in the heading.
 
 | # | Heading on the page | Purpose |
@@ -22,10 +22,13 @@ in the heading.
 | 6 | Ảnh hưởng khi chạy production | When to use and not, what it costs, how to detect it in production, a review checklist |
 | 7 | Hiểu lầm thường gặp | Summary of misconceptions |
 | 8 | Câu hỏi ôn tập | Recall questions with hidden answers |
-| 9 | Câu hỏi còn mở | Open questions with status |
-| 10 | Tài liệu tham khảo | Sources, and how far each claim has been verified |
+| 9 | Bài toán thực tế | Real-world cases: the problem is shown, the senior answer is hidden |
+| 10 | Câu hỏi còn mở | Open questions with status |
+| 11 | Tài liệu tham khảo | Sources, and how far each claim has been verified |
 
-The TOC lists the ten numbered sections. A section may have `h3` subsections;
+The TOC lists the eleven numbered sections. Pages written before 2026-10-20
+have ten (no section 9 yet); they gain it when they are next revised, and the
+numbers of the last two sections shift by one then. A section may have `h3` subsections;
 section 2 almost always does.
 
 ### 0. Hero
@@ -117,7 +120,42 @@ Each question is a `<details>` whose body holds the question and a nested
 date the questions were written (`Viết ngày 2026-10-19`) at the top of the
 section; monthly checkpoints draw spaced-review questions from here.
 
-### 9. Câu hỏi còn mở
+### 9. Bài toán thực tế
+
+Practice in the shape of real work, so the reader rehearses decisions rather
+than recall. Three cases per page, numbered globally like recall questions
+(`C1`, `C2`, …; the log tracks the next free number). Each case is a
+`.case` block (markup in `style.md`) with two parts.
+
+**Shown:** Bối cảnh (a concrete system with numbers: traffic, sizes, the
+current code or incident), Yêu cầu (what must hold), Ràng buộc (limits the
+reader cannot change), and Nhiệm vụ (exactly what the reader should produce:
+a design, a diagnosis, a choice). Write it so it can be solved with the page's
+content plus earlier pages; say which earlier pages it draws on.
+
+**Hidden:** an optional `Gợi ý` (one to three nudges, in its own `<details>`),
+then the answer in `<details class="answer"><summary>Xem lời giải</summary>`.
+The answer follows how a senior engineer reasons, in this order, each part
+under a small heading (`h4.ah`):
+
+1. **Làm rõ đề bài**: questions a senior would ask first, and the assumptions
+   taken when the case does not say.
+2. **Ước lượng**: the numbers that decide the design (rates, sizes, hold
+   times), worked out step by step. Label estimates as estimates.
+3. **Các phương án**: at least three real options, in a table with columns
+   for how it works, ưu điểm, nhược điểm. Include the tempting wrong one.
+4. **Đánh đổi và quyết định**: the choice, why it wins for these numbers, and
+   the conditions under which a different option would win.
+5. **Triển khai**: the concrete design: schema, statements, order of steps,
+   code sketch when it helps.
+6. **Rủi ro và cách kiểm chứng**: what can still go wrong, which metric or
+   test shows it, and how to roll back.
+7. **Lỗi hay gặp với bài này**: the mistakes a mid-level answer makes.
+
+Case answers are reasoning written from reading, not measurements. A number in
+them is an estimate unless it cites an experiment that was run.
+
+### 10. Câu hỏi còn mở
 
 What is not understood yet or needs research. Each item has the same number
 as in Open questions of `LEARNING_LOG.md` (the log is the source of truth),
@@ -125,7 +163,7 @@ a status (`mở`, `đã trả lời một phần`, `đã trả lời`, `bỏ`) a
 answered, by what (an experiment, a manual section) and when. Change the
 status in the log and on the page in the same commit.
 
-### 10. Tài liệu tham khảo
+### 11. Tài liệu tham khảo
 
 Links to the exact sections of the reference manual and other primary
 sources. Then a short verification table: each key claim on the page and

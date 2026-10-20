@@ -130,6 +130,7 @@ These are written in the page as exercises; none have been run yet.
 - **E25** — One hot row at 1, 8 and 32 clients for 30 s: tx/s, p50/p99, version retries, `Innodb_row_lock_waits`, with and without 5 ms of app work under the lock.
 - **E26** — `affectedRows` and `changedRows` in mysql2 with and without `FOUND_ROWS`, for a no-op update, a refused withdrawal and a missing account.
 - **Q41–Q46** — The six recall questions in section 08 of the concurrency-control page.
+- **C1–C3** — The three real-world cases in section 09 of the concurrency-control page (flash sale stock and per-user limit, crossed-transfer deadlocks, long-lived edit form vs a batch job). Solve in writing before opening the answers.
 - **Q11–Q16** — The six recall questions in section 08 of the composite-index page (answers are on the page, hidden).
 - **Q1–Q5** — The five check questions at the end of the page (leftmost prefix, `COUNT(*)` and the visibility map, full scan polluting the cache, TOAST, a `sessions` table updated 5,000×/sec). Answer in writing before looking anything up, then verify.
 
@@ -140,6 +141,8 @@ These are written in the page as exercises; none have been run yet.
 **Topic and objective.** Month 3 topic, written ahead as documentation only (Phase 3 of the documentation plan): why read-check-write loses money or overdraws even inside a transaction, the three ways to hold `balance ≥ 0` under concurrent withdrawals, what each costs, and where all three stop working (a hot row).
 
 **Output.** [topics/concurrency-control-strategies/index.html](../topics/concurrency-control-strategies/index.html) — 10 sections. Widgets: a race simulator (N requests, five strategies, seeded interleaving, lock queue, per-tick timeline with lock-hold bars, invariant check); a 6-step conditional-UPDATE stepper showing the second request re-evaluate `WHERE` on the latest committed version and get 0 rows; a hot-row calculator (lock hold time, max tx/s, M/D/1 wait) comparing `FOR UPDATE` with a conditional UPDATE; a 6-step version-column stepper. Prediction templates for E24–E26.
+
+**Cases added (same day).** Section 09 "Bài toán thực tế" with cases C1–C3, each a shown problem and a hidden answer reasoned as a senior would (clarify, estimate, options with pros and cons, decision, implementation, risks and verification, common mistakes). The answers are reasoning from reading, not measurements. The same commit adds section 9 to the shared page structure in `content.md`, the `.case` component to `style.md`, and the section to `SKILL.md` and `CLAUDE.md`; pages written before 2026-10-20 still have ten sections.
 
 **What it covers.**
 
