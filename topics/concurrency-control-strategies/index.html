@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Giữ đúng số dư khi ghi đồng thời</title>
+<title>Kiểm soát ghi đồng thời trên số dư</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -179,7 +179,7 @@ details.answer summary{font-weight:500;color:var(--struct)}
 
 <div class="shell">
 <nav class="toc" aria-label="Mục lục">
-  <p>Ghi đồng thời lên số dư</p>
+  <p>Kiểm soát ghi đồng thời</p>
   <ol>
     <li><a href="#s1">Bản chất vấn đề</a></li>
     <li><a href="#s2">Cơ chế hoạt động</a></li>
@@ -196,7 +196,7 @@ details.answer summary{font-weight:500;color:var(--struct)}
 
 <main>
 <div class="hero">
-<h1>Giữ đúng số dư khi ghi đồng thời</h1>
+<h1>Kiểm soát ghi đồng thời trên số dư</h1>
 <p class="lede">Hai request cùng rút tiền từ một tài khoản. Code nào cũng kiểm tra số dư trước khi trừ, vậy mà số dư vẫn có thể sai hoặc âm. Bài này so sánh ba cách giữ đúng số dư trên MySQL 8.4: một câu <code>UPDATE</code> có điều kiện, khoá trước bằng <code>SELECT … FOR UPDATE</code>, và kiểm tra cột version. Mỗi cách đúng theo một kiểu, và trả giá theo một kiểu.</p>
 <div class="brief">
   <div><h4>Mục tiêu</h4><ul>
