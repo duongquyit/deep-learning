@@ -21,10 +21,10 @@ topic pages share one style, the style of the first topic, written down in
    the learner needed ("you forgot the parent", "INCLUDE needs id too") are the
    most valuable content; keep them.
 2. **Fill the fixed document structure.** Every page has the same hero brief
-   and the same ten sections in the same order: Bản chất vấn đề, Cơ chế hoạt
-   động, Vì sao thiết kế như vậy, Ví dụ, Thí nghiệm, Ảnh hưởng khi chạy
-   production, Hiểu lầm thường gặp, Câu hỏi ôn tập, Câu hỏi còn mở, Tài liệu
-   tham khảo. What goes in each is in `references/content.md`. Sort the
+   and the same eleven sections in the same order: Bản chất vấn đề, Cơ chế
+   hoạt động, Vì sao thiết kế như vậy, Ví dụ, Thí nghiệm, Ảnh hưởng khi chạy
+   production, Hiểu lầm thường gặp, Câu hỏi ôn tập, Bài toán thực tế, Câu hỏi
+   còn mở, Tài liệu tham khảo. What goes in each is in `references/content.md`. Sort the
    gathered material into them before writing anything.
 3. **Pick one widget per mechanism.** For each section ask: what moves or
    changes here? That is the widget. Use the patterns in

@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-19",
+  "generated_at": "2026-10-20",
   "program": {
     "start": "2026-10-19",
     "end": "2027-04-18",
@@ -244,6 +244,13 @@
   },
   "sessions": [
     {
+      "date": "2026-10-20",
+      "title": "Concurrency control strategies on a balance",
+      "artifact": "../topics/concurrency-control-strategies/index.html",
+      "planned": false,
+      "feeds": "Month 3"
+    },
+    {
       "date": "2026-10-19",
       "title": "Locking and deadlocks (InnoDB)",
       "artifact": "../topics/innodb-locking-deadlock/index.html",
@@ -306,6 +313,12 @@
       "work": "B+tree index internals (structure, split, slotted page, buffer pool, covering index, heap/MVCC) — conceptual only, no measurements; PostgreSQL-shaped, see open question 1",
       "artifact": "topics/btree-index-internals",
       "feeds": "Month 1, Weeks 1–2"
+    },
+    {
+      "date": "2026-10-20",
+      "work": "Concurrency control strategies on a balance (conditional UPDATE, FOR UPDATE, version column, hot rows) — documentation only, written ahead of Month 3; no measurements",
+      "artifact": "topics/concurrency-control-strategies",
+      "feeds": "Month 3"
     }
   ],
   "targets": {
@@ -569,10 +582,38 @@
         "provisional": true,
         "evidence": "same, §02, §04",
         "date": "2026-10-19"
+      },
+      {
+        "topic": "Lost update vs check-then-act on a balance; why a transaction under RR does not prevent either",
+        "level": 2,
+        "provisional": true,
+        "evidence": "concurrency-control-strategies §01–§02",
+        "date": "2026-10-20"
+      },
+      {
+        "topic": "Three concurrency-control strategies (conditional UPDATE, FOR UPDATE, version column): mechanism, cost, when to use",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §02–§03, §06",
+        "date": "2026-10-20"
+      },
+      {
+        "topic": "Checking write results: affected rows (changed vs matched, CLIENT_FOUND_ROWS, mysql2 default)",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §02, §04",
+        "date": "2026-10-20"
+      },
+      {
+        "topic": "Hot-row throughput: lock hold time as the ceiling, and the alternatives (append-only ledger, split balance, batching)",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §02",
+        "date": "2026-10-20"
       }
     ],
     "levels": {
-      "2": 33,
+      "2": 37,
       "1": 1
     }
   }

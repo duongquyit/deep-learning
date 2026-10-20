@@ -171,9 +171,32 @@ details.answer summary{font-weight:500;color:var(--struct)}
 }
 ```
 
+## Case CSS
+
+Pages that have section 9 (Bài toán thực tế, see `content.md`) add this block
+after the base CSS, as it is. Pages without section 9 do not need it.
+
+```css
+/* bài toán thực tế */
+.case{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:0 var(--r-m) var(--r-m) 0;padding:16px 20px;margin:22px 0;max-width:720px}
+.case>h3{margin:0 0 6px;font-size:1.15rem}
+.case .src{font-size:13.5px;color:var(--ink-2);margin:0 0 12px}
+.case dl{margin:0;display:grid;grid-template-columns:104px minmax(0,1fr);gap:8px 16px}
+.case dt{font-weight:600;color:var(--struct);font-size:15px}
+.case dd{margin:0}
+.case dd p:last-child,.case dd ul:last-child{margin-bottom:0}
+.case details{max-width:none;margin:12px 0 0}
+.case details.hint{background:var(--paper)}
+.case details.answer[open]{background:var(--surface)}
+.ah{font-size:15.5px;color:var(--struct);margin:20px 0 6px}
+.answer .tablewrap{max-width:none}
+@media (max-width:900px){.case{padding:14px}.case dl{grid-template-columns:minmax(0,1fr);gap:2px}.case dd{margin-bottom:8px}}
+```
+
 ## Markup that goes with it
 
 - Hero: `<div class="hero"><h1>…</h1><p class="lede">…</p><div class="brief">…</div></div>` at the top of `<main>`. The brief has three blocks, each `<div><h4>Mục tiêu</h4><ul>…</ul></div>`, then Cần biết trước, then Trạng thái. Section order and headings are in `content.md`.
+- Real-world case (section 9): `<div class="case" id="c1"><h3>C1. Short title</h3><p class="src">Dựa trên: …</p><dl><dt>Bối cảnh</dt><dd>…</dd><dt>Yêu cầu</dt><dd>…</dd><dt>Ràng buộc</dt><dd>…</dd><dt>Nhiệm vụ</dt><dd>…</dd></dl><details class="hint"><summary>Gợi ý</summary>…</details><details class="answer"><summary>Xem lời giải</summary><h4 class="ah">1. Làm rõ đề bài</h4>…</details></div>`.
 - Recall question: `<details><summary><span class="tag">Dự đoán</span>Short title</summary><p>Question</p><details class="answer"><summary>Xem đáp án</summary><p>…</p></details></details>`.
 - Section: `<section id="sN"><header><span class="num">0N</span><h2>…</h2></header> … </section>`.
 - Mistake callout: `<div class="note"><strong>Lỗi hay gặp:</strong> …</div>`.
