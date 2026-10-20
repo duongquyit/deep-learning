@@ -1,0 +1,899 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Nhất quán trong hệ phân tán: CAP, PACELC, quorum</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F2F4F6; --surface:#FFFFFF; --ink:#18203A; --ink-2:#56607A; --ink-3:#8A93A8;
+  --rule:#CCD3DD; --rule-strong:#8C96AB;
+  --struct:#3446B8; --struct-bg:#E6E9FA;            /* cấu trúc index, chrome của trang */
+  --row:#16795F;    --row-bg:#DDF2EA;               /* dữ liệu row thật */
+  --hot:#9A5F00;    --hot-bg:#FCEFD2; --hot-line:#E3A21A;  /* bị ghi, bị chạm, bị lọc */
+  --miss:#B5302B;   --miss-bg:#FBE1DF;              /* đọc từ disk, việc thừa, lỗi */
+  --path:#0B7A8A;   --path-bg:#D8F1F3;              /* đường đi hoặc khoảng đang đọc */
+  --key:#A8327A;    --key-bg:#F8E0EE;               /* con trỏ: PK, TID */
+  --ram:#5B4BB0;    --ram-bg:#E7E3FA;               /* hit trong buffer pool */
+  --grid:rgba(52,70,184,.06);
+  --r-s:4px; --r-m:8px;
+  --sans:"Instrument Sans",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --paper:#0F1320; --surface:#171C2B; --ink:#E6E9F2; --ink-2:#A3ABC0; --ink-3:#6E7790;
+  --rule:#2C3448; --rule-strong:#55607A;
+  --struct:#97A3FF; --struct-bg:#232A55;
+  --row:#5FD0AE;    --row-bg:#123A31;
+  --hot:#F2BE5C;    --hot-bg:#3B2C0E; --hot-line:#E3A21A;
+  --miss:#FF8A84;   --miss-bg:#3E1A1A;
+  --path:#5ED3E0;   --path-bg:#113A40;
+  --key:#F28DC4;    --key-bg:#3E1A2E;
+  --ram:#B7A8FF;    --ram-bg:#2A2350;
+  --grid:rgba(151,163,255,.05);
+}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important;animation:none!important}}
+body{margin:0;color:var(--ink);font:400 17px/1.65 var(--sans);
+  background-color:var(--paper);
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:24px 24px}
+a{color:var(--struct)}
+:focus-visible{outline:2px solid var(--struct);outline-offset:2px}
+
+/* layout */
+.shell{display:grid;grid-template-columns:230px minmax(0,1fr);gap:56px;max-width:1180px;margin:0 auto;padding:0 32px}
+nav.toc{position:sticky;top:0;align-self:start;height:100vh;padding:48px 0;overflow:auto}
+nav.toc p{font-weight:600;margin:0 0 12px;font-size:15px}
+nav.toc ol,.mobile-toc ol{list-style:none;margin:0;padding:0;counter-reset:s}
+nav.toc li,.mobile-toc li{counter-increment:s;margin:0}
+nav.toc a,.mobile-toc a{display:grid;grid-template-columns:28px 1fr;padding:5px 0;color:var(--ink-2);text-decoration:none;font-size:14.5px;line-height:1.4}
+nav.toc a::before,.mobile-toc a::before{content:counter(s,decimal-leading-zero);font:500 12px/1.9 var(--mono);color:var(--ink-3)}
+nav.toc a:hover,nav.toc a.on{color:var(--struct)}
+main{min-width:0;padding:56px 0 120px}
+.prose{max-width:720px}
+section{padding-top:72px}
+section>header{display:grid;grid-template-columns:auto 1fr;gap:0 18px;align-items:baseline;max-width:720px;margin-bottom:12px}
+section>header .num{font:500 15px var(--mono);color:var(--struct);border:1.5px solid var(--struct);border-radius:var(--r-s);padding:2px 7px;transform:translateY(-4px)}
+h1,h2,h3,h4{line-height:1.2;letter-spacing:-.015em;margin:0}
+h1{font-size:clamp(2.3rem,5.4vw,3.9rem);font-weight:700;letter-spacing:-.03em;line-height:1.02;max-width:14ch;margin-bottom:20px}
+.lede{font-size:19px;color:var(--ink-2);max-width:56ch;margin-bottom:28px}
+h2{font-size:clamp(1.6rem,3vw,2.1rem);font-weight:650}
+h3{font-size:1.2rem;font-weight:600;margin:36px 0 8px}
+p{margin:0 0 14px}
+ul,ol.list{margin:0 0 16px;padding-left:22px}
+li{margin:4px 0}
+code{font:0.88em var(--mono);background:var(--struct-bg);color:var(--ink);padding:1px 5px;border-radius:3px}
+pre{font:13.5px/1.6 var(--mono);background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:var(--r-s);padding:14px 16px;overflow-x:auto;margin:0 0 18px;max-width:720px}
+pre code{background:none;padding:0}
+.tablewrap{overflow-x:auto;max-width:720px;margin:0 0 20px}
+table{border-collapse:collapse;width:100%;max-width:720px;margin:0 0 20px;font-size:15px;background:var(--surface)}
+.tablewrap table{margin:0;min-width:560px}
+th,td{text-align:left;padding:9px 12px;border:1px solid var(--rule);vertical-align:top}
+th{font-weight:600;background:var(--struct-bg)}
+
+/* widget frame: styled like a page, header strip = page header */
+.frame{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);margin:22px 0 28px;max-width:920px;overflow:hidden}
+.frame>.ph{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:9px 16px;border-bottom:1px solid var(--rule);background:var(--struct-bg);font-size:14px}
+.frame>.ph strong{font-weight:600}
+.frame>.ph .meta{margin-left:auto;font:500 12.5px var(--mono);color:var(--ink-2)}
+.frame .bd{padding:16px;min-width:0}
+.frame svg{display:block;width:100%;height:auto}
+.st-t{font:600 16px var(--sans);margin:0 0 8px}
+.desc{background:var(--paper);border-radius:var(--r-s);padding:12px 14px;margin-top:12px;min-height:84px;font-size:15.5px;color:var(--ink-2)}
+.desc pre{margin:10px 0 0;font-size:12.5px;border-left-color:var(--rule-strong)}
+.nav{display:flex;gap:8px;margin-top:12px;align-items:center}
+button{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 14px;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--struct);color:var(--struct)}
+button:disabled{opacity:.4;cursor:default}
+button.primary,button[aria-pressed="true"]{background:var(--struct);border-color:var(--struct);color:var(--surface)}
+button.primary:hover:not(:disabled),button[aria-pressed="true"]:hover{color:var(--surface);filter:brightness(1.1)}
+input,select{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 10px}
+input[type=number]{width:84px}
+input[type=range],input[type=checkbox]{accent-color:var(--struct)}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-top:12px}
+.stat{background:var(--paper);border-radius:var(--r-s);padding:8px 12px}
+.stat span{display:block;font-size:13px;color:var(--ink-2)}
+.stat b{font:600 20px var(--sans);font-variant-numeric:tabular-nums}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;color:var(--ink-2);margin-top:12px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:14px;height:14px;border-radius:3px;border:2px solid;display:inline-block}
+.fine{font-size:13.5px;color:var(--ink-2);margin:10px 0 0}  /* chú thích nhỏ dưới widget */
+
+/* svg text */
+.tb{font:600 14px var(--sans)} .t{font:400 13px var(--sans)} .ts{font:400 12px var(--sans)} .tm{font:500 12.5px var(--mono)}
+.lbl{fill:var(--ink-2);font:400 12.5px var(--sans)}
+
+/* callouts */
+.note{border-left:3px solid var(--hot-line);background:var(--hot-bg);padding:12px 16px;border-radius:0 var(--r-s) var(--r-s) 0;margin:18px 0;max-width:720px;font-size:16px}
+.note strong{color:var(--hot)}
+.senior{border:1.5px solid var(--struct);border-radius:var(--r-m);padding:14px 18px;margin:22px 0;max-width:720px;background:var(--surface)}
+.senior h4{font-size:16px;margin-bottom:6px;color:var(--struct)}
+.senior p:last-child,.senior ul:last-child{margin-bottom:0}
+details{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-s);padding:10px 14px;margin:10px 0;max-width:720px}
+details summary{cursor:pointer;font-weight:600}
+details[open] summary{margin-bottom:8px}
+details.answer{background:var(--paper);border-style:dashed;margin:10px 0 0}
+details.answer summary{font-weight:500;color:var(--struct)}
+.tag{display:inline-block;font:500 12px var(--sans);color:var(--ink-2);border:1px solid var(--rule-strong);border-radius:999px;padding:0 8px;margin-right:6px;vertical-align:1px}
+
+/* hero brief: mục tiêu, cần biết trước, trạng thái */
+.brief{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px 24px;background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);padding:14px 18px;max-width:920px;margin:0 0 8px;font-size:15px}
+.brief h4{font-size:14px;color:var(--struct);margin:0 0 4px}
+.brief ul{margin:0;padding-left:18px}
+.brief p{margin:0}
+
+.mobile-toc{display:none}
+@media (max-width:900px){
+  .shell{grid-template-columns:1fr;padding:0 16px;gap:0}
+  nav.toc{display:none}
+  .mobile-toc{display:block;margin-top:20px}
+  main{padding-top:32px}
+  .frame .bd{padding:12px}
+  body{font-size:16px}
+}
+
+
+/* bài toán thực tế */
+.case{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:0 var(--r-m) var(--r-m) 0;padding:16px 20px;margin:22px 0;max-width:720px}
+.case>h3{margin:0 0 6px;font-size:1.15rem}
+.case .src{font-size:13.5px;color:var(--ink-2);margin:0 0 12px}
+.case dl{margin:0;display:grid;grid-template-columns:104px minmax(0,1fr);gap:8px 16px}
+.case dt{font-weight:600;color:var(--struct);font-size:15px}
+.case dd{margin:0}
+.case dd p:last-child,.case dd ul:last-child{margin-bottom:0}
+.case details{max-width:none;margin:12px 0 0}
+.case details.hint{background:var(--paper)}
+.case details.answer[open]{background:var(--surface)}
+.ah{font-size:15.5px;color:var(--struct);margin:20px 0 6px}
+.answer .tablewrap{max-width:none}
+@media (max-width:900px){.case{padding:14px}.case dl{grid-template-columns:minmax(0,1fr);gap:2px}.case dd{margin-bottom:8px}}
+
+/* ---- page widgets ---- */
+.n rect{fill:var(--surface);stroke:var(--rule-strong);stroke-width:1}
+.n text{fill:var(--ink)}
+.n.struct rect{fill:var(--struct-bg);stroke:var(--struct)} .n.struct text{fill:var(--struct)}
+.n.row rect{fill:var(--row-bg);stroke:var(--row);stroke-width:1.6} .n.row text{fill:var(--row)}
+.n.hot rect{fill:var(--hot-bg);stroke:var(--hot);stroke-width:2} .n.hot text{fill:var(--hot)}
+.n.miss rect{fill:var(--miss-bg);stroke:var(--miss);stroke-width:2} .n.miss text{fill:var(--miss)}
+.n.path rect{fill:var(--path-bg);stroke:var(--path);stroke-width:2} .n.path text{fill:var(--path)}
+.n.key rect{fill:var(--key-bg);stroke:var(--key);stroke-width:2} .n.key text{fill:var(--key)}
+.n.dim rect{fill:var(--paper);stroke:var(--rule);stroke-dasharray:4 3} .n.dim text{fill:var(--ink-3)}
+.edge{stroke:var(--rule-strong);stroke-width:1.4;fill:none}
+.edge.on{stroke:var(--path);stroke-width:2.4}
+.edge.cut{stroke:var(--miss);stroke-width:2.4;stroke-dasharray:6 5}
+.zone{fill:none;stroke:var(--rule-strong);stroke-dasharray:4 4}
+.xmark{stroke:var(--miss);stroke-width:3;stroke-linecap:round}
+.op{stroke-width:6;stroke-linecap:round}
+.op.w{stroke:var(--key)} .op.r0{stroke:var(--miss)} .op.r1{stroke:var(--row)}
+.axis{stroke:var(--rule-strong);stroke-width:1}
+.lg-path{border-color:var(--path);background:var(--path-bg)} .lg-row{border-color:var(--row);background:var(--row-bg)}
+.lg-miss{border-color:var(--miss);background:var(--miss-bg)} .lg-hot{border-color:var(--hot);background:var(--hot-bg)}
+.lg-key{border-color:var(--key);background:var(--key-bg)} .lg-dim{border-color:var(--rule);background:var(--paper);border-style:dashed}
+.lg-w{border-color:var(--key);background:var(--key)} .lg-r1{border-color:var(--row);background:var(--row)} .lg-r0{border-color:var(--miss);background:var(--miss)}
+.calc{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px 14px;margin-bottom:12px}
+.calc label{display:flex;flex-direction:column;gap:4px;font-size:13.5px;color:var(--ink-2)}
+.calc input[type=number]{width:100%;max-width:170px}
+.stat b.bad{color:var(--miss)} .stat b.good{color:var(--row)} .stat b.warn{color:var(--hot)}
+.toggles{display:flex;flex-wrap:wrap;gap:8px 16px;margin:10px 0 0;font-size:14px;align-items:center}
+.toggles .grp{display:inline-flex;gap:4px;align-items:center}
+.toggles button{padding:4px 10px;font:600 13px var(--mono)}
+.gtab{width:100%;border-collapse:collapse;font-size:14.5px;margin:12px 0 0}
+.gtab td,.gtab th{padding:7px 10px;border:1px solid var(--rule)}
+.gtab td.ok{color:var(--row);font-weight:600} .gtab td.no{color:var(--miss);font-weight:600}
+</style>
+</head>
+<body>
+
+<div class="shell">
+<nav class="toc" aria-label="Mục lục">
+  <p>Nhất quán trong hệ phân tán</p>
+  <ol>
+    <li><a href="#s1">Bản chất vấn đề</a></li>
+    <li><a href="#s2">Cơ chế hoạt động</a></li>
+    <li><a href="#s3">Vì sao thiết kế như vậy</a></li>
+    <li><a href="#s4">Ví dụ</a></li>
+    <li><a href="#s5">Thí nghiệm</a></li>
+    <li><a href="#s6">Ảnh hưởng khi chạy production</a></li>
+    <li><a href="#s7">Hiểu lầm thường gặp</a></li>
+    <li><a href="#s8">Câu hỏi ôn tập</a></li>
+    <li><a href="#s9">Bài toán thực tế</a></li>
+    <li><a href="#s10">Câu hỏi còn mở</a></li>
+    <li><a href="#s11">Tài liệu tham khảo</a></li>
+  </ol>
+</nav>
+
+<main>
+<div class="hero">
+<h1>Nhất quán trong hệ phân tán: CAP, PACELC, quorum</h1>
+<p class="lede">Khi dữ liệu nằm trên nhiều máy, câu hỏi "giá trị hiện tại là gì" không còn một câu trả lời hiển nhiên. Mạng có thể đứt giữa hai nửa hệ thống, và ngay cả khi mạng tốt, đợi mọi máy đồng ý cũng tốn thời gian. Bài này giải thích CAP và PACELC theo đúng nghĩa của chúng, các mức nhất quán từ mạnh tới yếu, cách tính quorum, và cách chọn mức nhất quán cho từng tính năng thay vì cho cả hệ thống.</p>
+<div class="brief">
+  <div><h4>Mục tiêu</h4><ul>
+    <li>Phát biểu đúng CAP: chỉ khi mạng bị chia cắt mới phải chọn giữa nhất quán và luôn trả lời; và chỉ ra vì sao "chọn 2 trong 3" là cách nói gây hiểu lầm.</li>
+    <li>Dùng PACELC để mô tả cả lúc bình thường (độ trễ đổi lấy nhất quán), và xếp được vài hệ thống quen thuộc.</li>
+    <li>Phân biệt linearizable, causal, read-your-writes, monotonic reads, eventual; chọn mức cho một tính năng cụ thể.</li>
+    <li>Tính được với N, W, R: lần đọc có chắc thấy lần ghi mới nhất không, chịu được bao nhiêu máy chết, và độ trễ ra sao; nói được vì sao R + W &gt; N vẫn chưa đủ.</li>
+  </ul></div>
+  <div><h4>Cần biết trước</h4><ul>
+    <li><a href="../replication-read-your-writes/index.html">Replication và read-your-writes</a>: async, semi-sync, độ trễ.</li>
+    <li><a href="../transactional-outbox/index.html">Transactional outbox</a>: saga, nhất quán sau cùng giữa các service.</li>
+    <li><a href="../capacity-estimation/index.html">Ước lượng capacity</a>: độ trễ mạng giữa zone và region.</li>
+  </ul></div>
+  <div><h4>Trạng thái</h4><p>Level 2 (prov.). Định nghĩa CAP lấy từ bài của Gilbert và Lynch; PACELC từ bài của Abadi (2012); quorum từ Dynamo. Hành vi và mặc định của MySQL Group Replication lấy từ manual và mã nguồn 8.4. Widget là mô hình; chưa đo (E44–E45).</p></div>
+</div>
+<details class="mobile-toc"><summary>Mục lục</summary><ol><li><a href="#s1">Bản chất vấn đề</a></li><li><a href="#s2">Cơ chế hoạt động</a></li><li><a href="#s3">Vì sao thiết kế như vậy</a></li><li><a href="#s4">Ví dụ</a></li><li><a href="#s5">Thí nghiệm</a></li><li><a href="#s6">Ảnh hưởng khi chạy production</a></li><li><a href="#s7">Hiểu lầm thường gặp</a></li><li><a href="#s8">Câu hỏi ôn tập</a></li><li><a href="#s9">Bài toán thực tế</a></li><li><a href="#s10">Câu hỏi còn mở</a></li><li><a href="#s11">Tài liệu tham khảo</a></li></ol></details>
+</div>
+
+<!-- 1 -->
+<section id="s1">
+<header><span class="num">01</span><h2>Bản chất vấn đề</h2></header>
+<div class="prose">
+<p>Hệ thống bán vé có ba máy lưu dữ liệu: hai ở Hà Nội, một ở TP.HCM. Còn đúng một ghế cuối. Đường mạng giữa hai thành phố đứt trong 30 giây. Đúng lúc đó, một khách ở Hà Nội và một khách ở TP.HCM cùng bấm "Đặt". Máy ở TP.HCM không biết gì về Hà Nội. Nó có hai lựa chọn:</p>
+<ul>
+<li><strong>Từ chối</strong> (hoặc bắt khách chờ) cho tới khi nối lại được: giữ dữ liệu đúng, nhưng phía TP.HCM không phục vụ được.</li>
+<li><strong>Nhận đơn</strong> bằng thông tin nó đang có: luôn trả lời, nhưng có thể bán một ghế hai lần, và phải xử lý khi nối lại.</li>
+</ul>
+<p>Đó chính là định lý CAP. Gilbert và Lynch chứng minh: trong một mạng có thể làm mất tin nhắn, không thể vừa bảo đảm mọi máy còn sống đều trả lời (availability) vừa bảo đảm mọi thao tác trông như xảy ra lần lượt trên một bản dữ liệu duy nhất (consistency, theo nghĩa linearizable). Khi mạng bị chia cắt (partition), phải chọn một.</p>
+<p>Hình dung hai quầy bán vé ở hai đầu sân vận động, nói chuyện qua bộ đàm. Bộ đàm hỏng. Quầy nào cũng có thể đóng cửa chờ sửa, hoặc cứ bán và hy vọng không trùng ghế. Chọn chế độ dưới đây và bấm qua từng bước.</p>
+</div>
+<div class="frame" id="part"></div>
+</section>
+
+<!-- 2 -->
+<section id="s2">
+<header><span class="num">02</span><h2>Cơ chế hoạt động</h2></header>
+<div class="prose">
+<h3>CAP nói gì, và không nói gì</h3>
+<p>Ý chính: CAP chỉ nói về lúc mạng bị chia cắt, và với nghĩa rất hẹp của hai chữ C và A. Nó không nói hệ thống "chọn 2 trong 3" một lần cho mãi mãi.</p>
+<ul>
+<li><strong>C</strong> trong CAP là linearizable: mọi thao tác trông như xảy ra tại một thời điểm duy nhất, theo một thứ tự chung. Không phải chữ C trong ACID (giữ ràng buộc dữ liệu).</li>
+<li><strong>A</strong> trong CAP là mọi request tới một máy còn sống đều nhận được câu trả lời, không giới hạn thời gian. Một hệ thống trả lời sau 30 giây vẫn "available" theo nghĩa này, dù với người dùng là hỏng.</li>
+<li><strong>P</strong> không phải là thứ để chọn. Mạng giữa các máy luôn có thể đứt. Một hệ thống "CA" chỉ có nghĩa khi chạy trên một máy.</li>
+<li>Không có partition thì không có gì buộc phải bỏ C hay A. Phần lớn thời gian, câu hỏi thật là cái giá độ trễ, như PACELC nói ở mục tiếp theo.</li>
+</ul>
+</div>
+<div class="note"><strong>Lỗi hay gặp:</strong> gắn nhãn cả một hệ thống là "CP" hay "AP" rồi coi như xong. Một hệ thống có thể xử lý mỗi loại thao tác theo một cách: đặt ghế thì từ chối khi mất đa số, còn xem sơ đồ ghế thì trả bản cũ. Quy tắc: chọn hành vi khi bị chia cắt cho từng thao tác, theo cái giá của sai lệch.</div>
+
+<div class="prose">
+<h3>PACELC: lúc không có sự cố thì sao</h3>
+<p>Ý chính: Abadi bổ sung nửa còn lại của CAP. Nếu có partition (P), hệ thống chọn giữa A và C; còn (Else) lúc bình thường, nó chọn giữa độ trễ thấp (L) và nhất quán (C). Phần "else" mới là thứ ảnh hưởng tới người dùng hằng ngày.</p>
+<p>Lý do: muốn mọi lần đọc thấy lần ghi mới nhất, lần ghi phải chờ các bản sao khác xác nhận, hoặc lần đọc phải hỏi nhiều bản sao. Cả hai đều thêm ít nhất một vòng mạng. Trong cùng zone là dưới 1 ms; giữa hai region là hàng chục tới hàng trăm mili giây.</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Hệ thống</th><th>Khi bị chia cắt</th><th>Lúc bình thường</th><th>Nguồn</th></tr></thead>
+<tbody>
+<tr><td>Dynamo, Cassandra, Riak (mặc định)</td><td>A</td><td>L</td><td>Abadi 2012</td></tr>
+<tr><td>VoltDB, H-Store</td><td>C</td><td>C</td><td>Abadi 2012</td></tr>
+<tr><td>PNUTS (Yahoo)</td><td>C</td><td>L</td><td>Abadi 2012</td></tr>
+<tr><td>MySQL primary + replica async, đọc từ replica</td><td>Failover có thể mất dữ liệu; replica vẫn trả bản cũ</td><td>L (đọc replica nhanh, có thể cũ)</td><td>suy luận của trang này</td></tr>
+<tr><td>MySQL Group Replication, single-primary</td><td>C: nhóm mất đa số thì không commit được</td><td>Tuỳ <code>group_replication_consistency</code>: <code>EVENTUAL</code> là L, <code>BEFORE</code>/<code>AFTER</code> là C</td><td>manual 8.4; xếp loại là suy luận</td></tr>
+</tbody></table></div>
+
+<div class="prose">
+<h3>Các mức nhất quán</h3>
+<p>Ý chính: giữa "mọi thứ luôn đúng ngay" và "rồi sẽ đúng" có nhiều mức trung gian, và mỗi tính năng chỉ cần một mức. Mức càng mạnh càng phải phối hợp nhiều, nên càng chậm và càng dễ ngừng phục vụ khi mạng có sự cố.</p>
+<ul>
+<li><strong>Linearizable:</strong> có một thứ tự chung cho mọi thao tác; lần đọc bắt đầu sau khi một lần ghi đã xong thì phải thấy lần ghi đó.</li>
+<li><strong>Causal:</strong> nếu thao tác B phụ thuộc thao tác A (B đọc kết quả của A, hoặc cùng một người làm A rồi B), ai cũng thấy A trước B. Các thao tác không liên quan có thể được thấy theo thứ tự khác nhau.</li>
+<li><strong>Read-your-writes:</strong> một người luôn thấy lần ghi của chính mình.</li>
+<li><strong>Monotonic reads:</strong> một người đã thấy bản mới thì không thấy lại bản cũ.</li>
+<li><strong>Eventual:</strong> nếu ngừng ghi, cuối cùng mọi bản sao giống nhau. Không hứa gì về lúc trước đó.</li>
+</ul>
+<p>Widget dưới đây là một lịch sử nhỏ: A ghi x = 1, rồi bốn lần đọc ở các thời điểm khác nhau. Bấm để chọn giá trị mỗi lần đọc trả về, và xem mức nhất quán nào còn giữ.</p>
+</div>
+<div class="frame" id="hist">
+  <div class="ph"><strong>Một lịch sử, năm mức nhất quán</strong><span class="meta" id="hsMeta"></span></div>
+  <div class="bd">
+    <svg id="hsSvg" viewBox="0 0 680 200" role="img" aria-label="Dòng thời gian của lần ghi và bốn lần đọc của ba client"></svg>
+    <div class="toggles" id="hsTog"></div>
+    <table class="gtab" id="hsTab"></table>
+    <div class="desc" aria-live="polite" id="hsDesc"></div>
+    <div class="legend"><span><i class="lg-w"></i>ghi x = 1 (từ lúc gửi tới lúc xong)</span><span><i class="lg-r1"></i>đọc trả về 1</span><span><i class="lg-r0"></i>đọc trả về 0</span></div>
+    <p class="fine">Giá trị ban đầu của x là 0. Mỗi đoạn là khoảng thời gian từ lúc gửi request tới lúc nhận trả lời. R4 chồng lên lần ghi, nên trả 0 hay 1 đều hợp lệ với linearizable. "Eventual" luôn thoả mãn ở đây, vì không có lần đọc nào đủ muộn để bắt buộc phải thấy 1. Causal ở đây gồm read-your-writes của A và monotonic reads của B.</p>
+  </div>
+</div>
+
+<div class="prose">
+<h3>Quorum: N, W, R</h3>
+<p>Ý chính: lưu mỗi giá trị trên N bản sao. Một lần ghi chỉ cần W bản sao xác nhận; một lần đọc hỏi R bản sao. Nếu R + W &gt; N, tập đọc và tập ghi luôn chung ít nhất một bản sao, nên lần đọc thấy được lần ghi gần nhất đã thành công, trong điều kiện bình thường.</p>
+<p>Đây là cách Dynamo và các hệ thống theo nó cho phép chọn điểm cân bằng: W lớn thì ghi chậm và dễ thất bại khi có máy chết, R lớn thì đọc chậm. Hệ thống đồng thuận như Raft hay Paxos (Group Replication dùng một biến thể Paxos) dùng đa số: với 2f + 1 máy, chịu được f máy chết.</p>
+</div>
+<div class="frame" id="quorum">
+  <div class="ph"><strong>Quorum: chồng lấn, chịu lỗi và độ trễ</strong><span class="meta" id="qrMeta"></span></div>
+  <div class="bd">
+    <div class="calc">
+      <label>Số bản sao N<input id="qrN" type="number" min="1" max="9" value="3"></label>
+      <label>W (số bản sao xác nhận ghi)<input id="qrW" type="number" min="1" max="9" value="2"></label>
+      <label>R (số bản sao hỏi khi đọc)<input id="qrR" type="number" min="1" max="9" value="2"></label>
+      <label>Vị trí các bản sao<select id="qrL">
+        <option value="az">3 zone trong một region</option>
+        <option value="2r">2 region</option>
+        <option value="3r" selected>3 region</option>
+      </select></label>
+    </div>
+    <svg id="qrSvg" viewBox="0 0 680 170" role="img" aria-label="Các bản sao, tập ghi và tập đọc trong trường hợp chồng lấn ít nhất"></svg>
+    <div class="stats" id="qrStats"></div>
+    <div class="desc" aria-live="polite" id="qrDesc"></div>
+    <div class="legend"><span><i class="lg-key"></i>chỉ trong tập ghi</span><span><i class="lg-path"></i>chỉ trong tập đọc</span><span><i class="lg-row"></i>trong cả hai (chồng lấn)</span><span><i class="lg-dim"></i>không trong tập nào</span></div>
+    <p class="fine">Hình vẽ trường hợp xấu nhất: tập đọc tránh tập ghi nhiều nhất có thể. Độ trễ của một thao tác bằng vòng mạng tới bản sao thứ W (ghi) hoặc thứ R (đọc) gần nhất, tính từ client ở region đầu tiên. Vòng mạng giả định: cùng zone 1 ms, khác zone 2 ms, khác region 40–80 ms. Mô hình; chưa đo.</p>
+  </div>
+</div>
+<div class="note"><strong>Lỗi hay gặp:</strong> tin rằng R + W &gt; N là đủ để có linearizable. Không đủ: hai lần ghi đồng thời có thể tới các bản sao theo thứ tự khác nhau; một lần ghi thất bại giữa chừng vẫn để lại giá trị trên vài bản sao; "sloppy quorum" của Dynamo cho ghi vào máy ngoài danh sách khi máy chính bị lỗi; và chọn bản mới nhất bằng đồng hồ thì phụ thuộc đồng hồ các máy. Quy tắc: cần linearizable thì dùng hệ thống có đồng thuận (một leader, đa số đồng ý), không tự ghép từ quorum.</div>
+
+<div class="prose">
+<h3>Khi hai bên cùng ghi: xung đột</h3>
+<p>Ý chính: hệ thống chọn "luôn trả lời" khi bị chia cắt thì phải hợp nhất các lần ghi xung đột khi nối lại. Cách đơn giản nhất làm mất dữ liệu một cách lặng lẽ.</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Cách</th><th>Làm thế nào</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>Ghi sau thắng (last write wins, LWW)</td><td>Giữ bản có dấu thời gian lớn nhất</td><td>Đơn giản, luôn hội tụ</td><td>Bỏ đi lần ghi còn lại mà không báo; phụ thuộc đồng hồ</td></tr>
+<tr><td>Version vector, giữ các bản xung đột</td><td>Phát hiện hai bản không bản nào "sau" bản nào; trả cả hai cho ứng dụng</td><td>Không mất dữ liệu</td><td>Ứng dụng phải tự hợp nhất (Dynamo: giỏ hàng gộp lại, món đã xoá có thể quay lại)</td></tr>
+<tr><td>CRDT</td><td>Kiểu dữ liệu tự hợp nhất được: bộ đếm cộng theo từng máy, tập hợp chỉ thêm</td><td>Hợp nhất tự động, đúng toán học</td><td>Chỉ cho một số kiểu dữ liệu; không giữ được ràng buộc như "không âm"</td></tr>
+<tr><td>Tránh xung đột</td><td>Mỗi key chỉ có một nơi được ghi (leader theo key, theo region)</td><td>Không có xung đột để giải</td><td>Ghi từ xa phải đi tới nơi sở hữu: thêm độ trễ</td></tr>
+</tbody></table></div>
+
+<div class="prose">
+<h3>Nhất quán giữa nhiều service</h3>
+<p>Ý chính: khi dữ liệu nằm ở nhiều service, mỗi service có database riêng, không có transaction chung. Nhất quán giữa chúng là nhất quán sau cùng (eventual), xây bằng event qua outbox, consumer idempotent, và saga có bước bù trừ (xem <a href="../transactional-outbox/index.html">trang outbox</a>).</p>
+<ul>
+<li>Mỗi mẩu dữ liệu có đúng một service sở hữu; các service khác giữ bản sao chỉ để đọc, cập nhật bằng event.</li>
+<li>Event mang số version; consumer bỏ qua event có version cũ hơn cái nó đã có, vì event có thể tới sai thứ tự.</li>
+<li>Bước quyết định tiền hay quyền đọc từ service sở hữu, không đọc từ bản sao.</li>
+</ul>
+</div>
+</section>
+
+<!-- 3 -->
+<section id="s3">
+<header><span class="num">03</span><h2>Vì sao thiết kế như vậy</h2></header>
+<div class="prose">
+<p><strong>Vì sao linearizable đắt?</strong> Muốn mọi người thấy cùng một thứ tự, phải có một nơi quyết định thứ tự (một leader) hoặc đa số đồng ý cho mỗi thao tác. Cả hai đều cần ít nhất một vòng mạng tới đa số bản sao. Đặt bản sao ở nhiều region để chịu được mất cả region thì vòng mạng đó là hàng chục tới hàng trăm mili giây cho mỗi lần ghi.</p>
+<p><strong>Vì sao dùng đa số?</strong> Hai đa số bất kỳ luôn chung ít nhất một máy, nên hai nửa bị chia cắt không thể cùng quyết định. Với 3 máy chịu được 1 máy chết, với 5 máy chịu được 2. 4 máy vẫn chỉ chịu được 1, nên số máy thường là số lẻ.</p>
+<p><strong>Vì sao nhiều hệ thống chọn eventual?</strong> Vì phần lớn dữ liệu chịu được cũ một chút, và đổi lại được độ trễ thấp cộng khả năng phục vụ khi mạng có sự cố. Cái sai là chọn eventual cho dữ liệu không chịu được nó, như tồn kho, số dư, quyền truy cập.</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Mức</th><th>Cần phối hợp</th><th>Khi bị chia cắt</th><th>Hợp với</th></tr></thead>
+<tbody>
+<tr><td>Linearizable</td><td>Đa số mỗi thao tác, hoặc một leader</td><td>Phía thiểu số ngừng phục vụ</td><td>Khoá phân tán, giữ chỗ, tồn kho cuối cùng, tạo username duy nhất</td></tr>
+<tr><td>Causal</td><td>Theo dõi phụ thuộc giữa thao tác</td><td>Phục vụ được ở cả hai phía</td><td>Bình luận và trả lời, mạng xã hội</td></tr>
+<tr><td>Read-your-writes, monotonic</td><td>Định tuyến theo người dùng (trang replication)</td><td>Phục vụ được nếu người dùng ở cùng phía với dữ liệu của họ</td><td>Hồ sơ, đơn hàng của tôi</td></tr>
+<tr><td>Eventual</td><td>Không</td><td>Phục vụ được ở cả hai phía</td><td>Lượt xem, gợi ý, bộ đếm hiển thị, cache</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- 4 -->
+<section id="s4">
+<header><span class="num">04</span><h2>Ví dụ</h2></header>
+<div class="prose"><p>Câu lệnh Group Replication theo manual 8.4; mặc định đọc từ mã nguồn 8.4. Chưa chạy trên lab.</p><h3>MySQL Group Replication: xem nhóm và chọn mức nhất quán</h3></div>
+<pre><code>-- thành viên và trạng thái (ONLINE, RECOVERING, UNREACHABLE, ERROR…)
+SELECT MEMBER_HOST, MEMBER_STATE, MEMBER_ROLE
+  FROM performance_schema.replication_group_members;
+
+-- mức nhất quán theo session; mặc định 8.4 là BEFORE_ON_PRIMARY_FAILOVER
+SET SESSION group_replication_consistency = 'BEFORE';   -- đọc chờ mọi transaction trước đó được áp dụng
+SET SESSION group_replication_consistency = 'AFTER';    -- ghi chờ tới khi mọi thành viên đã áp dụng
+SET SESSION group_replication_consistency = 'EVENTUAL'; -- không chờ gì
+
+-- thành viên mất liên lạc với đa số: mặc định không tự làm gì (0 = chờ mãi)
+SELECT @@group_replication_unreachable_majority_timeout;</code></pre>
+
+<div class="prose"><h3>Bộ đếm CRDT (G-counter) trong TypeScript</h3></div>
+<pre><code>// mỗi máy chỉ tăng ô của chính nó; hợp nhất = lấy lớn nhất theo từng ô
+type GCounter = Record&lt;string, number&gt;;
+const inc = (c: GCounter, node: string, n = 1) =&gt; ({ ...c, [node]: (c[node] ?? 0) + n });
+const merge = (a: GCounter, b: GCounter) =&gt; {
+  const out: GCounter = { ...a };
+  for (const [k, v] of Object.entries(b)) out[k] = Math.max(out[k] ?? 0, v);
+  return out;
+};
+const value = (c: GCounter) =&gt; Object.values(c).reduce((s, v) =&gt; s + v, 0);
+
+// Hà Nội và TP.HCM cùng tăng trong lúc bị chia cắt, rồi hợp nhất: không mất lượt nào
+let hn = inc({}, 'hn', 3), hcm = inc({}, 'hcm', 5);
+value(merge(hn, hcm));   // 8, và merge(hn, hcm) bằng merge(hcm, hn)</code></pre>
+
+<div class="prose"><h3>Event có version giữa các service</h3></div>
+<pre><code>// consumer ở billing: chỉ áp dụng event mới hơn bản đang có
+UPDATE billing_customers
+   SET email = ?, source_version = ?
+ WHERE customer_id = ? AND source_version &lt; ?;   -- event cũ tới muộn: 0 row, bỏ qua</code></pre>
+</section>
+
+<!-- 5 -->
+<section id="s5">
+<header><span class="num">05</span><h2>Thí nghiệm</h2></header>
+<div class="prose"><p>Cần ba container MySQL 8.4 chạy Group Replication single-primary. Viết dự đoán trước.</p></div>
+<details><summary>E44. Chia cắt mạng trong Group Replication</summary>
+<p><strong>Câu hỏi.</strong> Ngắt mạng của primary khỏi hai thành viên còn lại (<code>docker network disconnect</code>). Phía primary (thiểu số): một <code>INSERT</code> làm gì, chờ bao lâu, lỗi gì? Phía hai thành viên (đa số): có bầu primary mới không, sau bao lâu? Nối lại: primary cũ làm gì với transaction đang chờ của nó?</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e44/prediction.md</code></p>
+<p><strong>Chạy.</strong> Script ghi liên tục vào primary; đọc <code>replication_group_members</code> ở cả hai phía mỗi giây.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+<details><summary>E45. Cái giá của group_replication_consistency</summary>
+<p><strong>Câu hỏi.</strong> Ghi trên primary rồi đọc ngay trên một secondary: tỉ lệ đọc ra bản cũ và độ trễ đọc, ghi với <code>EVENTUAL</code>, <code>BEFORE</code>, <code>AFTER</code>. Thêm 20 ms độ trễ mạng tới một thành viên (<code>tc netem</code>): mỗi mức chậm thêm bao nhiêu?</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e45/prediction.md</code></p>
+<p><strong>Chạy.</strong> Script Node với connection tới primary và secondary, đổi mức theo session.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+</section>
+
+<!-- 6 -->
+<section id="s6">
+<header><span class="num">06</span><h2>Ảnh hưởng khi chạy production</h2></header>
+<div class="prose">
+<h3>Khi nào dùng mức nào</h3>
+<ul>
+<li>Bất biến không được phép sai một lần (bán quá, số dư âm, trùng username): một nơi quyết định (một primary, một leader theo key) hoặc đồng thuận đa số. Chấp nhận phía thiểu số ngừng phục vụ.</li>
+<li>Dữ liệu của chính người dùng: read-your-writes và monotonic reads, đủ cho phần lớn màn hình.</li>
+<li>Dữ liệu hiển thị chung, bộ đếm, gợi ý: eventual, kèm giới hạn "cũ tối đa bao lâu".</li>
+<li>Nhiều region cùng ghi: tránh xung đột bằng cách cho mỗi key một region sở hữu, trước khi nghĩ tới hợp nhất xung đột.</li>
+</ul>
+<h3>Cái giá</h3>
+<ul>
+<li>Nhất quán mạnh: thêm vòng mạng mỗi lần ghi, và ngừng phục vụ ở phía thiểu số khi bị chia cắt.</li>
+<li>Nhất quán yếu: code ứng dụng phải chịu dữ liệu cũ, xung đột và bù trừ; lỗi khó tái hiện.</li>
+<li>Đồng thuận cần ít nhất 3 máy (hoặc 3 zone) để chịu được một máy chết.</li>
+</ul>
+<h3>Nhận ra trên production bằng gì</h3>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Triệu chứng</th><th>Xem ở đâu</th></tr></thead>
+<tbody>
+<tr><td>Ghi đứng khi một zone gặp sự cố</td><td><code>replication_group_members</code>: thành viên <code>UNREACHABLE</code>, nhóm còn đa số không</td></tr>
+<tr><td>Bán trùng, trùng username sau sự cố mạng</td><td>Đối soát sau sự cố; log các lần ghi ở chế độ "luôn trả lời"</td></tr>
+<tr><td>Dữ liệu giữa hai service lệch nhau</td><td>Đối soát định kỳ theo version; độ trễ consumer; event bị bỏ qua vì version cũ</td></tr>
+<tr><td>Độ trễ ghi tăng sau khi thêm bản sao ở region xa</td><td>p99 commit; độ trễ mạng tới thành viên chậm nhất trong đa số</td></tr>
+</tbody></table></div>
+<div class="senior"><h4>Góc nhìn senior: hỏi "sai thì tốn gì", không hỏi "CP hay AP"</h4><p>Với từng thao tác, senior hỏi hai câu. Thứ nhất: nếu hai người cùng làm thao tác này ở hai phía của một lần mạng đứt, hậu quả là gì, và có sửa được sau đó không? Bán trùng ghế thì phải hoàn tiền và xin lỗi; đếm trùng một lượt xem thì chẳng ai quan tâm. Thứ hai: thêm 50 ms vào mỗi lần làm thao tác này thì người dùng có nhận ra không? Hai câu trả lời đó chọn mức nhất quán; tên định lý chỉ là cách gọi.</p></div>
+<div class="prose">
+<h3>Checklist khi review một thiết kế nhiều bản sao</h3>
+<ul>
+<li>Liệt kê bất biến nào phải luôn đúng; mỗi bất biến được giữ ở đâu (một leader, đồng thuận, hay chấp nhận sai rồi đối soát)?</li>
+<li>Khi mạng đứt giữa hai zone hay hai region, mỗi thao tác chính làm gì: từ chối, chờ, hay nhận rồi hợp nhất sau?</li>
+<li>Nếu hợp nhất: dùng cách nào, có mất dữ liệu lặng lẽ không (LWW)?</li>
+<li>Số bản sao và quorum: chịu được mấy máy chết, độ trễ ghi là vòng mạng tới đâu?</li>
+<li>Giữa các service: ai sở hữu dữ liệu, event có version không, consumer có idempotent không?</li>
+</ul>
+</div>
+</section>
+
+<!-- 7 -->
+<section id="s7">
+<header><span class="num">07</span><h2>Hiểu lầm thường gặp</h2></header>
+<div class="prose"><ul>
+<li><strong>Hiểu lầm:</strong> CAP là "chọn 2 trong 3". <strong>Vì sao sai:</strong> P không phải lựa chọn; chỉ khi có partition mới phải chọn giữa C và A (<a href="#s2">phần 02</a>). <strong>Quy tắc:</strong> nói "khi bị chia cắt, thao tác này từ chối hay trả bản có thể sai".</li>
+<li><strong>Hiểu lầm:</strong> C trong CAP là C trong ACID. <strong>Vì sao sai:</strong> C trong CAP là linearizable; C trong ACID là giữ ràng buộc dữ liệu. <strong>Quy tắc:</strong> nói rõ mức nhất quán đang bàn.</li>
+<li><strong>Hiểu lầm:</strong> R + W &gt; N là có nhất quán mạnh. <strong>Vì sao sai:</strong> ghi đồng thời, ghi thất bại một phần, sloppy quorum, đồng hồ lệch. <strong>Quy tắc:</strong> cần linearizable thì dùng đồng thuận.</li>
+<li><strong>Hiểu lầm:</strong> eventual consistency nghĩa là "nhất quán sau vài mili giây". <strong>Vì sao sai:</strong> nó không hứa thời gian nào; lúc có sự cố có thể là hàng giờ. <strong>Quy tắc:</strong> ghi ra "cũ tối đa bao lâu" và đo nó.</li>
+<li><strong>Hiểu lầm:</strong> last write wins là đủ để hợp nhất. <strong>Vì sao sai:</strong> nó bỏ đi lần ghi còn lại mà không báo ai. <strong>Quy tắc:</strong> chỉ dùng LWW khi mất một lần ghi là chấp nhận được.</li>
+<li><strong>Hiểu lầm:</strong> thêm bản sao luôn làm hệ thống bền hơn mà không tốn gì. <strong>Vì sao sai:</strong> với đồng thuận, 4 máy chịu lỗi không hơn 3 máy, và bản sao ở xa làm mọi lần ghi chậm hơn. <strong>Quy tắc:</strong> chọn số lẻ, đặt theo zone, tính độ trễ tới đa số.</li>
+</ul></div>
+</section>
+
+<!-- 8 -->
+<section id="s8">
+<header><span class="num">08</span><h2>Câu hỏi ôn tập</h2></header>
+<p class="prose">Viết ngày 2026-10-20. Đánh số Q83 đến Q88.</p>
+<details><summary><span class="tag">Giải thích</span>Q83. CAP nói gì</summary>
+<p>Phát biểu CAP theo Gilbert và Lynch bằng lời của bạn, và giải thích vì sao "hệ thống CA" không có ý nghĩa với hệ thống chạy trên nhiều máy.</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Trong một mạng có thể làm mất tin nhắn giữa các máy, không thể có một kho dữ liệu vừa linearizable vừa bảo đảm mọi request tới máy còn sống đều được trả lời. Khi mạng bị chia cắt, mỗi thao tác phải chọn: từ chối hoặc chờ (giữ C), hoặc trả lời bằng thông tin có thể cũ (giữ A). "CA" giả định mạng không bao giờ đứt, điều không đúng với hệ thống nhiều máy; chỉ một máy duy nhất mới không có partition.</p></details></details>
+<details><summary><span class="tag">Dự đoán</span>Q84. Quorum</summary>
+<p>N = 5, W = 3, R = 2. Lần đọc có chắc thấy lần ghi gần nhất không? Chịu được bao nhiêu máy chết cho ghi, cho đọc? Đổi thành R = 3 thì sao?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>R + W = 5, không lớn hơn N = 5, nên tập đọc và tập ghi có thể không chung máy nào: không chắc thấy lần ghi gần nhất. Ghi chịu được 5 − 3 = 2 máy chết, đọc chịu được 5 − 2 = 3. Với R = 3: R + W = 6 &gt; 5, luôn chung ít nhất một máy; đọc chỉ còn chịu được 2 máy chết và chậm hơn (chờ bản sao thứ 3).</p></details></details>
+<details><summary><span class="tag">Dự đoán</span>Q85. Mức nhất quán</summary>
+<p>A ghi x = 1, xong lúc 100 ms. B đọc lúc 120 ms được 1, rồi đọc lúc 300 ms được 0. Lịch sử này vi phạm những mức nào?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Vi phạm linearizable (lần đọc lúc 300 ms bắt đầu sau khi lần ghi xong, phải thấy 1) và monotonic reads của B (đã thấy 1 rồi lại thấy 0), nên cũng vi phạm causal, vì causal bao gồm monotonic reads. Không vi phạm read-your-writes, vì B không phải người ghi. Eventual vẫn có thể thoả nếu về sau mọi bản sao đều là 1.</p></details></details>
+<details><summary><span class="tag">Giải thích</span>Q86. Vì sao số lẻ</summary>
+<p>Vì sao cụm đồng thuận thường có 3 hoặc 5 máy, không phải 4?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Đa số của 4 là 3, nên 4 máy chỉ chịu được 1 máy chết, bằng 3 máy, mà mỗi lần ghi phải chờ thêm một máy. Ngoài ra, chia đôi 2–2 thì không phía nào có đa số, cả hệ thống ngừng ghi. Với 2f + 1 máy, chịu được f máy chết.</p></details></details>
+<details><summary><span class="tag">Chẩn đoán</span>Q87. Món đã xoá quay lại giỏ</summary>
+<p>Giỏ hàng lưu trên một kho kiểu Dynamo. Khách xoá một món trên điện thoại khi mất sóng, rồi thêm món khác trên laptop. Sau đó món đã xoá lại xuất hiện. Vì sao?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Hai lần ghi xung đột (một bản không có món A, một bản có món A cộng món B). Khi hợp nhất bằng cách gộp các món, món A từ bản laptop quay lại. Đây chính là hành vi bài Dynamo mô tả: thà món đã xoá quay lại còn hơn mất món đã thêm. Muốn xoá được chắc chắn, cần ghi nhận việc xoá như một thao tác (tombstone) trong kiểu dữ liệu hợp nhất.</p></details></details>
+<details><summary><span class="tag">Chẩn đoán</span>Q88. Email lệch giữa hai service</summary>
+<p>User-service phát event <code>EmailChanged</code>. Billing-service cập nhật bản sao. Sau khi khách đổi email hai lần trong một phút, billing giữ email đầu tiên. Vì sao, và sửa thế nào?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Hai event tới billing theo thứ tự ngược (ví dụ do retry hoặc hai partition khác nhau), và billing áp dụng event nào tới sau. Sửa: event mang version tăng dần từ user-service; billing chỉ cập nhật khi version mới hơn (<code>WHERE source_version &lt; ?</code>). Thêm partition key theo customer id để event của một khách đi theo thứ tự.</p></details></details>
+</section>
+
+<!-- 9 -->
+<section id="s9">
+<header><span class="num">09</span><h2>Bài toán thực tế</h2></header>
+<div class="prose"><p>Ba tình huống giống việc thật. Đọc đề, tự viết lời giải ra giấy (phương án, con số, đánh đổi), rồi mới mở lời giải. Gợi ý chỉ mở khi bí. Lời giải là lập luận từ tài liệu, không phải số đo; con số trong đó là ước lượng. Viết ngày 2026-10-20.</p></div>
+
+<div class="case" id="c22">
+<h3>C22. Bán vé concert ở hai region</h3>
+<p class="src">Dựa trên: phần 01–03 của trang này; <a href="../concurrency-control-strategies/index.html">Kiểm soát ghi đồng thời</a> (C1).</p>
+<dl>
+<dt>Bối cảnh</dt><dd><p>Công ty bán vé chạy ở region Singapore. Để khách ở Nhật nhanh hơn, CTO muốn chạy "active-active": mỗi region một database đầy đủ, cả hai cùng nhận đặt vé, đồng bộ hai chiều. Vòng mạng Singapore–Tokyo khoảng 70 ms (giả định, phải đo). Mỗi concert lớn mở bán 50.000 ghế; đỉnh 20.000 lượt đặt mỗi giây trong phút đầu, phần lớn từ một nước.</p></dd>
+<dt>Yêu cầu</dt><dd>Không bán trùng ghế. p99 đặt ghế dưới 300 ms cho khách ở cả hai nước. Mất một region thì region còn lại vẫn bán tiếp được trong 5 phút.</dd>
+<dt>Ràng buộc</dt><dd>MySQL 8.4. Team có kinh nghiệm với Group Replication, chưa dùng database phân tán khác.</dd>
+<dt>Nhiệm vụ</dt><dd>Đánh giá đề xuất active-active. Thiết kế cách giữ ghế, nói rõ hành vi khi đường mạng giữa hai region đứt.</dd>
+</dl>
+<details class="hint"><summary>Gợi ý</summary><ul>
+<li>Hai region cùng nhận đặt cùng một ghế khi đường mạng đứt: chuyện gì xảy ra lúc nối lại?</li>
+<li>Một concert có cần được bán ở hai nơi không?</li>
+<li>Xem sơ đồ ghế có cần nhất quán mạnh như đặt ghế không?</li>
+</ul></details>
+<details class="answer"><summary>Xem lời giải</summary>
+<h4 class="ah">1. Làm rõ đề bài</h4>
+<ul>
+<li>Bất biến: mỗi ghế được bán nhiều nhất một lần. Đây là bất biến không được sai một lần nào, nên đặt ghế cần linearizable trên từng ghế.</li>
+<li>Active-active với đồng bộ hai chiều bất đồng bộ là "luôn trả lời" khi bị chia cắt: cả hai bên nhận cùng một ghế, phát hiện khi nối lại. Không đạt yêu cầu "không bán trùng".</li>
+<li>Câu hỏi: một concert có khách từ cả hai nước với tỉ lệ đáng kể không? Giả định không: mỗi concert có một thị trường chính.</li>
+</ul>
+<h4 class="ah">2. Ước lượng</h4>
+<ul>
+<li>Nếu mọi lần đặt phải được hai region đồng ý (đồng thuận qua hai region): mỗi lần ghi ít nhất 70 ms vòng mạng, cộng xử lý. Với ba nơi (ví dụ Singapore, Tokyo, và một nơi thứ ba làm trọng tài), đa số luôn cần một region ở xa.</li>
+<li>20.000 lượt mỗi giây vào cùng một concert: phần lớn là tranh chấp trên vài nghìn ghế đẹp. Phải gom hoặc chặn trước (C1); đồng thuận đa region cho từng lượt sẽ không chịu nổi.</li>
+<li>Đi từ Tokyo tới region sở hữu concert ở Singapore: 70 ms vòng mạng cộng khoảng 50–100 ms xử lý, khoảng 150 ms. Dưới 300 ms.</li>
+</ul>
+<h4 class="ah">3. Các phương án</h4>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>A. Active-active, đồng bộ hai chiều, hợp nhất khi xung đột</td><td>Đọc và ghi nhanh ở cả hai nơi</td><td>Bán trùng khi mạng đứt hoặc chậm; hợp nhất bằng LWW làm mất đơn lặng lẽ</td></tr>
+<tr><td>B. Mỗi concert có một region sở hữu; mọi lần đặt đi về đó</td><td>Không xung đột; nhất quán mạnh trong một region</td><td>Khách ở xa chậm thêm một vòng mạng; region sở hữu chết thì concert đó ngừng bán tới khi chuyển</td></tr>
+<tr><td>C. Đồng thuận trên 3 region cho mọi lần đặt</td><td>Chịu được mất một region mà không mất dữ liệu</td><td>Mỗi lần ghi chờ region xa; team chưa có kinh nghiệm vận hành kiểu này</td></tr>
+<tr><td>D. Chia sẵn ghế cho mỗi region (Tokyo bán khu A, Singapore bán khu B)</td><td>Không xung đột, cả hai nơi nhanh</td><td>Một khu bán hết trong khi khu kia còn; khách không chọn được mọi ghế</td></tr>
+</tbody></table></div>
+<h4 class="ah">4. Đánh đổi và quyết định</h4>
+<p>Chọn B. Ở mỗi region, Group Replication 3 thành viên trên 3 zone. Sơ đồ ghế đọc được ở cả hai region với độ cũ vài giây.</p>
+<ul>
+<li>Thao tác đặt ghế nhất quán mạnh trong region sở hữu. Khi đường mạng giữa hai region đứt, khách ở region kia không đặt được (từ chối kèm thông báo), nhưng không bao giờ bán trùng. Đây là chọn C cho thao tác đặt.</li>
+<li>Xem sơ đồ ghế: bản sao bất đồng bộ ở region gần khách, cũ vài giây. Lúc đặt mới kiểm tra chính xác. Đây là chọn A, L cho thao tác xem.</li>
+<li>Mất cả region sở hữu: chuyển quyền sở hữu concert sang region kia bằng quy trình có kiểm soát. Dữ liệu chưa sang kịp (async giữa hai region) có thể mất vài giây đơn; bù bằng đối soát với cổng thanh toán (C21 ở trang replication). Nếu không chấp nhận mất, cần C, và trả bằng độ trễ.</li>
+</ul>
+<p>Khi nào đổi ý: nếu một concert thật sự có khách ở cả hai nước cùng tranh ghế, B vẫn đúng nhưng khách xa chậm hơn; D đáng xét khi nhà tổ chức đồng ý chia khu. A không bao giờ hợp với giữ ghế.</p>
+<h4 class="ah">5. Triển khai</h4>
+<ol class="list">
+<li>Bảng <code>events</code> có cột <code>home_region</code>. Lớp API ở mỗi region chuyển lần đặt của concert thuộc region khác sang region đó (gọi qua mạng nội bộ).</li>
+<li>Trong region sở hữu: luồng giữ ghế như C1 (cổng chặn sớm, câu ghi có điều kiện trên từng ghế, giữ chỗ 10 phút).</li>
+<li>Sơ đồ ghế: bản sao bất đồng bộ sang region kia, cộng cache vài giây; luôn ghi rõ "trạng thái có thể trễ vài giây".</li>
+<li>Diễn tập: cắt mạng giữa hai region trong giờ bán thử; region kia trả lời "tạm không đặt được" trong 1 giây, không treo request.</li>
+</ol>
+<h4 class="ah">6. Rủi ro và cách kiểm chứng</h4>
+<ul>
+<li>Đo vòng mạng thật và p99 đặt ghế từ Tokyo tới Singapore trong test tải.</li>
+<li>Đối soát sau mỗi đợt bán: số ghế đã bán bằng số vé đã phát, không ghế nào có hai đơn.</li>
+<li>Rủi ro: đường gọi chéo region chậm làm timeout dồn lại; đặt timeout và từ chối nhanh.</li>
+</ul>
+<h4 class="ah">7. Lỗi hay gặp với bài này</h4>
+<ul>
+<li>Chọn active-active cho dữ liệu có bất biến cứng.</li>
+<li>Dùng last write wins để "giải quyết" ghế bán trùng.</li>
+<li>Bắt cả thao tác xem ghế phải nhất quán mạnh, làm mọi trang chậm theo.</li>
+<li>Không nói rõ khách ở region kia thấy gì khi mạng đứt.</li>
+</ul>
+</details>
+</div>
+
+<div class="case" id="c23">
+<h3>C23. Một hệ thống, năm mức nhất quán</h3>
+<p class="src">Dựa trên: phần 02–03 của trang này; các trang cache, replication và capacity.</p>
+<dl>
+<dt>Bối cảnh</dt><dd><p>Một sàn thương mại điện tử đang thiết kế lại lớp dữ liệu. Kiến trúc sư đề xuất: "mọi thứ nhất quán mạnh, mọi đọc đi primary" cho đơn giản. Team hạ tầng phản đối: primary sẽ quá tải. Các tính năng:</p>
+<ol class="list">
+<li>Tồn kho khi đặt hàng.</li>
+<li>Giỏ hàng của khách (khách dùng cả điện thoại và laptop).</li>
+<li>Số lượt thích sản phẩm.</li>
+<li>Lịch sử đơn của tôi.</li>
+<li>Gợi ý "khách cũng mua".</li>
+<li>Số dư ví.</li>
+</ol>
+<p>Đỉnh: 50.000 lượt đọc mỗi giây trên toàn hệ thống, 3.000 lượt ghi mỗi giây.</p></dd>
+<dt>Yêu cầu</dt><dd>Không sai tiền, không bán quá. Mỗi tính năng có độ cũ tối đa ghi rõ. Primary dưới 70% ở đỉnh.</dd>
+<dt>Ràng buộc</dt><dd>MySQL 8.4 primary và replica, Redis. Không thêm database mới.</dd>
+<dt>Nhiệm vụ</dt><dd>Với từng tính năng: mức nhất quán, độ cũ tối đa, đọc ở đâu, hành vi khi có sự cố, và lý do.</dd>
+</dl>
+<details class="hint"><summary>Gợi ý</summary><ul>
+<li>Với mỗi tính năng, hỏi: sai một lần thì tốn gì, và sửa được sau không?</li>
+<li>Giỏ hàng là ví dụ kinh điển trong bài Dynamo.</li>
+<li>Bao nhiêu phần trăm trong 50.000 lượt đọc thật sự cần primary?</li>
+</ul></details>
+<details class="answer"><summary>Xem lời giải</summary>
+<h4 class="ah">1. Làm rõ đề bài</h4>
+<p>"Mọi thứ nhất quán mạnh" trả giá ở mọi lượt đọc, kể cả những lượt không cần. Cách làm của senior là đi từng tính năng, hỏi "sai thì tốn gì", rồi chọn mức rẻ nhất mà vẫn đủ.</p>
+<h4 class="ah">2. Ước lượng</h4>
+<ul>
+<li>Giả sử phân bố lượt đọc: gợi ý và lượt thích 50%, trang sản phẩm (có tồn kho hiển thị) 30%, giỏ hàng 10%, lịch sử đơn 7%, số dư 3%.</li>
+<li>Chỉ số dư, giỏ hàng (khi thanh toán) và lịch sử đơn ngay sau khi đặt cần đọc mới. Khoảng 3% + một phần của 17%: dưới 10% lượt đọc phải về primary, tức dưới 5.000 mỗi giây.</li>
+<li>"Mọi đọc về primary": 50.000 lượt mỗi giây cộng 3.000 ghi. Với tỉ lệ chi phí đọc trên ghi như ở C19 trang replication, gấp nhiều lần sức một primary.</li>
+</ul>
+<h4 class="ah">3. Các phương án</h4>
+<p>Không có một phương án cho cả hệ thống. Bảng dưới là phương án cho từng tính năng.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>Tính năng</th><th>Mức</th><th>Cũ tối đa</th><th>Đọc ở đâu</th><th>Khi có sự cố</th></tr></thead>
+<tbody>
+<tr><td>Tồn kho khi đặt</td><td>Linearizable trên từng sản phẩm</td><td>0</td><td>Câu ghi có điều kiện trên primary</td><td>Primary không ghi được thì từ chối đặt</td></tr>
+<tr><td>Tồn kho hiển thị</td><td>Eventual</td><td>30 giây</td><td>Cache, replica</td><td>Trả bản cũ, ghi "có thể thay đổi"</td></tr>
+<tr><td>Giỏ hàng</td><td>Read-your-writes; hợp nhất khi xung đột (gộp món)</td><td>0 với chính khách</td><td>Primary hoặc Redis theo khách</td><td>Vẫn thêm được; xung đột gộp lại; kiểm tra lại giá và tồn kho khi thanh toán</td></tr>
+<tr><td>Lượt thích</td><td>Eventual, bộ đếm gom lô</td><td>1 phút</td><td>Redis, flush định kỳ (C15)</td><td>Có thể mất vài giây lượt thích</td></tr>
+<tr><td>Lịch sử đơn của tôi</td><td>Read-your-writes, monotonic</td><td>0 với chính khách</td><td>Replica có chờ GTID, quá hạn về primary (C19)</td><td>Replica trễ: tự chuyển về primary</td></tr>
+<tr><td>Gợi ý</td><td>Eventual</td><td>1 ngày</td><td>Bảng tính sẵn, cache</td><td>Trả bản cũ hoặc ẩn khối</td></tr>
+<tr><td>Số dư ví</td><td>Linearizable</td><td>0</td><td>Primary; ghi bằng câu có điều kiện</td><td>Từ chối giao dịch, không bao giờ đoán</td></tr>
+</tbody></table></div>
+<h4 class="ah">4. Đánh đổi và quyết định</h4>
+<ul>
+<li>Phản biện kiến trúc sư bằng con số: "mọi đọc về primary" tốn gấp nhiều lần sức primary, trong khi chỉ dưới 10% lượt đọc cần dữ liệu mới.</li>
+<li>Đồng ý một phần với kiến trúc sư: đơn giản là có giá trị. Nên chỉ có ba "lớp" nhất quán trong code (mạnh, của tôi, cũ có giới hạn), mỗi lớp một hàm truy cập, thay vì mỗi màn hình tự chọn.</li>
+<li>Giỏ hàng chọn hợp nhất thay vì từ chối, vì không thêm được món vào giỏ làm mất doanh thu, còn món đã xoá quay lại thì khách tự xoá lại được. Mọi thứ được kiểm tra lại ở bước thanh toán.</li>
+</ul>
+<h4 class="ah">5. Triển khai</h4>
+<ul>
+<li>Thư viện truy cập dữ liệu có ba hàm: <code>readStrong()</code> (primary), <code>readMine(userId)</code> (GTID hoặc primary), <code>readStale(maxAge)</code> (cache hoặc replica).</li>
+<li>Review: mỗi endpoint mới phải khai báo lớp nhất quán và độ cũ tối đa.</li>
+<li>Metric theo lớp: tỉ lệ đọc về primary, độ cũ thực tế đo được (tuổi cache, độ trễ replica).</li>
+</ul>
+<h4 class="ah">6. Rủi ro và cách kiểm chứng</h4>
+<ul>
+<li>Rủi ro lớn nhất: ai đó dùng <code>readStale</code> cho một quyết định tiền. Kiểm tra trong review và test: mọi đường ghi tiền chỉ dùng câu ghi có điều kiện.</li>
+<li>Đo tải primary sau khi chia lớp; mục tiêu dưới 70%.</li>
+<li>Test hỗn loạn: làm replica trễ 30 giây, Redis chết; mỗi tính năng phải cư xử đúng như cột "khi có sự cố".</li>
+</ul>
+<h4 class="ah">7. Lỗi hay gặp với bài này</h4>
+<ul>
+<li>Chọn một mức cho cả hệ thống.</li>
+<li>Không ghi "cũ tối đa bao lâu", để mỗi người hiểu một kiểu.</li>
+<li>Dùng tồn kho hiển thị (cũ) để quyết định có cho đặt hay không.</li>
+<li>Để giỏ hàng từ chối thêm món khi có sự cố nhỏ.</li>
+</ul>
+</details>
+</div>
+
+<div class="case" id="c24">
+<h3>C24. Đổi email ở một service, bốn service còn lại lệch nhau</h3>
+<p class="src">Dựa trên: phần 02 của trang này; <a href="../transactional-outbox/index.html">Transactional outbox</a>; <a href="../idempotency-retries/index.html">Idempotency và retry</a>.</p>
+<dl>
+<dt>Bối cảnh</dt><dd><p>Năm service đều lưu email khách hàng: user, billing, notification, CRM, analytics. Khi khách đổi email, user-service cập nhật database, rồi gọi HTTP lần lượt tới bốn service kia. Nếu một lời gọi lỗi, nó ghi log và bỏ qua.</p>
+<p>Sự cố: hoá đơn gửi tới email cũ; khách đổi email hai lần thì CRM giữ email thứ nhất; analytics có 3% khách mang email không còn tồn tại; một lần user-service rollback sau khi đã gọi billing, nên billing có email mà user-service không có.</p></dd>
+<dt>Yêu cầu</dt><dd>Mọi service có email đúng trong 1 phút. Hoá đơn và thông báo bảo mật luôn gửi tới email hiện tại. Không mất thay đổi khi một service tạm chết.</dd>
+<dt>Ràng buộc</dt><dd>Có Kafka và outbox từ Phase 3. Không gộp các service.</dd>
+<dt>Nhiệm vụ</dt><dd>Chỉ ra từng nguyên nhân. Thiết kế lại cách lan truyền thay đổi, và nói service nào được đọc bản sao, service nào phải hỏi user-service.</dd>
+</dl>
+<details class="hint"><summary>Gợi ý</summary><ul>
+<li>Gọi HTTP sau khi ghi database là loại ghi đôi nào?</li>
+<li>Vì sao CRM có thể nhận hai thay đổi theo thứ tự ngược?</li>
+<li>Gửi thông báo bảo mật tới email cũ hay mới thì an toàn hơn?</li>
+</ul></details>
+<details class="answer"><summary>Xem lời giải</summary>
+<h4 class="ah">1. Làm rõ đề bài: nguyên nhân</h4>
+<ul>
+<li><strong>Billing có email ma:</strong> gọi HTTP trước khi commit, rồi rollback. Ghi đôi kiểu "gửi trước, commit sau" (trang outbox).</li>
+<li><strong>Hoá đơn gửi email cũ, analytics lệch 3%:</strong> lời gọi lỗi thì bỏ qua. Ghi đôi kiểu "commit trước, gửi sau", không thử lại.</li>
+<li><strong>CRM giữ email thứ nhất:</strong> hai lời gọi tới CRM chạy chồng lên nhau (lần đổi thứ hai bắt đầu khi lần đầu còn đang retry ở tầng HTTP), lần đầu tới sau. CRM áp dụng cái tới sau.</li>
+<li>Gốc chung: không có một nguồn sự thật được tôn trọng, và lan truyền không bền, không có thứ tự.</li>
+</ul>
+<h4 class="ah">2. Ước lượng</h4>
+<ul>
+<li>Đổi email là thao tác hiếm, giả sử vài nghìn lần mỗi ngày. Lượng event không đáng kể; vấn đề hoàn toàn là tính đúng.</li>
+<li>Gửi hoá đơn: giả sử vài trăm nghìn mỗi ngày. Nếu billing hỏi user-service cho mỗi hoá đơn, user-service nhận thêm vài lần mỗi giây. Nhỏ.</li>
+</ul>
+<h4 class="ah">3. Các phương án</h4>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>A. Giữ HTTP, thêm retry</td><td>Ít thay đổi</td><td>Vẫn ghi đôi; retry làm thứ tự càng lộn</td></tr>
+<tr><td>B. Outbox, event <code>EmailChanged</code> có version, partition theo customer id</td><td>Không mất, không có event ma; thứ tự theo khách</td><td>Bản sao có độ trễ; consumer phải idempotent</td></tr>
+<tr><td>C. Không lưu bản sao; mọi service hỏi user-service khi cần</td><td>Luôn đúng</td><td>User-service thành phụ thuộc bắt buộc; analytics cần quét hàng triệu dòng</td></tr>
+<tr><td>D. Kết hợp: B cho bản sao, C cho thao tác nhạy cảm</td><td>Đúng ở chỗ cần, rẻ ở chỗ còn lại</td><td>Hai cách truy cập phải được ghi rõ</td></tr>
+</tbody></table></div>
+<h4 class="ah">4. Đánh đổi và quyết định</h4>
+<p>Chọn D.</p>
+<ul>
+<li>User-service sở hữu email. Thay đổi đi qua outbox trong cùng transaction, partition key là customer id, event mang <code>version</code> tăng dần.</li>
+<li>CRM, analytics: giữ bản sao, cập nhật theo event, chỉ áp dụng khi version mới hơn.</li>
+<li>Billing và notification: vẫn giữ bản sao để hiển thị, nhưng ngay trước khi gửi hoá đơn hay thông báo bảo mật thì hỏi user-service. Thông báo "email của bạn vừa đổi" gửi tới <em>cả</em> email cũ và mới, theo thói quen bảo mật phổ biến, để chủ thật phát hiện nếu tài khoản bị chiếm.</li>
+</ul>
+<h4 class="ah">5. Triển khai</h4>
+<pre><code>-- user-service, một transaction
+UPDATE users SET email = ?, email_version = email_version + 1 WHERE id = ?;
+INSERT INTO outbox (aggregate_type, aggregate_id, type, payload)
+VALUES ('customer', ?, 'EmailChanged', JSON_OBJECT('email', ?, 'version', ?));
+
+-- consumer ở CRM
+UPDATE crm_contacts SET email = ?, email_version = ?
+ WHERE customer_id = ? AND email_version &lt; ?;</code></pre>
+<ul>
+<li>Bù dữ liệu cũ: chạy một lần job phát <code>EmailChanged</code> cho mọi khách với version hiện tại; consumer tự sửa bản sao.</li>
+<li>Đối soát hằng ngày: so email và version giữa user-service và từng bản sao; lệch quá 1 phút thì cảnh báo.</li>
+</ul>
+<h4 class="ah">6. Rủi ro và cách kiểm chứng</h4>
+<ul>
+<li>Test: đổi email hai lần trong 1 giây, đẩy event qua với thứ tự đảo; mọi bản sao cuối cùng giữ email thứ hai.</li>
+<li>Test: tắt CRM 10 phút trong lúc đổi email; bật lại thì CRM bắt kịp.</li>
+<li>Rủi ro: user-service chậm làm billing chậm. Đặt timeout; nếu user-service không trả lời, hoãn gửi hoá đơn thay vì gửi tới email có thể cũ.</li>
+</ul>
+<h4 class="ah">7. Lỗi hay gặp với bài này</h4>
+<ul>
+<li>Thêm retry vào lời gọi HTTP và coi là xong.</li>
+<li>Áp dụng event theo thứ tự tới, không theo version.</li>
+<li>Để thao tác nhạy cảm (bảo mật, hoá đơn) đọc từ bản sao.</li>
+<li>Không có đối soát để biết các bản sao đang lệch.</li>
+</ul>
+</details>
+</div>
+</section>
+
+<!-- 10 -->
+<section id="s10">
+<header><span class="num">10</span><h2>Câu hỏi còn mở</h2></header>
+<p class="prose">Số thứ tự trùng với Open questions trong <code>.claude/docs/LEARNING_LOG.md</code>. Log là bản gốc.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>#</th><th>Câu hỏi</th><th>Trạng thái</th></tr></thead>
+<tbody>
+<tr><td>35</td><td>Với Group Replication và <code>group_replication_unreachable_majority_timeout</code> = 0, một client đang commit trên thành viên thiểu số đứng bao lâu và nhận lỗi gì? Khi nối lại, transaction đó commit hay bị huỷ?</td><td>Mở. E44.</td></tr>
+<tr><td>36</td><td><code>BEFORE</code> và <code>AFTER</code> của <code>group_replication_consistency</code> tốn thêm bao nhiêu độ trễ đọc và ghi so với <code>EVENTUAL</code> trên lab, với và không có 20 ms độ trễ mạng tới một thành viên?</td><td>Mở. E45.</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- 11 -->
+<section id="s11">
+<header><span class="num">11</span><h2>Tài liệu tham khảo</h2></header>
+<div class="prose"><ul>
+<li>Seth Gilbert, Nancy Lynch, <a href="https://www.comp.nus.edu.sg/~gilbert/pubs/BrewersConjecture-SigAct.pdf">"Brewer's Conjecture and the Feasibility of Consistent, Available, Partition-Tolerant Web Services"</a>, ACM SIGACT News, 2002: định nghĩa và Định lý 1</li>
+<li>Daniel J. Abadi, <a href="https://cs.umd.edu/~abadi/papers/abadi-pacelc.pdf">"Consistency Tradeoffs in Modern Distributed Database System Design"</a>, IEEE Computer, tháng 2/2012: PACELC và cách xếp loại</li>
+<li>Giuseppe DeCandia và cộng sự, "Dynamo: Amazon's Highly Available Key-value Store", SOSP 2007; ghi chú tóm tắt ở <a href="https://paper-notes.zhjwpku.com/storage/kv/dynamo.html">paper-notes</a>: R + W &gt; N, sloppy quorum, hinted handoff, vector clock</li>
+<li>MySQL 8.4, <a href="https://dev.mysql.com/doc/refman/8.4/en/group-replication-background.html">Group Replication Background</a> (Paxos, đa số đồng ý thứ tự), <a href="https://dev.mysql.com/doc/refman/8.4/en/group-replication-network-partitioning.html">Network Partitioning</a>, <a href="https://dev.mysql.com/doc/refman/8.4/en/group-replication-configuring-consistency-guarantees.html">Configuring Transaction Consistency Guarantees</a></li>
+<li>Mã nguồn MySQL 8.4: <code>sql/sys_vars.cc</code> (mặc định <code>group_replication_consistency</code>), <code>plugin/group_replication/src/plugin.cc</code> (mặc định <code>unreachable_majority_timeout</code> = 0)</li>
+<li>Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, chương 5 và 9</li>
+</ul></div>
+<h3>Mức kiểm chứng</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>Khẳng định</th><th>Nguồn</th></tr></thead>
+<tbody>
+<tr><td>Định nghĩa C, A, P và Định lý 1 của CAP</td><td>bài Gilbert và Lynch, đã đọc</td></tr>
+<tr><td>PACELC; Dynamo, Cassandra, Riak là PA/EL; VoltDB, H-Store là PC/EC; PNUTS là PC/EL</td><td>bài Abadi 2012, đã đọc</td></tr>
+<tr><td>Group Replication dựa trên Paxos, cần đa số; mất đa số thì nhóm không tiến được</td><td>manual 8.4</td></tr>
+<tr><td>Mặc định <code>group_replication_consistency</code> = <code>BEFORE_ON_PRIMARY_FAILOVER</code>; <code>unreachable_majority_timeout</code> = 0</td><td>mã nguồn MySQL 8.4</td></tr>
+<tr><td>Xếp loại PACELC cho các cấu hình MySQL</td><td>suy luận của trang này</td></tr>
+<tr><td>R + W &gt; N chưa đủ cho linearizable</td><td>Kleppmann, chương 9; chưa thử</td></tr>
+<tr><td>Hành vi của widget chia cắt mạng và quorum</td><td>mô hình; chưa đo (E44, E45)</td></tr>
+</tbody></table></div>
+</section>
+</main>
+
+</div>
+
+<script>
+const DEFS=`<defs><marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>`;
+function B(x,y,w,h,cls,t,sub){
+  const tx=x+w/2;
+  return `<g class="n ${cls||''}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="5"/>`+
+  `<text class="tb" x="${tx}" y="${y+(sub?h/2-8:h/2)}" text-anchor="middle" dominant-baseline="central">${t}</text>`+
+  (sub?`<text class="ts" x="${tx}" y="${y+h/2+10}" text-anchor="middle" dominant-baseline="central">${sub}</text>`:'')+`</g>`;
+}
+const A=(d,cls)=>`<path d="${d}" class="edge ${cls||''}" marker-end="url(#arw)"/>`;
+const T=(x,y,t,anchor,cls)=>`<text class="${cls||'lbl'}" x="${x}" y="${y}" text-anchor="${anchor||'start'}">${t}</text>`;
+const X=(x,y)=>`<path class="xmark" d="M${x-8} ${y-8}L${x+8} ${y+8}M${x+8} ${y-8}L${x-8} ${y+8}"/>`;
+const $=id=>document.getElementById(id);
+const vi=(n,d=0)=>Number(n).toLocaleString('vi-VN',{maximumFractionDigits:d});
+const num=(id,a,b,d)=>{let v=parseFloat($(id).value);return isNaN(v)?d:Math.max(a,Math.min(b,v));};
+
+/* ---------- 01: partition stepper ---------- */
+function partSteps(mode){
+  const S=[];const add=(t,d,st)=>S.push({t,d,...st});
+  const base={n1:'ghế 7: trống',n2:'ghế 7: trống',n3:'ghế 7: trống',c1:'',c2:'',cut:false};
+  add('Ban đầu','Ba bản sao, hai ở Hà Nội (N1, N2), một ở TP.HCM (N3). Ghế 7 là ghế cuối, đang trống ở cả ba.',{...base});
+  add('Đường mạng đứt','Đường mạng giữa Hà Nội và TP.HCM đứt. Hai máy ở Hà Nội vẫn nói chuyện được với nhau. N3 đứng một mình.',{...base,cut:true});
+  if(mode==='cp'){
+    add('Khách Hà Nội đặt ghế 7','Request tới N1. Hệ thống yêu cầu đa số (2 trên 3) đồng ý. N1 và N2 cùng ở Hà Nội nên đủ đa số: ghi thành công.',{...base,cut:true,n1:'ghế 7: khách HN',n2:'ghế 7: khách HN',c1:'đặt được',cls1:'row',hn:'ok',n1c:'row',n2c:'row'});
+    add('Khách TP.HCM đặt ghế 7','Request tới N3. N3 không liên lạc được với ai, chỉ có 1 trên 3: không đủ đa số. Nó từ chối (hoặc bắt khách chờ). Phía TP.HCM không phục vụ ghi được, nhưng không có gì sai.',{...base,cut:true,n1:'ghế 7: khách HN',n2:'ghế 7: khách HN',n3:'không ghi được',n3c:'miss',c1:'đặt được',cls1:'row',c2:'bị từ chối',cls2:'miss',hcm:'no',n1c:'row',n2c:'row'});
+    add('Khách TP.HCM xem ghế','N3 có thể trả bản nó đang có ("ghế 7 trống", đã cũ) kèm cảnh báo, hoặc từ chối luôn cả đọc. Đọc cũ không bán trùng được, vì đặt vẫn cần đa số.',{...base,cut:true,n1:'ghế 7: khách HN',n2:'ghế 7: khách HN',n3:'ghế 7: trống (cũ)',n3c:'hot',c1:'đặt được',cls1:'row',c2:'thấy "trống" (cũ)',cls2:'hot',n1c:'row',n2c:'row'});
+    add('Mạng nối lại','N3 nhận các thay đổi nó lỡ và bắt kịp. Không có xung đột nào phải giải. Cái giá đã trả: trong 30 giây, phía TP.HCM không đặt được ghế.',{...base,n1:'ghế 7: khách HN',n2:'ghế 7: khách HN',n3:'ghế 7: khách HN',n1c:'row',n2c:'row',n3c:'row',c1:'có vé',cls1:'row',c2:'không có vé',cls2:'dim',end:'Đúng; phía thiểu số mất khả năng ghi trong lúc đứt mạng'});
+  }else{
+    add('Khách Hà Nội đặt ghế 7','Request tới N1. Chế độ "luôn trả lời": N1 ghi và trả lời ngay, đồng bộ sang N2.',{...base,cut:true,n1:'ghế 7: khách HN',n2:'ghế 7: khách HN',c1:'đặt được',cls1:'row',n1c:'row',n2c:'row'});
+    add('Khách TP.HCM đặt ghế 7','Request tới N3. N3 thấy ghế 7 trống (nó chưa biết gì về Hà Nội) và nhận đơn. Cả hai khách đều nhận "đặt thành công".',{...base,cut:true,n1:'ghế 7: khách HN',n2:'ghế 7: khách HN',n3:'ghế 7: khách HCM',n3c:'hot',c1:'đặt được',cls1:'row',c2:'đặt được',cls2:'row',n1c:'row',n2c:'row'});
+    add('Mạng nối lại: xung đột','Các bản sao trao đổi thay đổi và phát hiện ghế 7 có hai chủ. Một ghế đã bán hai lần.',{...base,n1:'ghế 7: 2 chủ',n2:'ghế 7: 2 chủ',n3:'ghế 7: 2 chủ',n1c:'miss',n2c:'miss',n3c:'miss',c1:'có vé?',cls1:'hot',c2:'có vé?',cls2:'hot'});
+    add('Giải xung đột bằng "ghi sau thắng"','Hệ thống giữ lần ghi có dấu thời gian lớn hơn, giả sử của khách TP.HCM. Khách Hà Nội mất vé mà không ai báo. Muốn tránh mất lặng lẽ, phải phát hiện xung đột và xử lý bằng nghiệp vụ: hoàn tiền, xin lỗi, đổi ghế.',{...base,n1:'ghế 7: khách HCM',n2:'ghế 7: khách HCM',n3:'ghế 7: khách HCM',n1c:'hot',n2c:'hot',n3c:'hot',c1:'mất vé, không biết',cls1:'miss',c2:'có vé',cls2:'row',end:'Luôn phục vụ được; bán trùng, phải bù trừ sau'});
+  }
+  return S;
+}
+(function(){
+  const el=$('part');
+  el.innerHTML=`<div class="ph"><strong>Mạng đứt giữa hai thành phố, ghế cuối cùng</strong><span class="meta"></span></div><div class="bd">
+  <div class="calc"><label>Khi bị chia cắt, thao tác đặt ghế sẽ<select id="ptM"><option value="cp" selected>Cần đa số đồng ý (giữ nhất quán)</option><option value="ap">Luôn trả lời bằng bản đang có</option></select></label></div>
+  <h4 class="st-t"></h4><svg viewBox="0 0 680 230" role="img"></svg>
+  <div class="desc" aria-live="polite"><div class="st-d"></div><pre hidden></pre></div>
+  <div class="nav"><button data-d="-1">Trước</button><button data-d="1" class="primary">Tiếp</button></div>
+  <div class="legend"><span><i class="lg-row"></i>ghi thành công, đúng</span><span><i class="lg-hot"></i>dữ liệu cũ hoặc đang xung đột</span><span><i class="lg-miss"></i>từ chối, hoặc sai</span></div>
+  <p class="fine">Ba bản sao, đa số là 2. Đây là mô hình; Group Replication của MySQL theo cách "cần đa số" (manual 8.4: nhóm mất đa số thì không tiến được). E44 thử trên lab.</p></div>`;
+  const svg=el.querySelector('svg'),t=el.querySelector('.st-t'),d=el.querySelector('.st-d'),pre=el.querySelector('pre'),meta=el.querySelector('.meta');
+  const [pv,nx]=el.querySelectorAll('.nav button');let i=0,steps=partSteps('cp');
+  function draw(s){
+    let g=`<rect class="zone" x="10" y="8" width="380" height="186" rx="8"/><rect class="zone" x="460" y="8" width="210" height="186" rx="8"/>`;
+    g+=T(20,26,'Hà Nội','start','tb')+T(470,26,'TP.HCM','start','tb');
+    g+=B(30,40,160,56,s.n1c||'struct','N1',s.n1)+B(210,40,160,56,s.n2c||'struct','N2',s.n2)+B(480,40,170,56,s.n3c||'struct','N3',s.n3);
+    g+=B(70,128,240,50,s.cls1||'dim','Khách Hà Nội',s.c1||'')+B(480,128,170,50,s.cls2||'dim','Khách TP.HCM',s.c2||'');
+    g+=`<line x1="190" y1="68" x2="210" y2="68" class="edge on"/>`;
+    g+=`<line x1="370" y1="68" x2="480" y2="68" class="edge ${s.cut?'cut':'on'}"/>`;
+    if(s.cut)g+=X(425,68);
+    if(s.end)g+=T(340,218,s.end,'middle','tb');
+    return DEFS+g;
+  }
+  function render(){const s=steps[i];svg.innerHTML=draw(s);svg.setAttribute('aria-label',s.t);t.textContent=s.t;d.textContent=s.d;pre.hidden=true;
+    meta.textContent=`bước ${i+1} / ${steps.length}`;pv.disabled=i===0;nx.disabled=i===steps.length-1;}
+  const go=k=>{i=Math.max(0,Math.min(steps.length-1,i+k));render();};
+  pv.onclick=()=>go(-1);nx.onclick=()=>go(1);
+  $('ptM').onchange=()=>{steps=partSteps($('ptM').value);i=0;render();};
+  el.tabIndex=0;el.addEventListener('keydown',e=>{if(e.target.closest('select,input'))return;if(e.key==='ArrowRight')go(1);if(e.key==='ArrowLeft')go(-1);});
+  render();
+})();
+
+/* ---------- 02: history checker ---------- */
+const OPS=[
+  {id:'W',who:'A',lane:0,s:0,e:100,kind:'w',label:'ghi x = 1'},
+  {id:'R4',who:'C',lane:2,s:40,e:140,kind:'r',label:'R4'},
+  {id:'R2',who:'B',lane:1,s:120,e:170,kind:'r',label:'R2'},
+  {id:'R1',who:'A',lane:0,s:160,e:210,kind:'r',label:'R1'},
+  {id:'R3',who:'B',lane:1,s:300,e:350,kind:'r',label:'R3'}
+];
+let HV={R1:1,R2:1,R3:0,R4:0};
+function hs(){
+  const X0=90,W=560,sx=t=>X0+t/400*W;
+  let g='';
+  ['Client A','Client B','Client C'].forEach((n,i)=>{const y=34+i*48;g+=T(10,y+5,n,'start','t')+`<line class="axis" x1="${X0}" y1="${y}" x2="${X0+W}" y2="${y}" opacity=".35"/>`;});
+  OPS.forEach(o=>{const y=34+o.lane*48;const cls=o.kind==='w'?'w':(HV[o.id]?'r1':'r0');
+    g+=`<line class="op ${cls}" x1="${sx(o.s)}" y1="${y}" x2="${sx(o.e)}" y2="${y}"/>`;
+    g+=T((sx(o.s)+sx(o.e))/2,y-10,o.kind==='w'?o.label:`${o.label} → ${HV[o.id]}`,'middle','tm');});
+  g+=`<line class="axis" x1="${sx(100)}" y1="18" x2="${sx(100)}" y2="${34+2*48+14}" stroke-dasharray="3 3"/>`+T(sx(100),186,'ghi xong (100 ms)','middle','ts');
+  [0,200,400].forEach(t=>g+=T(sx(t),186,t===100?'':`${t} ms`,'middle','ts'));
+  $('hsSvg').innerHTML=g;
+  const R=HV;
+  const lin=R.R1===1&&R.R2===1&&R.R3===1;
+  const ryw=R.R1===1;
+  const mono=!(R.R2===1&&R.R3===0);
+  const causal=ryw&&mono; // causal bao gồm read-your-writes và monotonic reads
+  const rows=[
+    ['Linearizable',lin,lin?'Mọi lần đọc bắt đầu sau 100 ms đều thấy 1; R4 chồng lên lần ghi nên 0 hay 1 đều được.':'Có lần đọc bắt đầu sau khi lần ghi đã xong mà vẫn trả 0.'],
+    ['Causal',causal,causal?'A thấy lần ghi của mình, và B không thấy giá trị lùi lại sau khi đã thấy 1.':(ryw?'B đã thấy 1 (phụ thuộc lần ghi của A) rồi lại thấy 0: causal bao gồm monotonic reads.':'A vừa ghi xong mà đọc lại 0: causal bao gồm read-your-writes.')],
+    ['Read-your-writes (A)',ryw,ryw?'A thấy lần ghi của mình.':'A vừa ghi x = 1 mà đọc lại được 0.'],
+    ['Monotonic reads (B)',mono,mono?'B không thấy giá trị lùi lại.':'B đã thấy 1 ở R2 rồi thấy lại 0 ở R3.'],
+    ['Eventual',true,'Không lần đọc nào đủ muộn để bắt buộc phải thấy 1; miễn sau cùng mọi bản sao là 1.']
+  ];
+  $('hsTab').innerHTML='<thead><tr><th>Mức</th><th>Giữ?</th><th>Vì sao</th></tr></thead><tbody>'+rows.map(([n,ok,why])=>`<tr><td>${n}</td><td class="${ok?'ok':'no'}">${ok?'có':'không'}</td><td>${why}</td></tr>`).join('')+'</tbody>';
+  const held=rows.filter(r=>r[1]).map(r=>r[0]);
+  $('hsDesc').textContent=lin?'Lịch sử này thoả mọi mức, kể cả linearizable.':`Còn giữ: ${held.join(', ')}. Một hệ thống cho ra lịch sử này không thể nói là linearizable.`;
+  $('hsMeta').textContent=`R1=${R.R1} R2=${R.R2} R3=${R.R3} R4=${R.R4}`;
+  $('hsTog').querySelectorAll('button').forEach(b=>{const [id,v]=b.dataset.v.split(':');b.setAttribute('aria-pressed',String(HV[id]===+v));});
+}
+$('hsTog').innerHTML=['R1','R2','R3','R4'].map(id=>`<span class="grp">${id}: <button data-v="${id}:0">0</button><button data-v="${id}:1">1</button></span>`).join('');
+$('hsTog').querySelectorAll('button').forEach(b=>b.onclick=()=>{const [id,v]=b.dataset.v.split(':');HV[id]=+v;hs();});
+hs();
+
+/* ---------- 02: quorum ---------- */
+const LAYOUT={az:[1,2,2,2,2,2,2,2,2],'2r':[1,2,60,60,2,60,2,60,2],'3r':[1,40,80,2,40,80,2,40,80]};
+const ZONE={az:['zone 1','zone 2','zone 3'],'2r':['region 1','region 2'],'3r':['region 1','region 2','region 3']};
+function qr(){
+  const N=Math.round(num('qrN',1,9,3));let W=Math.round(num('qrW',1,9,2)),R=Math.round(num('qrR',1,9,2));W=Math.min(W,N);R=Math.min(R,N);
+  const L=$('qrL').value,lat=LAYOUT[L].slice(0,N);
+  const order=lat.map((v,i)=>[v,i]).sort((a,b)=>a[0]-b[0]);
+  const wSet=new Set(order.slice(0,W).map(x=>x[1]));
+  // worst case read set: prefer nodes outside write set
+  const outside=[...Array(N).keys()].filter(i=>!wSet.has(i)),inside=[...Array(N).keys()].filter(i=>wSet.has(i));
+  const rSet=new Set([...outside,...inside].slice(0,R));
+  const overlap=Math.max(0,W+R-N);
+  const wLat=order[W-1][0],rLat=order[R-1][0];
+  const bw=Math.min(66,600/N-8),gap=(620-N*bw)/(N+1);
+  let g='';
+  for(let i=0;i<N;i++){const x=30+gap+i*(bw+gap),w=wSet.has(i),r=rSet.has(i);
+    const cls=w&&r?'row':w?'key':r?'path':'dim';
+    g+=B(x,30,bw,64,cls,`B${i+1}`,lat[i]<=2?(lat[i]===1?'gần':'khác zone'):'xa');
+    g+=T(x+bw/2,112,`${lat[i]} ms`,'middle','ts');}
+  g+=T(30,18,'Tập ghi (W gần nhất) và tập đọc (tránh tập ghi nhiều nhất có thể)','start','ts');
+  g+=T(340,150,overlap>0?`Chồng lấn ít nhất ${overlap} bản sao: đọc luôn chạm một bản đã nhận lần ghi`:'Có thể không chồng lấn: đọc có thể bỏ lỡ lần ghi gần nhất','middle','tb');
+  $('qrSvg').innerHTML=g;
+  $('qrStats').innerHTML=[['R + W > N',W+R>N?'có':'không',W+R>N?'good':'bad'],['Ghi chịu được máy chết',N-W,''],['Đọc chịu được máy chết',N-R,''],['Độ trễ ghi',vi(wLat)+' ms',wLat>20?'warn':''],['Độ trễ đọc',vi(rLat)+' ms',rLat>20?'warn':'']]
+    .map(([k,v,c])=>`<div class="stat"><span>${k}</span><b${c?` class="${c}"`:''}>${v}</b></div>`).join('');
+  $('qrDesc').textContent=`N = ${N}, W = ${W}, R = ${R}. `+(W+R>N?`Mọi tập đọc chung ít nhất ${overlap} bản sao với tập ghi, nên lần đọc thấy lần ghi gần nhất đã thành công, trong điều kiện bình thường. `:`Tập đọc có thể nằm trọn ngoài tập ghi, nên lần đọc có thể trả bản cũ. `)+
+    `Ghi phải chờ bản sao thứ ${W} gần nhất (${vi(wLat)} ms), đọc chờ bản thứ ${R} (${vi(rLat)} ms). `+(wLat>20?'Đa số nằm ở region khác, nên mọi lần ghi trả giá vòng mạng xa: đây là chữ L trong PACELC.':'');
+  $('qrMeta').textContent=ZONE[L].length+' '+(L==='az'?'zone':'region');
+}
+['qrN','qrW','qrR','qrL'].forEach(id=>$(id).addEventListener('input',qr));qr();
+</script>
+</body>
+</html>

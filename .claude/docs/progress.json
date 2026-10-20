@@ -245,6 +245,13 @@
   "sessions": [
     {
       "date": "2026-10-20",
+      "title": "Distributed consistency: CAP, PACELC, quorums",
+      "artifact": "../topics/distributed-consistency/index.html",
+      "planned": false,
+      "feeds": "Month 3"
+    },
+    {
+      "date": "2026-10-20",
       "title": "Replication and read-your-writes",
       "artifact": "../topics/replication-read-your-writes/index.html",
       "planned": false,
@@ -396,6 +403,12 @@
       "date": "2026-10-20",
       "work": "Replication and read-your-writes (binlog pipeline, async vs semi-sync, lag sources and measurement, GTID-based read-your-writes, monotonic reads) — documentation only, written ahead of Month 5; no measurements",
       "artifact": "topics/replication-read-your-writes",
+      "feeds": "Month 5"
+    },
+    {
+      "date": "2026-10-20",
+      "work": "Distributed consistency (CAP stated precisely, PACELC, consistency models, quorums, conflict resolution, consistency across services, MySQL Group Replication) — documentation only, written ahead of Month 5; no measurements",
+      "artifact": "topics/distributed-consistency",
       "feeds": "Month 5"
     }
   ],
@@ -856,10 +869,31 @@
         "provisional": true,
         "evidence": "same, §02, §04",
         "date": "2026-10-20"
+      },
+      {
+        "topic": "CAP stated precisely (linearizable C, availability of non-failed nodes, choice only under partition) and PACELC (latency vs consistency in normal operation)",
+        "level": 2,
+        "provisional": true,
+        "evidence": "distributed-consistency §01–§03",
+        "date": "2026-10-20"
+      },
+      {
+        "topic": "Consistency models (linearizable, causal, read-your-writes, monotonic reads, eventual) and choosing one per feature",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §02–§03, §06",
+        "date": "2026-10-20"
+      },
+      {
+        "topic": "Quorums (N, W, R; majority 2f+1) and conflict resolution (LWW, version vectors, CRDTs, single-writer per key); versioned events between services",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §02, §04",
+        "date": "2026-10-20"
       }
     ],
     "levels": {
-      "2": 60,
+      "2": 63,
       "1": 2
     }
   }
