@@ -60,6 +60,7 @@ Research and topics done outside the monthly plan. Each row needs a log entry, a
 | 2026-10-14 | B+tree index internals (structure, split, slotted page, buffer pool, covering index, heap/MVCC) — conceptual only, no measurements; PostgreSQL-shaped, see open question 1 | [topics/btree-index-internals](../topics/btree-index-internals/index.html) | Month 1, Weeks 1–2 | [2026-10-14](LEARNING_LOG.md) |
 | 2026-10-20 | Concurrency control strategies on a balance (conditional UPDATE, `FOR UPDATE`, version column, hot rows) — documentation only, written ahead of Month 3; no measurements | [topics/concurrency-control-strategies](../topics/concurrency-control-strategies/index.html) | Month 3 | [2026-10-20](LEARNING_LOG.md) |
 | 2026-10-20 | Idempotency and retries (delivery semantics, idempotency keys, consumer dedup, backoff with jitter, DLQ) — documentation only, written ahead of Month 3; no measurements | [topics/idempotency-retries](../topics/idempotency-retries/index.html) | Month 3 | [2026-10-20](LEARNING_LOG.md) |
+| 2026-10-20 | Transactional outbox (dual write, polling relay and the id-cursor gap, CDC from the binlog, saga at concept level) — documentation only, written ahead of Month 3; no measurements | [topics/transactional-outbox](../topics/transactional-outbox/index.html) | Month 3 | [2026-10-20](LEARNING_LOG.md) |
 
 ## Month 1 — Database Internals and Query Optimization
 
