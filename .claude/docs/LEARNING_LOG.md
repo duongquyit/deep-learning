@@ -141,6 +141,7 @@ These are written in the page as exercises; none have been run yet.
 - **E28** — Kill a consumer at three points for four marker designs; count how many times the effect happens. *(Month 3 deliverable: tests for duplicate processing and retries.)*
 - **E29** — Retry storm against a rate-limited endpoint: immediate, exponential, full jitter, equal jitter. Checks the page's model against the AWS article.
 - **Q47–Q52** — The six recall questions in section 08 of the idempotency page.
+- **C4–C6** — The three real-world cases in section 09 of the idempotency page (payment gateway with out-of-order webhooks, SMS without provider idempotency, a retry storm after a 90 s database failover). Solve in writing before opening the answers.
 - **Q11–Q16** — The six recall questions in section 08 of the composite-index page (answers are on the page, hidden).
 - **Q1–Q5** — The five check questions at the end of the page (leftmost prefix, `COUNT(*)` and the visibility map, full scan polluting the cache, TOAST, a `sessions` table updated 5,000×/sec). Answer in writing before looking anything up, then verify.
 
@@ -151,6 +152,8 @@ These are written in the page as exercises; none have been run yet.
 **Topic and objective.** Month 3 topic, written ahead as documentation only (Phase 3 of the documentation plan): why retries are unavoidable and duplicates come with them, how to make the receiving side idempotent at the API and at a queue consumer, and how to retry without making an outage worse.
 
 **Output.** [topics/idempotency-retries/index.html](../topics/idempotency-retries/index.html) — 10 sections. Widgets: a configurable stepper for one transfer over an unreliable network (four failure scenarios × retry on/off × idempotency key on/off, counting transfers); a 7-step stepper of two requests with the same key (INSERT, S-lock wait on the uncommitted duplicate, 1062, return the stored response; 422 and rollback variants); a dedup-placement matrix that runs a small model for four marker designs × three crash points; a retry-storm simulator (outage, fixed capacity, immediate / exponential / full jitter / equal jitter). Prediction templates for E27–E29.
+
+**Cases added (same day).** Section 09 "Bài toán thực tế" with cases C4–C6, each a shown problem and a hidden senior-style answer. The answers are reasoning from reading, not measurements.
 
 **What it covers.**
 

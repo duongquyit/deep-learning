@@ -177,6 +177,20 @@ details.answer summary{font-weight:500;color:var(--struct)}
 .mx td button[aria-pressed="true"]{outline:2.5px solid var(--struct);outline-offset:1px}
 .mx td.na{color:var(--ink-3);font-size:13px}
 .trace{font:12.5px/1.6 var(--mono);background:var(--paper);border-radius:var(--r-s);padding:10px 12px;margin:10px 0 0;white-space:pre-wrap}
+/* bài toán thực tế */
+.case{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:0 var(--r-m) var(--r-m) 0;padding:16px 20px;margin:22px 0;max-width:720px}
+.case>h3{margin:0 0 6px;font-size:1.15rem}
+.case .src{font-size:13.5px;color:var(--ink-2);margin:0 0 12px}
+.case dl{margin:0;display:grid;grid-template-columns:104px minmax(0,1fr);gap:8px 16px}
+.case dt{font-weight:600;color:var(--struct);font-size:15px}
+.case dd{margin:0}
+.case dd p:last-child,.case dd ul:last-child{margin-bottom:0}
+.case details{max-width:none;margin:12px 0 0}
+.case details.hint{background:var(--paper)}
+.case details.answer[open]{background:var(--surface)}
+.ah{font-size:15.5px;color:var(--struct);margin:20px 0 6px}
+.answer .tablewrap{max-width:none}
+@media (max-width:900px){.case{padding:14px}.case dl{grid-template-columns:minmax(0,1fr);gap:2px}.case dd{margin-bottom:8px}}
 </style>
 </head>
 <body>
@@ -193,8 +207,9 @@ details.answer summary{font-weight:500;color:var(--struct)}
     <li><a href="#s6">Ảnh hưởng khi chạy production</a></li>
     <li><a href="#s7">Hiểu lầm thường gặp</a></li>
     <li><a href="#s8">Câu hỏi ôn tập</a></li>
-    <li><a href="#s9">Câu hỏi còn mở</a></li>
-    <li><a href="#s10">Tài liệu tham khảo</a></li>
+    <li><a href="#s9">Bài toán thực tế</a></li>
+    <li><a href="#s10">Câu hỏi còn mở</a></li>
+    <li><a href="#s11">Tài liệu tham khảo</a></li>
   </ol>
 </nav>
 
@@ -215,7 +230,7 @@ details.answer summary{font-weight:500;color:var(--struct)}
   </ul></div>
   <div><h4>Trạng thái</h4><p>Level 2 (prov.). Nội dung lấy từ bản nháp IETF về header <code>Idempotency-Key</code>, tài liệu Stripe, AWS, manual MySQL 8.4 và mã nguồn BullMQ. Các widget là mô hình, chưa đo (E27–E29).</p></div>
 </div>
-<details class="mobile-toc"><summary>Mục lục</summary><ol><li><a href="#s1">Bản chất vấn đề</a></li><li><a href="#s2">Cơ chế hoạt động</a></li><li><a href="#s3">Vì sao thiết kế như vậy</a></li><li><a href="#s4">Ví dụ</a></li><li><a href="#s5">Thí nghiệm</a></li><li><a href="#s6">Ảnh hưởng khi chạy production</a></li><li><a href="#s7">Hiểu lầm thường gặp</a></li><li><a href="#s8">Câu hỏi ôn tập</a></li><li><a href="#s9">Câu hỏi còn mở</a></li><li><a href="#s10">Tài liệu tham khảo</a></li></ol></details>
+<details class="mobile-toc"><summary>Mục lục</summary><ol><li><a href="#s1">Bản chất vấn đề</a></li><li><a href="#s2">Cơ chế hoạt động</a></li><li><a href="#s3">Vì sao thiết kế như vậy</a></li><li><a href="#s4">Ví dụ</a></li><li><a href="#s5">Thí nghiệm</a></li><li><a href="#s6">Ảnh hưởng khi chạy production</a></li><li><a href="#s7">Hiểu lầm thường gặp</a></li><li><a href="#s8">Câu hỏi ôn tập</a></li><li><a href="#s9">Bài toán thực tế</a></li><li><a href="#s10">Câu hỏi còn mở</a></li><li><a href="#s11">Tài liệu tham khảo</a></li></ol></details>
 </div>
 
 <!-- 1 -->
@@ -547,7 +562,267 @@ await queue.add('import-row', data, {
 
 <!-- 9 -->
 <section id="s9">
-<header><span class="num">09</span><h2>Câu hỏi còn mở</h2></header>
+<header><span class="num">09</span><h2>Bài toán thực tế</h2></header>
+<div class="prose"><p>Ba tình huống giống việc thật. Đọc đề, tự viết lời giải ra giấy (phương án, con số, đánh đổi), rồi mới mở lời giải. Gợi ý chỉ mở khi bí. Lời giải là lập luận từ tài liệu, không phải số đo; con số trong đó là ước lượng. Viết ngày 2026-10-20.</p></div>
+
+<div class="case" id="c4">
+<h3>C4. Cổng thanh toán: trừ tiền hai lần và webhook đến sai thứ tự</h3>
+<p class="src">Dựa trên: phần 02–03 của trang này; <a href="../concurrency-control-strategies/index.html">Kiểm soát ghi đồng thời</a> (câu ghi có điều kiện).</p>
+<dl>
+<dt>Bối cảnh</dt><dd><p>Shop online tích hợp một cổng thanh toán. Luồng hiện tại:</p>
+<ul>
+<li>Khách bấm "Thanh toán". Server gọi <code>POST /v2/payments</code> của cổng, nhận <code>payment_url</code>, chuyển khách sang đó.</li>
+<li>Kết quả cuối báo về qua webhook <code>payment.succeeded</code> hoặc <code>payment.failed</code>. Webhook có chữ ký HMAC và <code>event_id</code>.</li>
+<li>Cổng gửi lại webhook tối đa 10 lần nếu không nhận được 200 trong 5 giây. Thứ tự các webhook không được bảo đảm.</li>
+<li>Cổng nhận header <code>Idempotency-Key</code>, giữ trong 24 giờ, và có <code>GET /v2/payments/{id}</code> để tra trạng thái.</li>
+</ul>
+<p>Ba sự cố trong tháng: khách bấm hai lần nên có hai giao dịch và bị trừ tiền hai lần; webhook <code>failed</code> của lần thử trước đến sau <code>succeeded</code> nên đơn đã trả tiền bị chuyển sang thất bại; 0,3% đơn kẹt ở "đang chờ thanh toán" vì webhook không bao giờ tới.</p></dd>
+<dt>Yêu cầu</dt><dd>Mỗi lần thanh toán một đơn chỉ tạo một giao dịch. Trạng thái đơn đúng dù webhook lặp hay sai thứ tự. Không đơn nào ở "đang chờ" quá 30 phút mà không ai biết. Khách được thanh toán lại sau khi thất bại.</dd>
+<dt>Ràng buộc</dt><dd>MySQL 8.4. Khoảng 2.000 đơn mỗi giờ lúc cao điểm. Không đổi cổng thanh toán.</dd>
+<dt>Nhiệm vụ</dt><dd>Thiết kế bảng, luồng tạo giao dịch, cách xử lý webhook, và cơ chế đối soát.</dd>
+</dl>
+<details class="hint"><summary>Gợi ý</summary><ul>
+<li>"Bấm hai lần" và "thanh toán lại sau khi thất bại" có nên dùng cùng một key không?</li>
+<li>Loại trùng theo <code>event_id</code> có giải quyết được thứ tự không?</li>
+<li>Khi không tin được webhook, nguồn sự thật nằm ở đâu?</li>
+</ul></details>
+<details class="answer"><summary>Xem lời giải</summary>
+<h4 class="ah">1. Làm rõ đề bài</h4>
+<p>Có ba vấn đề khác nhau, cần ba cơ chế khác nhau: tạo trùng (idempotency khi tạo), cập nhật sai thứ tự (máy trạng thái), và thiếu tin (đối soát chủ động).</p>
+<ul>
+<li>Trạng thái nào của cổng là cuối cùng? Giả định <code>succeeded</code> và <code>failed</code> đều là cuối của một giao dịch. Nhưng các sự kiện của <em>hai giao dịch khác nhau</em> cho cùng một đơn có thể đan xen.</li>
+<li>Thanh toán lại sau thất bại là một lần thử mới, cần key mới. Bấm hai lần trong cùng một lần thử phải dùng chung key.</li>
+<li>Nếu cả hai lần thử đều thành công (trước khi sửa, hoặc khách trả ở hai tab), phải hoàn một lần. Cần chính sách hoàn tiền tự động.</li>
+</ul>
+<h4 class="ah">2. Ước lượng</h4>
+<ul>
+<li>2.000 đơn mỗi giờ là khoảng 0,6 đơn mỗi giây: tải không phải vấn đề, tính đúng mới là vấn đề.</li>
+<li>Webhook có thể lặp tới 10 lần. Bảng lưu sự kiện thô tăng nhiều nhất khoảng 20.000 row mỗi giờ; giữ 30 ngày là khoảng 15 triệu row, nên cần index và job dọn.</li>
+<li>0,3% đơn kẹt là khoảng 6 đơn mỗi giờ cao điểm: đủ ít để tra từng đơn bằng API của cổng.</li>
+</ul>
+<h4 class="ah">3. Các phương án</h4>
+<div class="tablewrap"><table>
+<thead><tr><th>Vấn đề</th><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td rowspan="3">Tạo trùng</td><td>Khoá nút trên giao diện</td><td>Dễ</td><td>Không chặn được retry của mạng, hai tab, app gửi lại</td></tr>
+<tr><td>Key do client sinh mỗi lần bấm</td><td>Theo đúng bản nháp IETF</td><td>Client lỗi thì sinh key mới; hai tab vẫn trùng</td></tr>
+<tr><td>Server tạo row "lần thử" duy nhất cho mỗi đơn đang mở, dùng id của nó làm key gửi cổng</td><td>Chặn ở database, đúng cả với hai tab</td><td>Thêm một bảng; cần trick cho UNIQUE có điều kiện</td></tr>
+<tr><td rowspan="3">Sai thứ tự</td><td>Ghi đè trạng thái theo sự kiện</td><td>Dễ</td><td>Chính là lỗi đang gặp</td></tr>
+<tr><td>Loại trùng theo <code>event_id</code></td><td>Bỏ được webhook lặp</td><td>Không giải quyết thứ tự</td></tr>
+<tr><td>Máy trạng thái với câu ghi có điều kiện; khi mâu thuẫn thì tra <code>GET</code></td><td>Đúng bất kể thứ tự</td><td>Phải định nghĩa rõ các bước chuyển</td></tr>
+<tr><td rowspan="2">Thiếu tin</td><td>Chờ webhook</td><td>Không làm gì</td><td>0,3% kẹt mãi</td></tr>
+<tr><td>Job đối soát tra <code>GET</code> các lần thử chờ quá 10 phút</td><td>Bắt được mọi trường hợp</td><td>Thêm job; tôn trọng giới hạn gọi API của cổng</td></tr>
+</tbody></table></div>
+<h4 class="ah">4. Đánh đổi và quyết định</h4>
+<ul>
+<li><strong>Tạo:</strong> server tạo row <code>payment_attempts</code>, mỗi đơn chỉ có một lần thử đang mở, và gửi <code>attempt.id</code> làm <code>Idempotency-Key</code>. Bấm hai lần hay hai tab đều trả về cùng một lần thử và cùng <code>payment_url</code>.</li>
+<li><strong>Webhook:</strong> kiểm chữ ký, lưu sự kiện thô (loại trùng theo <code>event_id</code>), trả 200 ngay, rồi áp dụng bằng máy trạng thái. <code>succeeded</code> thắng mọi trạng thái khác vì tiền đã thật sự chuyển; không có bước nào đi từ <code>succeeded</code> sang <code>failed</code>.</li>
+<li><strong>Đối soát:</strong> job mỗi 5 phút tra cổng cho lần thử ở <code>pending</code> quá 10 phút. Quá 30 phút vẫn không rõ thì cảnh báo cho người xử lý.</li>
+</ul>
+<p>Khi nào đổi ý: nếu cổng gửi được thứ tự đảm bảo theo giao dịch (sequence number), có thể so sequence thay vì tra <code>GET</code>. Nếu lượng đơn lên hàng trăm mỗi giây, xử lý webhook qua hàng đợi thay vì đồng bộ.</p>
+<h4 class="ah">5. Triển khai</h4>
+<pre><code>CREATE TABLE payment_attempts (
+  id            CHAR(36) PRIMARY KEY,            -- cũng là Idempotency-Key gửi cổng
+  order_id      BIGINT NOT NULL,
+  open_order_id BIGINT NULL,                      -- = order_id khi lần thử còn mở, NULL khi đã xong
+  status        ENUM('created','pending','succeeded','failed','expired') NOT NULL,
+  provider_id   VARCHAR(64) NULL,
+  updated_at    DATETIME(3) NOT NULL,
+  UNIQUE KEY uq_open (open_order_id)              -- nhiều NULL được phép: mỗi đơn chỉ một lần thử mở
+);
+CREATE TABLE payment_events (event_id VARCHAR(64) PRIMARY KEY, attempt_id CHAR(36), type VARCHAR(32),
+                             payload JSON, received_at DATETIME(3));</code></pre>
+<ol class="list">
+<li><strong>Tạo lần thử:</strong> <code>INSERT</code> với <code>open_order_id = order_id</code>. Lỗi 1062 nghĩa là đã có lần thử mở: đọc nó và trả lại <code>payment_url</code> cũ. Sau commit, gọi <code>POST /v2/payments</code> với <code>Idempotency-Key: attempt.id</code>. Timeout thì gọi lại với đúng key đó.</li>
+<li><strong>Webhook:</strong> kiểm HMAC; <code>INSERT IGNORE</code> vào <code>payment_events</code>; trả 200. Một worker áp dụng sự kiện:
+<ul>
+<li><code>succeeded</code>: <code>UPDATE payment_attempts SET status = 'succeeded', open_order_id = NULL WHERE id = ? AND status &lt;&gt; 'succeeded'</code>; rồi <code>UPDATE orders SET status = 'paid' WHERE id = ? AND status IN ('awaiting_payment','payment_failed')</code>. Nếu câu thứ hai trả 0 row vì đơn đã <code>paid</code> bởi lần thử khác: tạo lệnh hoàn tiền tự động.</li>
+<li><code>failed</code>: <code>UPDATE payment_attempts SET status = 'failed', open_order_id = NULL WHERE id = ? AND status IN ('created','pending')</code>. 0 row nghĩa là lần thử đã <code>succeeded</code>: bỏ qua sự kiện, ghi log.</li>
+</ul></li>
+<li><strong>Đối soát:</strong> lần thử <code>pending</code> quá 10 phút thì gọi <code>GET</code> và áp dụng kết quả như một sự kiện. Lần thử <code>created</code> quá 30 phút mà cổng không biết thì chuyển <code>expired</code>, mở lại cho khách thanh toán.</li>
+</ol>
+<h4 class="ah">6. Rủi ro và cách kiểm chứng</h4>
+<ul>
+<li>Cổng chỉ giữ key 24 giờ. Không bao giờ gọi lại <code>POST</code> sau 24 giờ; khi đó chỉ dùng <code>GET</code>.</li>
+<li>Test hợp đồng: phát lại webhook lặp 10 lần, đảo thứ tự <code>failed</code> và <code>succeeded</code>, bỏ hẳn webhook. Trạng thái cuối phải đúng trong mọi trường hợp.</li>
+<li>Metric: tuổi lần thử <code>pending</code> lâu nhất; số sự kiện bị máy trạng thái bỏ qua theo loại; số lệnh hoàn tiền do thanh toán hai lần (phải tiến về 0).</li>
+<li>Đối soát cuối ngày với báo cáo của cổng: số giao dịch thành công và tổng tiền phải khớp với <code>payment_attempts</code>.</li>
+</ul>
+<h4 class="ah">7. Lỗi hay gặp với bài này</h4>
+<ul>
+<li>Sinh key mới mỗi lần gọi lại cổng.</li>
+<li>Gán thẳng trạng thái đơn theo sự kiện vừa đến.</li>
+<li>Loại trùng theo <code>event_id</code> rồi tưởng đã xử lý xong thứ tự.</li>
+<li>Xử lý nặng trước khi trả 200 cho webhook, khiến cổng gửi lại và tạo thêm trùng.</li>
+<li>Tin webhook mà không kiểm chữ ký.</li>
+</ul>
+</details>
+</div>
+
+<div class="case" id="c5">
+<h3>C5. SMS bị gửi trùng 3%, mà nhà cung cấp không có idempotency key</h3>
+<p class="src">Dựa trên: phần 02 của trang này (dấu "đã xử lý", thử lại).</p>
+<dl>
+<dt>Bối cảnh</dt><dd><p>Service thông báo nhận message từ hàng đợi (at-least-once, visibility timeout 30 giây), rồi gọi API của nhà cung cấp SMS. Mỗi tin 800 đồng. API không có idempotency key, và thỉnh thoảng timeout sau 10 giây dù tin vẫn được gửi. API nhận một trường <code>client_ref</code> tuỳ ý và có báo cáo trạng thái theo <code>client_ref</code> sau khoảng 1 phút.</p>
+<p>Có hai loại tin: OTP đăng nhập (hết hạn sau 2 phút) và tin khuyến mãi (2 triệu tin mỗi đợt). Đợt khuyến mãi tuần trước, 3% khách nhận 2–3 tin giống nhau. Team đề xuất ghi dấu "đã gửi" trước khi gọi API để hết trùng.</p></dd>
+<dt>Yêu cầu</dt><dd>Giảm trùng rõ rệt. OTP không được mất. Chi phí kiểm soát được.</dd>
+<dt>Ràng buộc</dt><dd>Không đổi nhà cung cấp. Nhà cung cấp giới hạn 300 tin mỗi giây.</dd>
+<dt>Nhiệm vụ</dt><dd>Giải thích vì sao trùng. Đánh giá đề xuất của team. Thiết kế cho từng loại tin, và nói rõ chấp nhận rủi ro nào.</dd>
+</dl>
+<details class="hint"><summary>Gợi ý</summary><ul>
+<li>Với mỗi loại tin, mất một tin và trùng một tin, cái nào đắt hơn?</li>
+<li>Gửi 2 triệu tin ở 300 tin mỗi giây mất bao lâu? Visibility timeout 30 giây có đủ không?</li>
+<li>"Không biết đã gửi chưa" có nên được ghi khác với "gửi thất bại" không?</li>
+</ul></details>
+<details class="answer"><summary>Xem lời giải</summary>
+<h4 class="ah">1. Làm rõ đề bài</h4>
+<p>Với một tác dụng phụ không idempotent ở bên ngoài, không có cách nào bảo đảm đúng một lần. Chỉ có thể chọn phía thất bại: hoặc thỉnh thoảng mất, hoặc thỉnh thoảng trùng. Quyết định đúng là chọn theo <em>từng loại tin</em>, vì giá của mất và giá của trùng khác nhau.</p>
+<p>Nguồn trùng có hai: worker chết sau khi gửi và trước khi ack; và message hiện lại khi đang được xử lý vì quá visibility timeout. Đợt khuyến mãi lớn rất dễ rơi vào loại thứ hai: worker chờ rate limit của nhà cung cấp lâu hơn 30 giây, message hiện lại, worker khác lấy và gửi tiếp.</p>
+<h4 class="ah">2. Ước lượng</h4>
+<ul>
+<li>2 triệu × 3% = 60.000 tin trùng × 800 đồng ≈ 48 triệu đồng mỗi đợt, chưa kể khách phàn nàn.</li>
+<li>2 triệu tin ở 300 tin mỗi giây là khoảng 6.700 giây, gần 2 giờ. Nếu worker kéo nhiều message hơn tốc độ gửi, message phải nằm chờ trong worker lâu hơn 30 giây, và hiện lại.</li>
+<li>OTP: trùng tốn 800 đồng và làm khách hơi khó chịu. Mất thì khách không đăng nhập được, gọi tổng đài, có thể bỏ đi. Mất đắt hơn trùng rất nhiều.</li>
+<li>Khuyến mãi: mất một tin gần như không tốn gì. Trùng thì tốn tiền và mất uy tín. Trùng đắt hơn mất.</li>
+</ul>
+<h4 class="ah">3. Các phương án</h4>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Cách làm</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>A. Ghi dấu trước khi gửi</td><td>Ghi "đã thử", rồi gọi API, không gửi lại</td><td>Không trùng do giao lại</td><td>Chết giữa hai bước, hoặc timeout, thì tin mất</td></tr>
+<tr><td>B. Ghi dấu sau khi gửi</td><td>Gọi API, thành công mới ghi, rồi ack</td><td>Không mất</td><td>Chết hoặc timeout thì gửi lại, trùng</td></tr>
+<tr><td>C. Trạng thái "đang gửi" và tra báo cáo</td><td>Ghi "đang gửi" kèm <code>client_ref</code>; lần giao lại thấy "đang gửi" cũ thì tra báo cáo rồi mới quyết định</td><td>Giảm cả trùng lẫn mất</td><td>Báo cáo trễ 1 phút; phức tạp; vẫn có trường hợp chưa rõ</td></tr>
+<tr><td>D. Sửa nguyên nhân giao lại</td><td>Visibility timeout dài hơn thời gian xử lý tệ nhất, hoặc gia hạn; worker chỉ kéo message vừa đủ tốc độ gửi</td><td>Loại phần lớn trùng mà không đổi ngữ nghĩa</td><td>Không loại được trường hợp worker chết</td></tr>
+<tr><td>E. Loại trùng khi đưa vào hàng đợi</td><td>Mỗi (đợt, khách) chỉ một message, UNIQUE trong database</td><td>Chặn trùng từ phía tạo tin</td><td>Không giúp với giao lại</td></tr>
+</tbody></table></div>
+<h4 class="ah">4. Đánh đổi và quyết định</h4>
+<ul>
+<li><strong>Khuyến mãi:</strong> A cộng D cộng E. Đề xuất của team đúng cho loại tin này: chấp nhận thỉnh thoảng mất một tin để không bao giờ gửi trùng. Timeout thì ghi "không rõ", không gửi lại.</li>
+<li><strong>OTP:</strong> B cộng D. Đề xuất của team sai cho loại tin này: mất OTP là lỗi nặng. Gửi lại khi lỗi, nhưng chỉ trong khoảng OTP còn hạn, tối đa 2 lần.</li>
+<li>C đáng làm sau nếu muốn biết chính xác chi phí và tỉ lệ mất của khuyến mãi, nhưng không cần để giải quyết sự cố hiện tại.</li>
+</ul>
+<p>Khi nào đổi ý: nếu nhà cung cấp thêm idempotency key, dùng B cho cả hai loại. Nếu tin khuyến mãi gắn với mã giảm giá có giá trị, mất trở nên đắt hơn, và C đáng làm ngay.</p>
+<h4 class="ah">5. Triển khai</h4>
+<pre><code>CREATE TABLE sms_sends (
+  id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+  kind        ENUM('otp','promo') NOT NULL,
+  campaign_id BIGINT NULL,
+  user_id     BIGINT NOT NULL,
+  client_ref  CHAR(36) NOT NULL,
+  status      ENUM('attempted','sent','unknown','failed') NOT NULL,
+  UNIQUE KEY uq_campaign_user (campaign_id, user_id)   -- NULL cho OTP nên không chặn OTP
+);</code></pre>
+<ul>
+<li><strong>Khuyến mãi:</strong> <code>INSERT</code> với <code>status = 'attempted'</code>; lỗi 1062 thì ack và bỏ qua. Gọi API với <code>client_ref</code>, timeout 10 giây. Thành công thì <code>'sent'</code>; timeout thì <code>'unknown'</code>; lỗi rõ ràng (400) thì <code>'failed'</code>. Luôn ack. Không thử lại.</li>
+<li><strong>OTP:</strong> gọi API; thành công thì ghi <code>'sent'</code> rồi ack. Timeout hoặc 5xx thì thử lại sau 5 giây và 15 giây, chỉ khi OTP còn trên 60 giây hiệu lực. Sau đó ack dù kết quả thế nào; khách có nút "gửi lại mã".</li>
+<li><strong>Hàng đợi:</strong> visibility timeout 5 phút (hoặc gia hạn khi đang xử lý). Số message worker kéo về mỗi lần khớp với 300 tin mỗi giây, ví dụ tách queue OTP riêng để OTP không phải xếp sau 2 triệu tin khuyến mãi.</li>
+<li><strong>Sau đợt:</strong> job đọc báo cáo của nhà cung cấp cho các tin <code>'unknown'</code>, để biết tỉ lệ thật sự đã gửi.</li>
+</ul>
+<h4 class="ah">6. Rủi ro và cách kiểm chứng</h4>
+<ul>
+<li>Đo tỉ lệ trùng thật từ báo cáo của nhà cung cấp: số khách có hơn một tin trong cùng một đợt. Kỳ vọng gần 0.</li>
+<li>Đo tỉ lệ <code>'unknown'</code> của khuyến mãi; nếu cao (trên 1%), nhà cung cấp đang chậm, và cần xem lại timeout.</li>
+<li>Đo thời gian từ lúc yêu cầu OTP tới lúc gửi; OTP nằm trong queue riêng nên không bị đợt khuyến mãi làm chậm.</li>
+<li>Test giết worker ở từng điểm như E28 cho cả hai luồng.</li>
+</ul>
+<h4 class="ah">7. Lỗi hay gặp với bài này</h4>
+<ul>
+<li>Dùng một chính sách cho mọi loại tin.</li>
+<li>Tin rằng ghi dấu trong database cho "đúng một lần" với một API bên ngoài.</li>
+<li>Visibility timeout ngắn hơn thời gian xử lý thật.</li>
+<li>Thử lại khi timeout với một thao tác không idempotent và đắt tiền.</li>
+<li>Gộp "không rõ" vào "thất bại", rồi gửi lại.</li>
+</ul>
+</details>
+</div>
+
+<div class="case" id="c6">
+<h3>C6. Database chỉ failover 90 giây, mà service sập 25 phút</h3>
+<p class="src">Dựa trên: phần 02–03 và 06 của trang này (backoff, jitter, retry budget).</p>
+<dl>
+<dt>Bối cảnh</dt><dd><p>Service checkout (40 pod) gọi service payment nội bộ qua API gateway. Cấu hình hiện tại:</p>
+<ul>
+<li>SDK HTTP trong checkout thử lại 5 lần ngay lập tức, timeout 2 giây.</li>
+<li>API gateway thử lại 3 lần khi gặp 502, 503, 504.</li>
+<li>Code checkout bọc thêm một vòng thử lại 2 lần.</li>
+</ul>
+<p>Lúc 20:00, database của service payment failover mất 90 giây. Database lên lại, nhưng service payment vẫn quá tải thêm 25 phút: CPU 100%, request đến gấp khoảng 30 lần bình thường (bình thường 300 request mỗi giây). Nhiều khách bị tạo hai lệnh thanh toán.</p></dd>
+<dt>Yêu cầu</dt><dd>Lần sau, sự cố database 90 giây phải hồi phục trong vòng 2 phút sau khi database lên. Không tạo lệnh trùng.</dd>
+<dt>Ràng buộc</dt><dd>Service payment phục vụ được khoảng 600 request mỗi giây. Không thể tăng ngay.</dd>
+<dt>Nhiệm vụ</dt><dd>Giải thích vì sao hệ thống không tự hồi phục. Tính hệ số nhân của retry. Đề xuất chính sách thử lại và các lớp bảo vệ, theo thứ tự ưu tiên.</dd>
+</dl>
+<details class="hint"><summary>Gợi ý</summary><ul>
+<li>Một lần bấm của khách tạo ra tối đa bao nhiêu request tới service payment?</li>
+<li>Server xử lý một request mà client đã bỏ đi sau 2 giây thì công đó có ích không?</li>
+<li>Lệnh trùng đến từ tầng nào?</li>
+</ul></details>
+<details class="answer"><summary>Xem lời giải</summary>
+<h4 class="ah">1. Làm rõ đề bài</h4>
+<p>Đây là một sự cố "tự duy trì" (metastable failure). Nguyên nhân ban đầu (database) đã hết, nhưng chính phản ứng của hệ thống (retry) giữ cho nó quá tải. Hệ thống chỉ hồi phục khi tải giảm, ở đây là khi khách bỏ cuộc.</p>
+<p>Câu hỏi cần hỏi: API tạo lệnh thanh toán có idempotency key không? Lệnh trùng cho thấy là không. Server có bỏ qua request đã quá hạn của client không? Nhiều khả năng là không.</p>
+<h4 class="ah">2. Ước lượng</h4>
+<ul>
+<li>Số lần thử tối đa mỗi tầng: SDK 1 + 5 = 6; gateway 1 + 3 = 4; code 1 + 2 = 3. Nhân lại: 6 × 4 × 3 = 72 request cho một lần bấm.</li>
+<li>Khi mọi thứ lỗi, tải đề xuất lên tới 300 × 72 ≈ 21.600 request mỗi giây. Thực tế bị giới hạn bởi timeout và pool, nên đo được khoảng 9.000, tức khoảng 30 lần.</li>
+<li>Sức chứa 600. Khi database lên lại, tải đến vẫn gấp khoảng 15 lần sức chứa. Hàng đợi trong server dài ra, mỗi request phải chờ quá 2 giây, client đã bỏ đi và thử lại. Server tốn gần hết công cho request không còn ai chờ: lượng việc hữu ích gần 0.</li>
+</ul>
+<h4 class="ah">3. Các phương án</h4>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>A. Chỉ thử lại ở một tầng</td><td>Hệ số nhân từ 72 xuống 3; rẻ nhất</td><td>Phải thống nhất giữa các team</td></tr>
+<tr><td>B. Backoff luỹ thừa có jitter, tối đa 3 lần</td><td>Trải tải theo thời gian</td><td>Một mình không đủ khi sự cố kéo dài</td></tr>
+<tr><td>C. Retry budget</td><td>Giới hạn tổng số lần thử lại, ví dụ 10% số request mới</td><td>Thêm trạng thái ở client</td></tr>
+<tr><td>D. Circuit breaker ở client</td><td>Ngừng gọi khi tỉ lệ lỗi cao, thử lại bằng vài request dò</td><td>Cần chỉnh ngưỡng; chi tiết là chủ đề Month 4</td></tr>
+<tr><td>E. Server từ chối sớm</td><td>Giới hạn số request đang xử lý, trả 503 kèm <code>Retry-After</code> ngay; bỏ request đã quá hạn</td><td>Cần truyền deadline từ client</td></tr>
+<tr><td>F. Idempotency key cho tạo lệnh</td><td>Thử lại không tạo lệnh trùng</td><td>Cần bảng khoá (như trang này)</td></tr>
+<tr><td>G. Tăng timeout, thêm pod</td><td>Trông có vẻ giúp</td><td>Pod mới mở thêm connection tới database vừa hồi phục; timeout dài giữ thêm tài nguyên</td></tr>
+</tbody></table></div>
+<h4 class="ah">4. Đánh đổi và quyết định</h4>
+<p>Làm theo thứ tự này, mỗi bước đứng được một mình:</p>
+<ol class="list">
+<li><strong>F và A trước:</strong> idempotency key cho tạo lệnh, và chỉ SDK trong checkout được thử lại (vì nó có key và biết ngữ cảnh). Gateway và vòng thử lại trong code bỏ hẳn. Hai việc này rẻ và loại phần lớn vấn đề.</li>
+<li><strong>B và C:</strong> 3 lần, full jitter, base 100 ms, cap 2 giây, retry budget 10%.</li>
+<li><strong>E:</strong> service payment giới hạn số request đang xử lý quanh mức nó phục vụ được, trả 503 ngay khi vượt, và bỏ request mà deadline của client đã qua.</li>
+<li><strong>D:</strong> circuit breaker ở checkout, khi Month 4 làm tới chủ đề này.</li>
+</ol>
+<p>G bị loại. Thêm pod chỉ đáng khi tải bình thường đã gần sức chứa, không phải để chống retry storm.</p>
+<h4 class="ah">5. Triển khai</h4>
+<div class="tablewrap"><table>
+<thead><tr><th>Tầng</th><th>Trước</th><th>Sau</th></tr></thead>
+<tbody>
+<tr><td>Code checkout</td><td>Thử lại 2 lần</td><td>Không thử lại; gửi <code>Idempotency-Key</code> và header deadline</td></tr>
+<tr><td>SDK HTTP</td><td>5 lần ngay, timeout 2 s</td><td>3 lần, full jitter, budget 10%, chỉ cho 503, 504, timeout</td></tr>
+<tr><td>API gateway</td><td>3 lần</td><td>0 lần</td></tr>
+<tr><td>Service payment</td><td>Nhận hết</td><td>Giới hạn đồng thời, 503 kèm <code>Retry-After</code>, bỏ request quá hạn</td></tr>
+</tbody></table></div>
+<pre><code>// retry budget: mỗi request thành công cộng 0,1 token, mỗi lần thử lại tốn 1 token
+class RetryBudget {
+  private tokens = 10;
+  onSuccess() { this.tokens = Math.min(100, this.tokens + 0.1); }
+  tryAcquire() { if (this.tokens &gt;= 1) { this.tokens -= 1; return true; } return false; }
+}</code></pre>
+<h4 class="ah">6. Rủi ro và cách kiểm chứng</h4>
+<ul>
+<li>Game day ở staging: tải 300 request mỗi giây, gây failover database 90 giây. Đo thời gian hồi phục sau khi database lên (mục tiêu dưới 2 phút), đỉnh tải đến, và số lệnh trùng (phải bằng 0).</li>
+<li>Metric theo tầng: số lần thử lại mỗi giây, budget còn lại, số request bị server từ chối sớm.</li>
+<li>Rủi ro: một team khác vẫn để retry ở gateway cho route mới. Đưa cấu hình retry vào review chung.</li>
+</ul>
+<h4 class="ah">7. Lỗi hay gặp với bài này</h4>
+<ul>
+<li>Tăng timeout và thêm pod.</li>
+<li>Mỗi tầng tự thêm retry "cho chắc".</li>
+<li>Thử lại thao tác tạo mới mà không có idempotency key.</li>
+<li>Chỉ thêm jitter mà không giới hạn tổng số lần thử lại.</li>
+<li>Server vẫn xử lý request mà client đã bỏ đi.</li>
+</ul>
+</details>
+</div>
+</section>
+
+<!-- 10 -->
+<section id="s10">
+<header><span class="num">10</span><h2>Câu hỏi còn mở</h2></header>
 <p class="prose">Số thứ tự trùng với Open questions trong <code>.claude/docs/LEARNING_LOG.md</code>. Log là bản gốc.</p>
 <div class="tablewrap"><table>
 <thead><tr><th>#</th><th>Câu hỏi</th><th>Trạng thái</th></tr></thead>
@@ -557,9 +832,9 @@ await queue.add('import-row', data, {
 </tbody></table></div>
 </section>
 
-<!-- 10 -->
-<section id="s10">
-<header><span class="num">10</span><h2>Tài liệu tham khảo</h2></header>
+<!-- 11 -->
+<section id="s11">
+<header><span class="num">11</span><h2>Tài liệu tham khảo</h2></header>
 <div class="prose"><ul>
 <li>IETF, <a href="https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-idempotency-key-header">The Idempotency-Key HTTP Header Field</a> (draft-ietf-httpapi-idempotency-key-header-07): mục Error Handling, fingerprint, hạn dùng</li>
 <li>Stripe, <a href="https://docs.stripe.com/api/idempotent_requests">Idempotent requests</a>: lưu mã và body của lần đầu, so tham số, 24 giờ, 255 ký tự</li>
