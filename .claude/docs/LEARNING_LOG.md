@@ -152,6 +152,7 @@ These are written in the page as exercises; none have been run yet.
 - **E31** — The id-cursor gap by hand; then two `SKIP LOCKED` relays killed every 10 s: lost and duplicated events, `data_locks` on `idx_unsent`.
 - **E32** — Polling relay latency (p50/p99) and idle query rate at 100 ms and 1 s sleep, 10 and 1,000 events/s.
 - **Q53–Q58** — The six recall questions in section 08 of the outbox page.
+- **C7–C9** — The three real-world cases in section 09 of the outbox page (lost confirmation emails and a migration to the outbox, a polling relay slowed by an 80M-row table, a flight and hotel saga with an irreversible step). Solve in writing before opening the answers.
 - **Q11–Q16** — The six recall questions in section 08 of the composite-index page (answers are on the page, hidden).
 - **Q1–Q5** — The five check questions at the end of the page (leftmost prefix, `COUNT(*)` and the visibility map, full scan polluting the cache, TOAST, a `sessions` table updated 5,000×/sec). Answer in writing before looking anything up, then verify.
 
@@ -162,6 +163,8 @@ These are written in the page as exercises; none have been run yet.
 **Topic and objective.** Month 3 topic, written ahead as documentation only (Phase 3 of the documentation plan): why writing to the database and the broker separately loses or invents events, how an outbox in the same transaction fixes it, how to relay the outbox without skipping rows, polling vs CDC, and sagas at concept level.
 
 **Output.** [topics/transactional-outbox/index.html](../topics/transactional-outbox/index.html) — 10 sections. Widgets: a dual-write matrix that runs a small model for four designs × three failures (crash, broker reject, commit failure) and labels each cell matched / lost event / phantom event; an 8-step stepper of a relay with an id cursor skipping an event committed late, and the status-based fix; a polling calculator (sleep-then-drain cycle: added latency, idle query rate, keeps up or not); a saga stepper with a selectable failing step and reverse compensations. Prediction templates for E30–E32.
+
+**Cases added (same day).** Section 09 "Bài toán thực tế" with cases C7–C9, each a shown problem and a hidden senior-style answer. The answers are reasoning from reading, not measurements; C8's lock diagnosis depends on open question 25.
 
 **What it covers.**
 
