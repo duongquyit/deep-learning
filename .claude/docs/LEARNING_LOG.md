@@ -59,6 +59,9 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 | Isolation levels in InnoDB (RR snapshot at first read, RC per statement) and which anomalies each allows | 2 (prov.) | same, §01–§02 | 2026-10-19 | Exercise E19 under RR and RC, including `WITH CONSISTENT SNAPSHOT` |
 | Consistent read vs locking read / DML (current read) and the lost-update trap | 2 (prov.) | same, §02, §04 | 2026-10-19 | Reproduce a lost update in the lab, then fix it two ways (Month 1 Week 4) |
 | MVCC on secondary indexes (no hidden columns, fallback to PRIMARY) | 2 (prov.) | same, §02 | 2026-10-19 | Exercise E20: covering read cost on a table under concurrent writes |
+| InnoDB lock types (S/X, IS/IX, record, gap, next-key, insert intention) and what each statement locks under RR and RC | 2 (prov.) | [innodb-locking-deadlock](../topics/innodb-locking-deadlock/index.html) §01–§02 | 2026-10-19 | Exercise E21: match `data_locks` for 5 statements under RR and RC, and predict which inserts block |
+| Lost update: four fixes and their cost | 2 (prov.) | same, §02 | 2026-10-19 | Exercise E22: reproduce and fix it two ways |
+| Deadlocks: detection, victim, 1213 vs 1205, reading `LATEST DETECTED DEADLOCK`, lock ordering | 2 (prov.) | same, §02, §04 | 2026-10-19 | Exercise E22: reproduce a crossed-transfer deadlock and read the report; then diagnose one from work |
 
 "(prov.)" = provisional. Every row above rests on one artifact I wrote myself, with no measurement behind it. Week 1 of Month 1 includes a baseline assessment (TECHNICAL_GROWTH.md Section 11) that should confirm or cut these.
 
@@ -83,6 +86,7 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 17. On storage with atomic 16KB writes, how much does turning off doublewrite gain? Low priority.
 18. Are the exact conditions that make a covering read on a secondary index fall back to PRIMARY (delete-marked entry, page modified by a transaction newer than the view) as described, and what does it cost on a table under writes? The manual names both conditions; the per-page transaction ID detail comes from the source code and is unchecked. E20.
 19. Under READ COMMITTED, an `UPDATE … WHERE` on an unindexed column uses a "semi-consistent read" to skip non-matching rows without waiting for their locks. How much does that change lock waits compared with REPEATABLE READ? Belongs to the locking page.
+20. On 8.4, is the first entry past a range on a secondary index, and on the PK, locked with a next-key lock or a gap lock only? This changed across 8.0 releases; the locking page's widget avoids ranges for that reason. E23.
 
 ## Pending verification (from the session's own exercise list)
 
@@ -112,8 +116,41 @@ These are written in the page as exercises; none have been run yet.
 - **E19** — Two-session timeline under RR and RC, plus `WITH CONSISTENT SNAPSHOT` and the lost-update variant.
 - **E20** — Covering read on `idx_user_id` inside an old read view after concurrent updates: buffer-pool requests vs a fresh session.
 - **Q29–Q34** — The six recall questions in section 08 of the MVCC page.
+- **E21** — Lock map on a 3-row table: `data_locks` for 5 statements under RR and RC, and which of 4 inserts block.
+- **E22** — Lost update reproduced and fixed two ways; crossed-transfer deadlock and its report; the same with ordered locking. *(The Month 1 Week 4 hands-on item.)*
+- **E23** — Lock on the first entry past a range, secondary index vs PK, on 8.4.
+- **Q35–Q40** — The six recall questions in section 08 of the locking page.
 - **Q11–Q16** — The six recall questions in section 08 of the composite-index page (answers are on the page, hidden).
 - **Q1–Q5** — The five check questions at the end of the page (leftmost prefix, `COUNT(*)` and the visibility map, full scan polluting the cache, TOAST, a `sessions` table updated 5,000×/sec). Answer in writing before looking anything up, then verify.
+
+---
+
+## 2026-10-19 — Locking and deadlocks (InnoDB)
+
+**Topic and objective.** Month 1 Week 4 topic, written ahead as documentation only: what InnoDB locks for each kind of statement, why a missing index can lock a whole table, lost update and its fixes, and how deadlocks are detected and handled. Closes Phase 1 of the documentation plan.
+
+**Output.** [topics/innodb-locking-deadlock/index.html](../topics/innodb-locking-deadlock/index.html) — 10 sections. Widgets: a lock map over PRIMARY and `idx_age` for 5 statements under RR and RC, listing the locks in `data_locks` form and letting 4 INSERT probes show whether they block and which lock blocks them; a 7-step crossed-transfer deadlock with the wait-for edges. A comparison table of four lost-update fixes. Prediction templates for E21–E23.
+
+**What it covers.**
+
+- Lock types from the 8.4 manual: S/X, IS/IX, record, gap (inhibit inserts only, never conflict with each other), next-key, insert intention, AUTO-INC.
+- Locking reads, `UPDATE`, `DELETE` lock every index entry scanned, not only matching rows; no usable index means every row and gap; a unique search for one row takes a record lock only; locking through a secondary index also locks the PRIMARY record. `INSERT` takes a record lock after an insert-intention lock; duplicate key takes an S lock (the manual's three-session deadlock).
+- READ COMMITTED drops gap locks except for FK and duplicate-key checks, and releases locks on non-matching rows.
+- Lost update fixes: atomic statement, `FOR UPDATE`, version column, SERIALIZABLE.
+- Deadlock detection on wait, small-transaction victim, 1213 rolls back the transaction, 1205 rolls back only the statement by default; lock ordering; `SKIP LOCKED` for job queues.
+- Comparison with PostgreSQL (row locks in tuples, no gap locks, SSI, `deadlock_timeout`).
+
+**Initial understanding.** TODO — what did I believe about InnoDB locking before this page? No prior belief was stated in the session.
+
+**Mistakes and misconceptions corrected.** TODO — only I know which. Traps the page writes down: InnoDB locks rows; `UPDATE … WHERE` locks only matching rows; locking a missing key locks nothing; gap locks conflict with each other; 1205 rolls back the transaction; deadlocks must be eliminated entirely.
+
+**Experiments and results.** None. The lock map is derived from the manual and has not been compared with `data_locks` on the lab. E21–E23 are the measurements; E22 is the Week 4 hands-on item.
+
+**Competency level.** Level 2 provisional on three new matrix rows.
+
+**Remaining questions.** Open questions 19 and 20.
+
+**Next step.** Phase 1 documentation is complete (index write cost, buffer pool/redo/undo, MVCC, locking). The lab phase follows: script E13–E23 into `lab.sh`, write predictions, run them in Weeks 3–4 alongside E8, E9–E12 and the baseline assessment.
 
 ---
 

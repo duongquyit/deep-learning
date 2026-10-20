@@ -1,0 +1,636 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Locking và deadlock trong InnoDB</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F2F4F6; --surface:#FFFFFF; --ink:#18203A; --ink-2:#56607A; --ink-3:#8A93A8;
+  --rule:#CCD3DD; --rule-strong:#8C96AB;
+  --struct:#3446B8; --struct-bg:#E6E9FA;            /* cấu trúc index, chrome của trang */
+  --row:#16795F;    --row-bg:#DDF2EA;               /* dữ liệu row thật */
+  --hot:#9A5F00;    --hot-bg:#FCEFD2; --hot-line:#E3A21A;  /* bị ghi, bị chạm, bị lọc */
+  --miss:#B5302B;   --miss-bg:#FBE1DF;              /* đọc từ disk, việc thừa, lỗi */
+  --path:#0B7A8A;   --path-bg:#D8F1F3;              /* đường đi hoặc khoảng đang đọc */
+  --key:#A8327A;    --key-bg:#F8E0EE;               /* con trỏ: PK, TID */
+  --ram:#5B4BB0;    --ram-bg:#E7E3FA;               /* hit trong buffer pool */
+  --grid:rgba(52,70,184,.06);
+  --r-s:4px; --r-m:8px;
+  --sans:"Instrument Sans",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --paper:#0F1320; --surface:#171C2B; --ink:#E6E9F2; --ink-2:#A3ABC0; --ink-3:#6E7790;
+  --rule:#2C3448; --rule-strong:#55607A;
+  --struct:#97A3FF; --struct-bg:#232A55;
+  --row:#5FD0AE;    --row-bg:#123A31;
+  --hot:#F2BE5C;    --hot-bg:#3B2C0E; --hot-line:#E3A21A;
+  --miss:#FF8A84;   --miss-bg:#3E1A1A;
+  --path:#5ED3E0;   --path-bg:#113A40;
+  --key:#F28DC4;    --key-bg:#3E1A2E;
+  --ram:#B7A8FF;    --ram-bg:#2A2350;
+  --grid:rgba(151,163,255,.05);
+}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important;animation:none!important}}
+body{margin:0;color:var(--ink);font:400 17px/1.65 var(--sans);
+  background-color:var(--paper);
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:24px 24px}
+a{color:var(--struct)}
+:focus-visible{outline:2px solid var(--struct);outline-offset:2px}
+
+/* layout */
+.shell{display:grid;grid-template-columns:230px minmax(0,1fr);gap:56px;max-width:1180px;margin:0 auto;padding:0 32px}
+nav.toc{position:sticky;top:0;align-self:start;height:100vh;padding:48px 0;overflow:auto}
+nav.toc p{font-weight:600;margin:0 0 12px;font-size:15px}
+nav.toc ol,.mobile-toc ol{list-style:none;margin:0;padding:0;counter-reset:s}
+nav.toc li,.mobile-toc li{counter-increment:s;margin:0}
+nav.toc a,.mobile-toc a{display:grid;grid-template-columns:28px 1fr;padding:5px 0;color:var(--ink-2);text-decoration:none;font-size:14.5px;line-height:1.4}
+nav.toc a::before,.mobile-toc a::before{content:counter(s,decimal-leading-zero);font:500 12px/1.9 var(--mono);color:var(--ink-3)}
+nav.toc a:hover,nav.toc a.on{color:var(--struct)}
+main{min-width:0;padding:56px 0 120px}
+.prose{max-width:720px}
+section{padding-top:72px}
+section>header{display:grid;grid-template-columns:auto 1fr;gap:0 18px;align-items:baseline;max-width:720px;margin-bottom:12px}
+section>header .num{font:500 15px var(--mono);color:var(--struct);border:1.5px solid var(--struct);border-radius:var(--r-s);padding:2px 7px;transform:translateY(-4px)}
+h1,h2,h3,h4{line-height:1.2;letter-spacing:-.015em;margin:0}
+h1{font-size:clamp(2.3rem,5.4vw,3.9rem);font-weight:700;letter-spacing:-.03em;line-height:1.02;max-width:14ch;margin-bottom:20px}
+.lede{font-size:19px;color:var(--ink-2);max-width:56ch;margin-bottom:28px}
+h2{font-size:clamp(1.6rem,3vw,2.1rem);font-weight:650}
+h3{font-size:1.2rem;font-weight:600;margin:36px 0 8px}
+p{margin:0 0 14px}
+ul,ol.list{margin:0 0 16px;padding-left:22px}
+li{margin:4px 0}
+code{font:0.88em var(--mono);background:var(--struct-bg);color:var(--ink);padding:1px 5px;border-radius:3px}
+pre{font:13.5px/1.6 var(--mono);background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:var(--r-s);padding:14px 16px;overflow-x:auto;margin:0 0 18px;max-width:720px}
+pre code{background:none;padding:0}
+.tablewrap{overflow-x:auto;max-width:720px;margin:0 0 20px}
+table{border-collapse:collapse;width:100%;max-width:720px;margin:0 0 20px;font-size:15px;background:var(--surface)}
+.tablewrap table{margin:0;min-width:560px}
+th,td{text-align:left;padding:9px 12px;border:1px solid var(--rule);vertical-align:top}
+th{font-weight:600;background:var(--struct-bg)}
+
+/* widget frame: styled like a page, header strip = page header */
+.frame{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);margin:22px 0 28px;max-width:920px;overflow:hidden}
+.frame>.ph{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:9px 16px;border-bottom:1px solid var(--rule);background:var(--struct-bg);font-size:14px}
+.frame>.ph strong{font-weight:600}
+.frame>.ph .meta{margin-left:auto;font:500 12.5px var(--mono);color:var(--ink-2)}
+.frame .bd{padding:16px;min-width:0}
+.frame svg{display:block;width:100%;height:auto}
+.st-t{font:600 16px var(--sans);margin:0 0 8px}
+.desc{background:var(--paper);border-radius:var(--r-s);padding:12px 14px;margin-top:12px;min-height:84px;font-size:15.5px;color:var(--ink-2)}
+.desc pre{margin:10px 0 0;font-size:12.5px;border-left-color:var(--rule-strong)}
+.nav{display:flex;gap:8px;margin-top:12px;align-items:center}
+button{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 14px;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--struct);color:var(--struct)}
+button:disabled{opacity:.4;cursor:default}
+button.primary,button[aria-pressed="true"]{background:var(--struct);border-color:var(--struct);color:var(--surface)}
+button.primary:hover:not(:disabled),button[aria-pressed="true"]:hover{color:var(--surface);filter:brightness(1.1)}
+input,select{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 10px}
+input[type=number]{width:84px}
+input[type=range],input[type=checkbox]{accent-color:var(--struct)}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-top:12px}
+.stat{background:var(--paper);border-radius:var(--r-s);padding:8px 12px}
+.stat span{display:block;font-size:13px;color:var(--ink-2)}
+.stat b{font:600 20px var(--sans);font-variant-numeric:tabular-nums}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;color:var(--ink-2);margin-top:12px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:14px;height:14px;border-radius:3px;border:2px solid;display:inline-block}
+.fine{font-size:13.5px;color:var(--ink-2);margin:10px 0 0}  /* chú thích nhỏ dưới widget */
+
+/* svg text */
+.tb{font:600 14px var(--sans)} .t{font:400 13px var(--sans)} .ts{font:400 12px var(--sans)} .tm{font:500 12.5px var(--mono)}
+.lbl{fill:var(--ink-2);font:400 12.5px var(--sans)}
+
+/* callouts */
+.note{border-left:3px solid var(--hot-line);background:var(--hot-bg);padding:12px 16px;border-radius:0 var(--r-s) var(--r-s) 0;margin:18px 0;max-width:720px;font-size:16px}
+.note strong{color:var(--hot)}
+.senior{border:1.5px solid var(--struct);border-radius:var(--r-m);padding:14px 18px;margin:22px 0;max-width:720px;background:var(--surface)}
+.senior h4{font-size:16px;margin-bottom:6px;color:var(--struct)}
+.senior p:last-child,.senior ul:last-child{margin-bottom:0}
+details{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-s);padding:10px 14px;margin:10px 0;max-width:720px}
+details summary{cursor:pointer;font-weight:600}
+details[open] summary{margin-bottom:8px}
+details.answer{background:var(--paper);border-style:dashed;margin:10px 0 0}
+details.answer summary{font-weight:500;color:var(--struct)}
+.tag{display:inline-block;font:500 12px var(--sans);color:var(--ink-2);border:1px solid var(--rule-strong);border-radius:999px;padding:0 8px;margin-right:6px;vertical-align:1px}
+
+/* hero brief: mục tiêu, cần biết trước, trạng thái */
+.brief{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px 24px;background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);padding:14px 18px;max-width:920px;margin:0 0 8px;font-size:15px}
+.brief h4{font-size:14px;color:var(--struct);margin:0 0 4px}
+.brief ul{margin:0;padding-left:18px}
+.brief p{margin:0}
+
+.mobile-toc{display:none}
+@media (max-width:900px){
+  .shell{grid-template-columns:1fr;padding:0 16px;gap:0}
+  nav.toc{display:none}
+  .mobile-toc{display:block;margin-top:20px}
+  main{padding-top:32px}
+  .frame .bd{padding:12px}
+  body{font-size:16px}
+}
+
+/* ---- page widgets ---- */
+.n rect{fill:var(--surface);stroke:var(--rule-strong);stroke-width:1}
+.n text{fill:var(--ink)}
+.n.struct rect{fill:var(--struct-bg);stroke:var(--struct)} .n.struct text{fill:var(--struct)}
+.n.row rect{fill:var(--row-bg);stroke:var(--row);stroke-width:1.6} .n.row text{fill:var(--row)}
+.n.hot rect{fill:var(--hot-bg);stroke:var(--hot);stroke-width:2} .n.hot text{fill:var(--hot)}
+.n.miss rect{fill:var(--miss-bg);stroke:var(--miss);stroke-width:2} .n.miss text{fill:var(--miss)}
+.n.key rect{fill:var(--key-bg);stroke:var(--key);stroke-width:2} .n.key text{fill:var(--key)}
+.n.path rect{fill:var(--path-bg);stroke:var(--path);stroke-width:2} .n.path text{fill:var(--path)}
+.n.dim rect{fill:var(--paper);stroke:var(--rule)} .n.dim text{fill:var(--ink-3)}
+.edge{stroke:var(--rule-strong);stroke-width:1.2;fill:none}
+.edge.hot{stroke:var(--hot);stroke-width:2.2}
+.edge.miss{stroke:var(--miss);stroke-width:2.4}
+.edge.row{stroke:var(--row);stroke-width:2}
+.gap{fill:var(--paper);stroke:var(--rule)}
+.gap.lk{fill:var(--hot-bg);stroke:var(--hot);stroke-width:2}
+.rec{fill:var(--surface);stroke:var(--rule-strong)}
+.rec.lk{fill:var(--key-bg);stroke:var(--key);stroke-width:2}
+.rec.sup{fill:var(--paper);stroke:var(--rule-strong);stroke-dasharray:3 3}
+.rect-t{font:600 13px var(--mono);fill:var(--ink)}
+.lmode{font:500 10.5px var(--mono);fill:var(--key)}
+.probe{fill:none;stroke:var(--row);stroke-width:2.4}
+.probe.blk{stroke:var(--miss)}
+.lg-hot{border-color:var(--hot);background:var(--hot-bg)}
+.lg-key{border-color:var(--key);background:var(--key-bg)}
+.lg-miss{border-color:var(--miss);background:var(--miss-bg)}
+.lg-path{border-color:var(--path);background:var(--path-bg)}
+.lg-row{border-color:var(--row);background:var(--row-bg)}
+.calc{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px 14px;margin-bottom:12px}
+.calc label{display:flex;flex-direction:column;gap:4px;font-size:13.5px;color:var(--ink-2)}
+.locks{font:12.5px/1.55 var(--mono);background:var(--paper);border-radius:var(--r-s);padding:10px 12px;margin:10px 0 0;overflow-x:auto;white-space:pre}
+.probes{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.probes button{font:500 12.5px var(--mono);padding:4px 9px}
+.probes button.blk{border-color:var(--miss);color:var(--miss)}
+.probes button.ok{border-color:var(--row);color:var(--row)}
+.probes button[aria-pressed="true"]{background:var(--surface);border-width:2.5px;font-weight:600}
+.probes button.blk[aria-pressed="true"]{color:var(--miss);background:var(--miss-bg)}
+.probes button.ok[aria-pressed="true"]{color:var(--row);background:var(--row-bg)}
+</style>
+</head>
+<body>
+
+<div class="shell">
+<nav class="toc" aria-label="Mục lục">
+  <p>Locking và deadlock</p>
+  <ol>
+    <li><a href="#s1">Bản chất vấn đề</a></li>
+    <li><a href="#s2">Cơ chế hoạt động</a></li>
+    <li><a href="#s3">Vì sao thiết kế như vậy</a></li>
+    <li><a href="#s4">Ví dụ</a></li>
+    <li><a href="#s5">Thí nghiệm</a></li>
+    <li><a href="#s6">Ảnh hưởng khi chạy production</a></li>
+    <li><a href="#s7">Hiểu lầm thường gặp</a></li>
+    <li><a href="#s8">Câu hỏi ôn tập</a></li>
+    <li><a href="#s9">Câu hỏi còn mở</a></li>
+    <li><a href="#s10">Tài liệu tham khảo</a></li>
+  </ol>
+</nav>
+
+<main>
+<div class="hero">
+<h1>Locking và deadlock trong InnoDB</h1>
+<p class="lede">Câu <code>SELECT</code> thường không cần khoá, nhờ ảnh chụp dữ liệu. Nhưng câu ghi và câu đọc có khoá thì vẫn khoá. Điều ít người biết: InnoDB không khoá "row", mà khoá các entry trong index và cả khoảng trống giữa chúng. Bài này giải thích một câu lệnh khoá chính xác những gì, vì sao một <code>UPDATE</code> thiếu index có thể chặn cả bảng, và deadlock xảy ra rồi được xử lý thế nào.</p>
+<div class="brief">
+  <div><h4>Mục tiêu</h4><ul>
+    <li>Dự đoán được một câu <code>FOR UPDATE</code>, <code>UPDATE</code> hoặc <code>DELETE</code> khoá những entry và khoảng trống nào trên từng index, dưới RR và dưới RC.</li>
+    <li>Nói được một câu <code>INSERT</code> cụ thể có bị các khoá đó chặn không, và vì sao.</li>
+    <li>Tái hiện được lỗi mất thay đổi (lost update), sửa nó bằng ít nhất hai cách, và nói được mỗi cách tốn gì.</li>
+    <li>Đọc được báo cáo deadlock trong <code>SHOW ENGINE INNODB STATUS</code> và đề xuất cách tránh.</li>
+  </ul></div>
+  <div><h4>Cần biết trước</h4><ul>
+    <li><a href="../mvcc-read-view/index.html">MVCC và read view</a>: câu nào đọc theo ảnh chụp, câu nào đọc bản mới nhất.</li>
+    <li><a href="../clustered-vs-secondary-index/index.html">Clustered và secondary index</a>: mỗi entry của secondary index có chép kèm khoá chính.</li>
+  </ul></div>
+  <div><h4>Trạng thái</h4><p>Level 2 (prov.). Nội dung lấy từ manual MySQL 8.4. Bản đồ khoá trong widget là suy ra từ manual, chưa đối chiếu với <code>performance_schema.data_locks</code> trên lab.</p></div>
+</div>
+<details class="mobile-toc"><summary>Mục lục</summary><ol><li><a href="#s1">Bản chất vấn đề</a></li><li><a href="#s2">Cơ chế hoạt động</a></li><li><a href="#s3">Vì sao thiết kế như vậy</a></li><li><a href="#s4">Ví dụ</a></li><li><a href="#s5">Thí nghiệm</a></li><li><a href="#s6">Ảnh hưởng khi chạy production</a></li><li><a href="#s7">Hiểu lầm thường gặp</a></li><li><a href="#s8">Câu hỏi ôn tập</a></li><li><a href="#s9">Câu hỏi còn mở</a></li><li><a href="#s10">Tài liệu tham khảo</a></li></ol></details>
+</div>
+
+<!-- 1 -->
+<section id="s1">
+<header><span class="num">01</span><h2>Bản chất vấn đề</h2></header>
+<div class="prose">
+<p>Bảng <code>t</code> có ba row: <code>(id 5, age 10)</code>, <code>(id 7, age 20)</code>, <code>(id 10, age 30)</code>. Khoá chính là <code>id</code>, và có một index thường <code>idx_age (age)</code>. Session A chạy <code>SELECT * FROM t WHERE age = 20 FOR UPDATE</code> và chưa commit. Session B muốn chèn <code>(id 8, age 25)</code>. B có phải chờ không? Chưa có row nào age 25, nên có vẻ không ai khoá nó.</p>
+<p>Vậy mà B phải chờ. Dưới <code>REPEATABLE READ</code>, A không chỉ khoá entry age 20, mà còn khoá các khoảng trống hai bên nó. Mục đích: nếu A chạy lại câu đó, không có row age 20 nào mới chen vào được (hiện tượng phantom). Age 25 rơi đúng vào khoảng trống giữa 20 và 30.</p>
+<p>Hãy hình dung một kệ sách xếp theo số. Giữ cuốn số 20 thì không ai lấy được cuốn đó. Giữ thêm hai khe hai bên thì không ai nhét được một cuốn số 20 mới vào kệ. Chọn câu lệnh và isolation level dưới đây để xem khoá nằm ở đâu, rồi bấm các câu <code>INSERT</code> để xem câu nào bị chặn.</p>
+</div>
+
+<div class="frame" id="lockmap">
+  <div class="ph"><strong>Bản đồ khoá trên hai index</strong><span class="meta" id="lmMeta"></span></div>
+  <div class="bd">
+    <div class="calc">
+      <label>Câu lệnh của session A (chưa commit)<select id="lmQ">
+        <option value="pk7">SELECT … WHERE id = 7 FOR UPDATE</option>
+        <option value="pk8">SELECT … WHERE id = 8 FOR UPDATE</option>
+        <option value="age20" selected>SELECT … WHERE age = 20 FOR UPDATE</option>
+        <option value="age25">SELECT … WHERE age = 25 FOR UPDATE</option>
+        <option value="noidx">UPDATE t SET note = 'x' WHERE note = 'b'</option>
+      </select></label>
+      <label>Isolation level<select id="lmIso"><option value="rr" selected>REPEATABLE READ</option><option value="rc">READ COMMITTED</option></select></label>
+    </div>
+    <svg id="lmSvg" viewBox="0 0 680 220" role="img" aria-label="Các entry và khoảng trống của PRIMARY và idx_age, phần bị khoá được tô màu"></svg>
+    <div class="locks" id="lmLocks"></div>
+    <div class="probes" id="lmProbes"></div>
+    <div class="desc" aria-live="polite" id="lmDesc"></div>
+    <div class="legend">
+      <span><i class="lg-key"></i>khoá trên entry (record lock)</span>
+      <span><i class="lg-hot"></i>khoá khoảng trống (gap lock), chặn chèn vào</span>
+      <span><i class="lg-miss"></i>INSERT bị chặn</span>
+      <span><i class="lg-row"></i>INSERT đi qua</span>
+    </div>
+    <p class="fine">Cột <code>note</code> không có index; row id 7 có <code>note = 'b'</code>. Danh sách khoá viết theo đúng dạng bạn sẽ thấy trong <code>performance_schema.data_locks</code>. Suy ra từ manual 8.4, chưa đối chiếu trên lab (E21).</p>
+  </div>
+</div>
+</section>
+
+<!-- 2 -->
+<section id="s2">
+<header><span class="num">02</span><h2>Cơ chế hoạt động</h2></header>
+<div class="prose">
+<h3>Các loại khoá</h3>
+<p>Ý chính: InnoDB khoá trên index, theo từng entry và từng khoảng trống giữa hai entry. Tên khoá trong <code>data_locks</code> cho biết nó khoá entry, khoảng trống, hay cả hai.</p>
+<ul>
+<li><strong>S và X:</strong> S là khoá đọc, nhiều bên cùng giữ được. X là khoá ghi, chỉ một bên giữ, và chặn mọi khoá khác trên cùng entry.</li>
+<li><strong>IS và IX:</strong> khoá "báo trước" ở mức bảng, đặt trước khi khoá row (<code>FOR SHARE</code> đặt IS, <code>FOR UPDATE</code> và câu ghi đặt IX). Chúng không chặn nhau; chỉ chặn ai muốn khoá cả bảng, như <code>LOCK TABLES … WRITE</code>.</li>
+<li><strong>Record lock</strong> (<code>X,REC_NOT_GAP</code>): khoá đúng một entry. Luôn là entry của một index; bảng không có index nào thì InnoDB khoá qua index ẩn nó tự tạo.</li>
+<li><strong>Gap lock</strong> (<code>X,GAP</code>): khoá khoảng trống nằm ngay <em>trước</em> một entry. Nó chỉ làm một việc: chặn chèn vào khoảng đó. Hai transaction có thể cùng giữ gap lock trên một khoảng mà không vướng nhau.</li>
+<li><strong>Next-key lock</strong> (<code>X</code>): khoá entry cộng khoảng trống ngay trước nó. Index có 10, 20, 30 thì các vùng next-key là (−∞, 10], (10, 20], (20, 30] và (30, +∞). Vùng cuối cùng được khoá qua một entry giả tên supremum, đứng sau entry lớn nhất.</li>
+<li><strong>Insert intention</strong> (<code>X,INSERT_INTENTION</code>): câu <code>INSERT</code> đặt khoá này lên khoảng trống nó sắp chèn vào. Hai câu chèn vào cùng một khoảng ở hai vị trí khác nhau không chặn nhau. Nhưng nếu khoảng đó đang bị transaction khác giữ gap lock hoặc next-key lock, câu chèn phải chờ.</li>
+</ul>
+
+<h3>Mỗi câu lệnh khoá những gì</h3>
+<p>Ý chính: câu ghi khoá mọi entry mà nó phải đi qua để tìm row, không chỉ những row khớp điều kiện. Vì vậy index quyết định câu ghi khoá rộng hay hẹp.</p>
+<ul>
+<li><code>SELECT</code> thường: không khoá gì (trừ khi dùng <code>SERIALIZABLE</code>).</li>
+<li><code>FOR UPDATE</code>, <code>FOR SHARE</code>, <code>UPDATE</code>, <code>DELETE</code> dưới RR: đặt next-key lock trên <strong>mọi entry mà nó quét qua</strong>. InnoDB chỉ nhớ đã quét qua đoạn index nào, không nhớ điều kiện <code>WHERE</code>.</li>
+<li>Ngoại lệ: tìm đúng một row bằng một index unique (khoá chính, hoặc <code>UNIQUE</code> với đủ mọi cột) thì chỉ khoá entry đó, không khoá khoảng trống.</li>
+<li>Khoá một entry trong secondary index thì InnoDB khoá luôn row tương ứng trong PRIMARY.</li>
+<li><code>INSERT</code>: trước hết lấy insert intention trên khoảng trống, rồi khoá X trên row mới (không khoá khoảng trống). Nếu bị trùng khoá, nó đặt khoá S lên entry đã có. Điều này dẫn tới một kiểu deadlock kinh điển (xem phần 04).</li>
+<li>Dưới <strong>READ COMMITTED</strong>: không khoá khoảng trống khi tìm kiếm, trừ lúc kiểm tra foreign key và kiểm tra trùng. Khoá trên row không khớp <code>WHERE</code> được nhả ngay sau khi xét xong.</li>
+</ul>
+</div>
+<div class="note"><strong>Lỗi hay gặp:</strong> chạy <code>UPDATE … WHERE</code> trên một cột không có index, dưới RR, và nghĩ nó chỉ khoá vài row khớp điều kiện. Không có index thì InnoDB phải quét cả PRIMARY, nên mọi entry và mọi khoảng trống đều bị khoá. Kết quả: không ai chèn hay sửa được row nào của bảng cho tới khi transaction kết thúc. Quy tắc: câu ghi phải tìm row qua một index lọc được ít row.</div>
+
+<div class="prose">
+<h3>Lost update và bốn cách chống</h3>
+<p>Ý chính: khi code đọc giá trị, tự tính, rồi ghi đè, thì phải có cơ chế riêng để không ghi đè thay đổi của người khác. Isolation level mặc định không tự làm việc này.</p>
+<p>Ví dụ: hai transaction cùng đọc <code>balance = 1000</code> bằng <code>SELECT</code> thường, mỗi bên tự tính số mới trong code, rồi cùng ghi. Bên ghi sau đè mất thay đổi của bên ghi trước (xem thêm <a href="../mvcc-read-view/index.html">trang MVCC</a>).</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Cách</th><th>Làm thế nào</th><th>Cái giá</th><th>Hợp khi</th></tr></thead>
+<tbody>
+<tr><td>Để database tự tính</td><td><code>UPDATE … SET balance = balance - ? WHERE id = ? AND balance &gt;= ?</code>, rồi xem có bao nhiêu row bị ảnh hưởng</td><td>Gần như không; khoá chỉ giữ trong lúc câu ghi chạy</td><td>Logic viết gọn được trong một câu SQL</td></tr>
+<tr><td>Khoá trước khi đọc</td><td><code>SELECT … FOR UPDATE</code>, tính, rồi <code>UPDATE</code>, cùng trong một transaction</td><td>Giữ khoá suốt lúc tính; dễ deadlock nếu khoá nhiều row theo thứ tự khác nhau</td><td>Logic phức tạp, hay xảy ra tranh chấp</td></tr>
+<tr><td>Kiểm tra version</td><td>Thêm cột <code>version</code>; ghi bằng <code>UPDATE … SET …, version = version + 1 WHERE id = ? AND version = ?</code>; nếu 0 row bị ảnh hưởng thì đọc lại và thử lại</td><td>Phải viết vòng thử lại; tốn công khi tranh chấp nhiều</td><td>Ít tranh chấp; thao tác kéo dài qua nhiều request</td></tr>
+<tr><td>SERIALIZABLE</td><td>Mọi <code>SELECT</code> thành <code>FOR SHARE</code></td><td>Hai bên cùng giữ khoá đọc rồi cùng xin khoá ghi: deadlock, một bên bị huỷ và phải chạy lại</td><td>Hiếm khi là lựa chọn tốt trên InnoDB</td></tr>
+</tbody></table></div>
+
+<div class="prose">
+<h3>Deadlock</h3>
+<p>Ý chính: deadlock là hai bên chờ nhau mãi. InnoDB phát hiện ngay và huỷ một bên; ứng dụng phải chạy lại transaction bị huỷ.</p>
+<p>Deadlock xảy ra khi A giữ khoá mà B cần, đồng thời B giữ khoá mà A cần. Không bên nào tự thoát ra được. Mỗi khi một câu lệnh phải chờ khoá, InnoDB kiểm tra xem có vòng chờ như vậy không (<code>innodb_deadlock_detect = ON</code>). Nếu có, nó chọn một bên, huỷ cả transaction đó, và trả lỗi 1213. Theo manual, InnoDB cố chọn transaction nhỏ hơn, tính theo số row đã chèn, sửa, xoá. Bên còn lại chạy tiếp.</p>
+<p>Chờ khoá mà không có vòng thì không phải deadlock. Khi đó transaction chờ tối đa <code>innodb_lock_wait_timeout</code> (mặc định 50 giây) rồi nhận lỗi 1205. Lỗi này mặc định chỉ huỷ câu lệnh đang chờ, không huỷ cả transaction.</p>
+</div>
+<div class="frame" id="dl"></div>
+<div class="note"><strong>Lỗi hay gặp:</strong> coi deadlock là bug phải diệt tận gốc. Khi nhiều transaction cùng ghi, thỉnh thoảng có deadlock là chuyện bình thường. Việc đúng là làm nó hiếm đi, và để ứng dụng <em>chạy lại cả transaction</em> khi gặp lỗi 1213. Nếu không chạy lại, mỗi lần deadlock hiếm hoi sẽ thành một lỗi người dùng nhìn thấy.</div>
+</section>
+
+<!-- 3 -->
+<section id="s3">
+<header><span class="num">03</span><h2>Vì sao thiết kế như vậy</h2></header>
+<div class="prose">
+<p><strong>Vì sao khoá entry thay vì khoá theo điều kiện?</strong> Khoá đúng điều kiện ("mọi row có age = 20") là chính xác nhất, nhưng kiểm tra hai điều kiện bất kỳ có chồng lên nhau không thì rất tốn. Khoá trên một index đã xếp thứ tự thì kiểm tra rất rẻ: chỉ cần nhìn entry kế bên. Cái giá: khoá rộng hơn cần (cả khoảng 20–30 bị khoá dù chỉ cần age 20).</p>
+<p><strong>Vì sao có gap lock?</strong> Để dưới REPEATABLE READ, đọc có khoá lần hai không thấy row mới chen vào. Và để replica chạy lại các câu lệnh theo đúng thứ tự cũng ra cùng kết quả. Dưới RC, InnoDB bỏ gap lock và chấp nhận phantom; khi đó binlog phải ghi theo từng row.</p>
+<p><strong>Vì sao phát hiện deadlock ngay, không chờ hết giờ?</strong> Để transaction không phải chờ 50 giây vô ích. Nhưng khi hàng nghìn thread cùng chờ một khoá, chính việc kiểm tra cũng tốn CPU. Manual cho phép tắt <code>innodb_deadlock_detect</code> trên hệ thống như vậy và dựa vào thời gian chờ tối đa.</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th></th><th>InnoDB</th><th>PostgreSQL</th></tr></thead>
+<tbody>
+<tr><td>Khoá row lưu ở</td><td>Bảng khoá trong bộ nhớ (lock system), theo page và bitmap entry</td><td>Ngay trong tuple (<code>xmax</code>, infomask); không giới hạn số row bị khoá</td></tr>
+<tr><td>Gap lock</td><td>Có, dưới RR</td><td>Không; SERIALIZABLE dùng SIReadLock (predicate) để phát hiện xung đột</td></tr>
+<tr><td>UPDATE gặp row đã bị đổi trong RR</td><td>Đợi khoá, sửa bản mới nhất</td><td>Đợi, rồi lỗi serialization nếu bên kia commit</td></tr>
+<tr><td>Deadlock</td><td>Phát hiện ngay, chọn nạn nhân nhỏ</td><td>Kiểm tra sau <code>deadlock_timeout</code> (1 giây), huỷ transaction đang kiểm tra</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- 4 -->
+<section id="s4">
+<header><span class="num">04</span><h2>Ví dụ</h2></header>
+<div class="prose"><h3>Xem khoá đang giữ và đang chờ</h3></div>
+<pre><code>SELECT engine_transaction_id AS trx, index_name, lock_type, lock_mode,
+       lock_status, lock_data
+FROM performance_schema.data_locks
+ORDER BY trx, index_name;
+
+-- ai đang chờ ai
+SELECT * FROM sys.innodb_lock_waits\G</code></pre>
+<p class="prose">Cột <code>lock_data</code> là giá trị của entry bị khoá. Với secondary index, nó gồm giá trị cột kèm khoá chính, ví dụ <code>20, 7</code>. Nếu khoá nằm sau entry lớn nhất, cột này ghi <code>supremum pseudo-record</code>.</p>
+
+<div class="prose"><h3>Deadlock chéo khi chuyển tiền</h3></div>
+<pre><code>-- Session A                                   -- Session B
+START TRANSACTION;                             START TRANSACTION;
+UPDATE accounts SET balance = balance - 100    UPDATE accounts SET balance = balance - 30
+ WHERE id = 7;                                  WHERE id = 9;
+UPDATE accounts SET balance = balance + 100    -- (đợi)
+ WHERE id = 9;   -- chờ B
+                                               UPDATE accounts SET balance = balance + 30
+                                                WHERE id = 7;   -- ERROR 1213: Deadlock</code></pre>
+<p class="prose">Cách sửa: mọi nơi đều khoá theo cùng một thứ tự, ví dụ id nhỏ trước. Khoá cả hai bằng <code>SELECT … WHERE id IN (7, 9) ORDER BY id FOR UPDATE</code> rồi mới cập nhật.</p>
+
+<div class="prose"><h3>Deadlock do duplicate key (theo manual 8.4)</h3></div>
+<pre><code>CREATE TABLE t1 (i INT, PRIMARY KEY (i)) ENGINE = InnoDB;
+-- Session 1: START TRANSACTION; INSERT INTO t1 VALUES (1);   -- X trên i = 1
+-- Session 2: START TRANSACTION; INSERT INTO t1 VALUES (1);   -- trùng, xin S, chờ
+-- Session 3: START TRANSACTION; INSERT INTO t1 VALUES (1);   -- trùng, xin S, chờ
+-- Session 1: ROLLBACK;
+-- Session 2 và 3 cùng được S, cùng xin X để chèn: deadlock, một bên bị rollback</code></pre>
+
+<div class="prose"><h3>Đọc deadlock gần nhất</h3></div>
+<pre><code>SHOW ENGINE INNODB STATUS\G   -- phần LATEST DETECTED DEADLOCK
+SET GLOBAL innodb_print_all_deadlocks = ON;   -- ghi mọi deadlock vào error log</code></pre>
+</section>
+
+<!-- 5 -->
+<section id="s5">
+<header><span class="num">05</span><h2>Thí nghiệm</h2></header>
+<div class="prose"><p>Chạy trên lab MySQL 8.4 với hai hoặc ba session. Viết dự đoán trước.</p></div>
+<details><summary>E21. Bản đồ khoá của phần 01 trên data_locks</summary>
+<p><strong>Câu hỏi.</strong> Tạo bảng <code>t</code> đúng như phần 01. Với năm câu của session A, dưới RR và RC, <code>performance_schema.data_locks</code> liệt kê những khoá nào? Bốn câu <code>INSERT</code> trong widget, câu nào bị chặn?</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e21/prediction.md</code></p>
+<p><strong>Chạy.</strong> Session A chạy câu, session B chạy truy vấn <code>data_locks</code> rồi thử từng <code>INSERT</code> với <code>SET innodb_lock_wait_timeout = 2</code>.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+<details><summary>E22. Lost update và deadlock bằng tay</summary>
+<p><strong>Câu hỏi.</strong> Tái hiện lost update với read-modify-write ở hai session, rồi sửa bằng câu ghi nguyên tử và bằng <code>FOR UPDATE</code>. Tái hiện deadlock chuyển tiền chéo; transaction nào bị chọn làm nạn nhân, và <code>LATEST DETECTED DEADLOCK</code> ghi gì? Đây là việc Week 4 của roadmap yêu cầu.</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e22/prediction.md</code></p>
+<p><strong>Chạy.</strong> Các script ở phần 04, chạy tay trong hai <code>./lab.sh shell</code>.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+<details><summary>E23. Khoá ở đầu cuối của một range</summary>
+<p><strong>Câu hỏi.</strong> Trên <code>idx_age</code> có 10, 20, 30, 40, <code>SELECT … WHERE age BETWEEN 15 AND 25 FOR UPDATE</code> dưới RR khoá entry 30 bằng next-key hay chỉ gap? Trên PK với <code>id BETWEEN 6 AND 8</code> thì sao? <code>INSERT</code> age 35 có bị chặn không?</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e23/prediction.md</code></p>
+<p><strong>Chạy.</strong> Như E21, đọc <code>lock_mode</code> của entry đầu tiên ngoài khoảng.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+</section>
+
+<!-- 6 -->
+<section id="s6">
+<header><span class="num">06</span><h2>Ảnh hưởng khi chạy production</h2></header>
+<div class="prose">
+<h3>Khi nào dùng gì</h3>
+<ul>
+<li>Mặc định: để database tự tính trong một câu ghi. Cần đọc rồi mới quyết định thì dùng <code>FOR UPDATE</code> trong một transaction ngắn. Thao tác kéo dài qua nhiều request thì dùng cột version.</li>
+<li>Khoá nhiều row thì luôn khoá theo một thứ tự cố định, thường theo khoá chính.</li>
+<li>Câu ghi luôn phải tìm row qua một index lọc tốt. <code>UPDATE … WHERE status = 'pending' LIMIT 100</code> trên cột không có index, dưới RR, sẽ khoá cả bảng.</li>
+<li>Cân nhắc READ COMMITTED khi deadlock vì khoá khoảng trống xảy ra nhiều, và ứng dụng không cần một ảnh chụp chung cho cả transaction.</li>
+<li>Bảng dùng làm hàng đợi việc: lấy việc bằng <code>SELECT … FOR UPDATE SKIP LOCKED</code> để các worker không phải chờ nhau.</li>
+</ul>
+<h3>Cái giá</h3>
+<ul>
+<li>Khoá được giữ tới khi commit hoặc rollback. Transaction càng dài, hoặc gọi API bên ngoài giữa chừng, thì người khác càng phải chờ lâu.</li>
+<li>Khoá khoảng trống làm các câu chèn vào cùng một vùng phải chờ nhau.</li>
+<li>Deadlock buộc ứng dụng chạy lại. Chạy lại sai cách (chỉ chạy lại câu cuối thay vì cả transaction) sẽ làm sai dữ liệu.</li>
+</ul>
+<h3>Nhận ra trên production bằng gì</h3>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Triệu chứng</th><th>Xem ở đâu</th></tr></thead>
+<tbody>
+<tr><td>Câu ghi chậm nhưng CPU và I/O thấp</td><td><code>sys.innodb_lock_waits</code>; <code>Innodb_row_lock_waits</code>, <code>Innodb_row_lock_time_avg</code></td></tr>
+<tr><td>Lỗi 1205 (lock wait timeout)</td><td>Transaction đang giữ khoá trong <code>sys.innodb_lock_waits</code> (<code>blocking_pid</code>, <code>blocking_query</code>); thường là transaction mở lâu</td></tr>
+<tr><td>Lỗi 1213 (deadlock)</td><td><code>LATEST DETECTED DEADLOCK</code>; bật <code>innodb_print_all_deadlocks</code> để có lịch sử; <code>lock_deadlocks</code> trong <code>INNODB_METRICS</code></td></tr>
+<tr><td>Insert đồng loạt chậm vào một vùng key</td><td><code>data_locks</code> với <code>X,GAP</code> hoặc <code>X,INSERT_INTENTION</code> đang <code>WAITING</code></td></tr>
+</tbody></table></div>
+<div class="senior"><h4>Góc nhìn senior: đọc báo cáo deadlock như đọc stack trace</h4><p>Mỗi báo cáo deadlock cho biết đúng hai câu lệnh, khoá mỗi bên đang giữ, khoá mỗi bên đang chờ, và trên index nào. Để sửa, hỏi ba câu. Hai luồng có khoá cùng nhóm row nhưng theo thứ tự khác nhau không? Câu lệnh có quét rộng hơn cần (thiếu index, khoá cả khoảng trống) không? Transaction có dài hơn cần không? Thêm chạy lại là cần thiết, nhưng chỉ sau khi đã trả lời ba câu này.</p></div>
+<div class="prose">
+<h3>Checklist khi review code ghi dữ liệu đồng thời</h3>
+<ul>
+<li>Có chỗ nào đọc, tự tính, rồi ghi đè không? Nếu có, đang dùng cách nào trong bốn cách ở phần 02?</li>
+<li>Mọi <code>UPDATE</code> và <code>DELETE</code> có tìm row qua một index lọc tốt không? Đã xem <code>EXPLAIN</code> chưa?</li>
+<li>Khoá nhiều row có theo thứ tự cố định không?</li>
+<li>Transaction có gọi mạng hoặc làm việc nặng khi đang giữ khoá không?</li>
+<li>Gặp lỗi 1213, ứng dụng có chạy lại <em>cả transaction</em> không? Có giới hạn số lần và chờ tăng dần giữa các lần không?</li>
+</ul>
+</div>
+</section>
+
+<!-- 7 -->
+<section id="s7">
+<header><span class="num">07</span><h2>Hiểu lầm thường gặp</h2></header>
+<div class="prose"><ul>
+<li><strong>Hiểu lầm:</strong> InnoDB khoá row. <strong>Vì sao sai:</strong> nó khoá entry trong index và khoảng trống giữa các entry. <strong>Quy tắc:</strong> luôn nghĩ theo index mà câu lệnh dùng để tìm row.</li>
+<li><strong>Hiểu lầm:</strong> <code>UPDATE … WHERE</code> chỉ khoá những row khớp điều kiện. <strong>Vì sao sai:</strong> nó khoá mọi entry mà nó quét qua; không có index thì là cả bảng (<a href="#s2">phần 02</a>). <strong>Quy tắc:</strong> xem <code>EXPLAIN</code> của cả câu ghi.</li>
+<li><strong>Hiểu lầm:</strong> <code>FOR UPDATE</code> trên một row chưa tồn tại thì không khoá gì. <strong>Vì sao sai:</strong> dưới RR, nó khoá khoảng trống nơi row đó sẽ nằm. <strong>Quy tắc:</strong> khoá trên giá trị chưa có vẫn chặn chèn vào khoảng đó.</li>
+<li><strong>Hiểu lầm:</strong> hai gap lock trên cùng khoảng sẽ chặn nhau. <strong>Vì sao sai:</strong> gap lock chỉ chặn chèn; hai bên cùng giữ một khoảng được. Chính vì thế, khi cả hai cùng giữ rồi cùng muốn chèn, chúng deadlock. <strong>Quy tắc:</strong> gap lock chỉ chặn câu chèn, không chặn gap lock khác.</li>
+<li><strong>Hiểu lầm:</strong> lỗi 1205 huỷ cả transaction. <strong>Vì sao sai:</strong> mặc định chỉ câu lệnh đang chờ bị huỷ (<code>innodb_rollback_on_timeout = OFF</code>). <strong>Quy tắc:</strong> ứng dụng phải tự quyết rollback hay chạy lại.</li>
+<li><strong>Hiểu lầm:</strong> deadlock là bug phải diệt hết. <strong>Vì sao sai:</strong> khi nhiều bên cùng ghi, thỉnh thoảng có deadlock là bình thường. <strong>Quy tắc:</strong> làm nó hiếm đi và chạy lại cả transaction khi gặp.</li>
+</ul></div>
+</section>
+
+<!-- 8 -->
+<section id="s8">
+<header><span class="num">08</span><h2>Câu hỏi ôn tập</h2></header>
+<p class="prose">Viết ngày 2026-10-19.</p>
+<details><summary><span class="tag">Dự đoán</span>Khoá của một câu tìm trên index thường</summary>
+<p>Index <code>idx_age</code> có 10, 20, 30 (PK 5, 7, 10). Dưới RR, <code>SELECT * FROM t WHERE age = 20 FOR UPDATE</code> đặt những khoá nào, trên index nào?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Trên <code>idx_age</code>: next-key lock trên (20, 7), tức khoá entry đó và khoảng trống (10, 20). Thêm gap lock trên (30, 10), tức khoảng trống (20, 30): InnoDB phải đọc tới 30 mới biết đã hết age 20. Trên PRIMARY: khoá entry id 7.</p></details></details>
+<details><summary><span class="tag">Dự đoán</span>INSERT nào bị chặn</summary>
+<p>Với khoá của câu trên, bốn câu sau câu nào phải đợi: <code>(6, 15)</code>, <code>(8, 25)</code>, <code>(11, 35)</code>, <code>(12, 20)</code>?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Age 15 rơi vào khoảng (10, 20): bị chặn. Age 25 vào khoảng (20, 30): bị chặn. Age 35 vào khoảng sau 30, không ai khoá: đi qua. Age 20 với id 12 đứng sau (20, 7), tức nằm trong khoảng trước (30, 10): bị chặn. PRIMARY không chặn câu nào, vì ở đó chỉ có khoá trên đúng entry id 7.</p></details></details>
+<details><summary><span class="tag">Giải thích</span>Vì sao hai bên cùng giữ gap rồi deadlock</summary>
+<p>Hai session cùng chạy <code>SELECT … WHERE id = 8 FOR UPDATE</code> (id 8 chưa có, PK có 7 và 10), rồi cùng <code>INSERT</code> id 8. Chuyện gì xảy ra?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Cả hai cùng lấy được gap lock trên khoảng (7, 10), vì gap lock không chặn nhau. Sau đó mỗi bên muốn chèn, nên phải chờ gap lock của bên kia. Hai bên chờ nhau: deadlock, InnoDB huỷ một bên. Kiểu "kiểm tra chưa có rồi mới chèn" bằng <code>FOR UPDATE</code> là nguồn deadlock rất hay gặp. Thay vào đó, dùng <code>INSERT … ON DUPLICATE KEY UPDATE</code>, hoặc cứ chèn rồi bắt lỗi trùng khoá.</p></details></details>
+<details><summary><span class="tag">Chẩn đoán</span>Cả bảng đứng</summary>
+<p>Một job chạy <code>UPDATE jobs SET state = 'taken' WHERE state = 'new' LIMIT 10</code> mỗi giây. Từ khi bật job, mọi API ghi vào <code>jobs</code> chậm hẳn, có lúc 1205. Vì sao?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Nếu <code>state</code> không có index, câu UPDATE phải quét PRIMARY, và dưới RR nó khoá mọi entry nó đi qua. Có LIMIT thì nó dừng sớm, nhưng phần đã quét vẫn bị khoá; còn nếu không có row nào khớp thì nó quét và khoá cả bảng. Cách sửa: thêm index trên <code>state</code> (hoặc <code>(state, id)</code>), lấy việc bằng <code>SELECT … FOR UPDATE SKIP LOCKED</code>, và giữ transaction thật ngắn.</p></details></details>
+<details><summary><span class="tag">Giải thích</span>Chọn cách chống lost update</summary>
+<p>Một màn hình sửa hồ sơ: người dùng mở form, sửa 5 phút, rồi lưu. Hai người cùng sửa một hồ sơ. Dùng cách nào trong bốn cách, và vì sao không dùng <code>FOR UPDATE</code>?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Dùng cột version. Khi mở form, lưu lại version đã đọc. Khi lưu, ghi bằng <code>UPDATE … WHERE id = ? AND version = ?</code>; nếu 0 row bị ảnh hưởng thì báo người dùng là đã có người sửa trước. Không dùng <code>FOR UPDATE</code> vì sẽ phải giữ transaction mở suốt 5 phút, chặn mọi người khác và chặn cả purge.</p></details></details>
+<details><summary><span class="tag">Chẩn đoán</span>Đọc một deadlock</summary>
+<p><code>LATEST DETECTED DEADLOCK</code> cho thấy transaction 1 giữ X trên PRIMARY id 7, chờ X trên id 9; transaction 2 giữ X trên id 9, chờ X trên id 7. Cả hai là cùng một endpoint chuyển tiền. Sửa thế nào?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Hai lần chuyển tiền ngược chiều nhau khoá hai tài khoản theo thứ tự ngược nhau. Cách sửa: luôn khoá theo một thứ tự cố định, lấy cả hai bằng <code>WHERE id IN (?, ?) ORDER BY id FOR UPDATE</code> rồi mới cập nhật. Và vẫn chạy lại cả transaction nếu gặp lỗi 1213.</p></details></details>
+</section>
+
+<!-- 9 -->
+<section id="s9">
+<header><span class="num">09</span><h2>Câu hỏi còn mở</h2></header>
+<p class="prose">Số thứ tự trùng với Open questions trong <code>.claude/docs/LEARNING_LOG.md</code>. Log là bản gốc.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>#</th><th>Câu hỏi</th><th>Trạng thái</th></tr></thead>
+<tbody>
+<tr><td>19</td><td>Ở READ COMMITTED, semi-consistent read cho <code>UPDATE</code> trên cột không index bỏ qua row không khớp mà không đợi khoá. Số lần chờ khoá thay đổi bao nhiêu so với RR?</td><td>Mở. Có thể đo bằng biến thể của E21.</td></tr>
+<tr><td>20</td><td>Trên 8.4, entry đầu tiên ngoài một range trên secondary index và trên PK bị khoá bằng next-key hay chỉ gap?</td><td>Mở. Hành vi này đã đổi qua các bản 8.0; widget phần 01 tránh trường hợp range vì vậy. E23.</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- 10 -->
+<section id="s10">
+<header><span class="num">10</span><h2>Tài liệu tham khảo</h2></header>
+<div class="prose"><ul>
+<li>MySQL 8.4 Reference Manual, <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-locking.html">InnoDB Locking</a>: S, X, IS, IX, record, gap, next-key, insert intention, AUTO-INC</li>
+<li><a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-locks-set.html">Locks Set by Different SQL Statements in InnoDB</a>: khoá theo câu lệnh, ví dụ deadlock duplicate key</li>
+<li><a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-deadlock-detection.html">Deadlock Detection</a>, <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-deadlocks-handling.html">How to Minimize and Handle Deadlocks</a></li>
+<li><a href="https://dev.mysql.com/doc/refman/8.4/en/performance-schema-data-locks-table.html">performance_schema.data_locks</a>, <a href="https://dev.mysql.com/doc/refman/8.4/en/sys-innodb-lock-waits.html">sys.innodb_lock_waits</a></li>
+<li><a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-locking-reads.html">Locking Reads</a>: <code>NOWAIT</code>, <code>SKIP LOCKED</code></li>
+<li>PostgreSQL, <a href="https://www.postgresql.org/docs/current/explicit-locking.html">Explicit Locking</a></li>
+</ul></div>
+<h3>Mức kiểm chứng</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>Khẳng định</th><th>Nguồn</th></tr></thead>
+<tbody>
+<tr><td>Định nghĩa và tương thích của các loại khoá; gap lock chỉ chặn insert, không xung đột nhau</td><td>manual 8.4 (InnoDB Locking)</td></tr>
+<tr><td>Khoá mọi entry được quét; không index thì khoá mọi row; unique tìm một row chỉ record lock</td><td>manual 8.4 (Locks Set)</td></tr>
+<tr><td>RC bỏ gap lock trừ kiểm tra FK và duplicate key</td><td>manual 8.4</td></tr>
+<tr><td>Ví dụ deadlock duplicate key với ba session</td><td>manual 8.4</td></tr>
+<tr><td>Bản đồ khoá năm câu trong widget phần 01</td><td>suy ra từ manual; chưa đối chiếu <code>data_locks</code> (E21)</td></tr>
+<tr><td>Khoá ở đầu cuối range</td><td>chưa rõ cho 8.4; câu hỏi 20, E23</td></tr>
+<tr><td><code>innodb_lock_wait_timeout</code> 50, 1205 chỉ rollback câu lệnh mặc định</td><td>manual 8.4 (bảng biến)</td></tr>
+<tr><td>So sánh với PostgreSQL</td><td>đọc tài liệu; chưa chạy</td></tr>
+</tbody></table></div>
+</section>
+</main>
+
+</div>
+
+<script>
+const DEFS=`<defs><marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>`;
+function B(x,y,w,h,cls,t,sub){
+  const tx=x+w/2;
+  return `<g class="n ${cls||''}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="5"/>`+
+  `<text class="tb" x="${tx}" y="${y+(sub?h/2-8:h/2)}" text-anchor="middle" dominant-baseline="central">${t}</text>`+
+  (sub?`<text class="ts" x="${tx}" y="${y+h/2+10}" text-anchor="middle" dominant-baseline="central">${sub}</text>`:'')+`</g>`;
+}
+const A=(d,cls)=>`<path d="${d}" class="edge ${cls||''}" marker-end="url(#arw)"/>`;
+const T=(x,y,t,anchor,cls)=>`<text class="${cls||'lbl'}" x="${x}" y="${y}" text-anchor="${anchor||'start'}">${t}</text>`;
+const $=id=>document.getElementById(id);
+
+/* ---------- 01: lock map ---------- */
+// records per index, in index order; key compares as arrays
+const ROWS=[{id:5,age:10},{id:7,age:20},{id:10,age:30}];
+const IX={
+  PRIMARY:{recs:ROWS.map(r=>({k:[r.id],label:`${r.id}`})),key:r=>[r.id]},
+  idx_age:{recs:ROWS.map(r=>({k:[r.age,r.id],label:`${r.age}, ${r.id}`})),key:r=>[r.age,r.id]}
+};
+// lock mode per record: 'X' next-key, 'GAP', 'REC'; key 'sup' for supremum
+const Q={
+ pk7:{rr:{PRIMARY:{'7':'REC'}},rc:{PRIMARY:{'7':'REC'}},
+   d:{rr:'id là khoá chính và id = 7 có thật: tìm đúng một row bằng index unique thì chỉ cần khoá entry đó. Không khoảng trống nào bị khoá, nên mọi INSERT với id khác 7 đều đi qua.',rc:'Giống RR: chỉ khoá entry id 7.'}},
+ pk8:{rr:{PRIMARY:{'10':'GAP'}},rc:{},
+   d:{rr:'Chưa có id 8. InnoDB tìm tới entry kế tiếp là 10, rồi dưới RR nó khoá khoảng trống (7, 10) để không ai chèn được id 8 hay 9. Riêng entry 10 không bị khoá.',rc:'Dưới RC, tìm không thấy thì không khoá gì, vì không khoá khoảng trống. Session khác chèn id 8 được ngay.'}},
+ age20:{rr:{idx_age:{'20,7':'X','30,10':'GAP'},PRIMARY:{'7':'REC'}},rc:{idx_age:{'20,7':'REC'},PRIMARY:{'7':'REC'}},
+   d:{rr:'idx_age không unique, nên InnoDB phải đọc tới entry đầu tiên khác 20 mới chắc đã hết. Nó khoá entry (20, 7) cùng khoảng trống (10, 20) trước nó. Nó khoá thêm khoảng trống (20, 30); riêng entry 30 không bị khoá. Cuối cùng, nó khoá row id 7 trong PRIMARY, vì khoá qua secondary index thì khoá luôn row thật.',rc:'Dưới RC chỉ còn khoá trên entry: (20, 7) trên idx_age và id 7 trên PRIMARY. Khoảng trống không bị khoá, nên vẫn chèn được một row age 20 mới, và lần FOR UPDATE sau có thể thấy thêm row đó (phantom).'}},
+ age25:{rr:{idx_age:{'30,10':'GAP'}},rc:{},
+   d:{rr:'Không có row age 25. InnoDB tìm tới (30, 10) rồi khoá khoảng trống (20, 30). Không row nào bị khoá, nhưng không ai chèn được age từ 21 tới 29.',rc:'Không tìm thấy row, và RC không khoá khoảng trống: không khoá gì cả.'}},
+ noidx:{rr:{PRIMARY:{'5':'X','7':'X','10':'X','sup':'X'}},rc:{PRIMARY:{'7':'REC'}},
+   d:{rr:'note không có index, nên UPDATE phải quét cả PRIMARY. Dưới RR, mỗi entry nó đi qua đều bị khoá kèm khoảng trống phía trước, kể cả khoảng cuối (supremum). Kết quả: không ai chèn hay sửa được gì cho tới khi A commit, dù chỉ có một row khớp.',rc:'Dưới RC, InnoDB vẫn quét và khoá từng row, nhưng nhả ngay khoá trên row không khớp WHERE. Chỉ còn khoá trên id 7. Khoảng trống không bị khoá.'}}
+};
+const PROBES=[{id:6,age:15},{id:8,age:25},{id:11,age:35},{id:12,age:20}];
+const cmp=(a,b)=>{for(let i=0;i<a.length;i++){if(a[i]!==b[i])return a[i]-b[i];}return 0;};
+function locksFor(){return Q[$('lmQ').value][$('lmIso').value];}
+function blocked(p){
+  const L=locksFor();
+  for(const name of ['PRIMARY','idx_age']){
+    const ix=IX[name],k=ix.key(p),lk=L[name]||{};
+    const nxt=ix.recs.find(r=>cmp(r.k,k)>0);
+    const id=nxt?nxt.k.join(','):'sup';
+    const m=lk[id];
+    if(m==='X'||m==='GAP')return {name,at:nxt?`(${nxt.label})`:'supremum',m};
+  }
+  return null;
+}
+let probe=null;
+function lm(){
+  const L=locksFor(),q=Q[$('lmQ').value],iso=$('lmIso').value;
+  let g='';const rows=[['PRIMARY',30],['idx_age',130]];
+  rows.forEach(([name,y])=>{
+    const ix=IX[name],lk=L[name]||{};
+    g+=T(10,y+30,name,'start','tb');
+    let x=110;const gw=46,rw=84;
+    const items=[...ix.recs,{k:null,label:'supremum',sup:true}];
+    items.forEach(r=>{
+      const id=r.sup?'sup':r.k.join(',');const m=lk[id];
+      const gapL=(m==='X'||m==='GAP');
+      // gap before this record
+      let pcls='';
+      if(probe){const b=blocked(probe);const k=IX[name].key(probe);const nxt=ix.recs.find(z=>cmp(z.k,k)>0);const nid=nxt?nxt.k.join(','):'sup';if(nid===id)pcls=(b&&b.name===name)?'probe blk':'probe';}
+      g+=`<rect class="gap ${gapL?'lk':''}" x="${x}" y="${y+12}" width="${gw}" height="30" rx="4"/>`;
+      if(pcls)g+=`<rect class="${pcls}" x="${x-3}" y="${y+9}" width="${gw+6}" height="36" rx="6"/>`;
+      x+=gw+4;
+      const recL=(m==='X'||m==='REC');
+      g+=`<rect class="rec ${r.sup?'sup':''} ${recL?'lk':''}" x="${x}" y="${y}" width="${rw}" height="54" rx="5"/>`;
+      g+=`<text class="rect-t" x="${x+rw/2}" y="${y+24}" text-anchor="middle">${r.sup?'sup':r.label}</text>`;
+      g+=`<text class="lmode" x="${x+rw/2}" y="${y+42}" text-anchor="middle">${m?(m==='X'?'X':(m==='GAP'?'X,GAP':'X,REC_NOT_GAP')):''}</text>`;
+      x+=rw+4;
+    });
+  });
+  $('lmSvg').innerHTML=g;
+  const lines=[];
+  for(const name of ['PRIMARY','idx_age']){const lk=L[name]||{};Object.entries(lk).forEach(([k,m])=>{
+    const lab=k==='sup'?'supremum pseudo-record':k.replace(',',', ');
+    lines.push(`${name.padEnd(8)} ${(m==='X'?'X':m==='GAP'?'X,GAP':'X,REC_NOT_GAP').padEnd(14)} ${lab}`);});}
+  $('lmLocks').textContent='index    lock_mode      lock_data\n'+(lines.length?lines.join('\n'):'(không khoá row nào; chỉ có khoá IX trên bảng)');
+  $('lmProbes').querySelectorAll('button').forEach(b=>{const p=PROBES[+b.dataset.p];b.className=blocked(p)?'blk':'ok';b.setAttribute('aria-pressed',probe===p);});
+  let d=q.d[iso];
+  if(probe){const b=blocked(probe);d+=` INSERT (${probe.id}, ${probe.age}): `+(b?`phải chờ, vì nó cần chèn vào khoảng trống trước ${b.at} của ${b.name}, mà khoảng này đang bị A khoá (${b.m==='X'?'next-key lock':'gap lock'}).`:'đi qua, vì không khoảng trống nào nó cần chèn vào đang bị khoá.');}
+  $('lmDesc').textContent=d;
+  const nb=PROBES.filter(p=>blocked(p)).length;
+  $('lmMeta').textContent=`${nb} / ${PROBES.length} insert bị chặn`;
+}
+$('lmProbes').innerHTML='<span style="font-size:13.5px;color:var(--ink-2);align-self:center">Bấm để session B thử chèn:</span>'+PROBES.map((p,i)=>`<button data-p="${i}">INSERT (${p.id}, ${p.age})</button>`).join('');
+$('lmProbes').querySelectorAll('button').forEach(b=>b.onclick=()=>{probe=PROBES[+b.dataset.p];lm();});
+$('lmQ').onchange=()=>{probe=null;lm();};$('lmIso').onchange=lm;lm();
+
+/* ---------- 02: deadlock stepper ---------- */
+const DL=[
+ {t:'Hai lần chuyển tiền ngược chiều',d:'A chuyển 100 từ tài khoản 7 sang 9. Cùng lúc, B chuyển 30 từ tài khoản 9 sang 7.',s:{a7:'',b9:'',aw:'',bw:''}},
+ {t:'A khoá id 7',d:'A trừ tiền tài khoản 7 (UPDATE … WHERE id = 7). Tìm đúng một row bằng khoá chính, nên A chỉ khoá ghi đúng row id 7. A giữ khoá này tới khi commit.',s:{a7:'hold',b9:'',aw:'',bw:''}},
+ {t:'B khoá id 9',d:'B trừ tiền tài khoản 9 và khoá ghi row id 9. Tới đây chưa ai phải chờ.',s:{a7:'hold',b9:'hold',aw:'',bw:''}},
+ {t:'A chờ id 9',d:'A muốn cộng tiền vào tài khoản 9, cần khoá row id 9, nhưng B đang giữ. A phải chờ B. Chỉ có một chiều chờ (A chờ B), nên đây vẫn là chờ khoá bình thường.',s:{a7:'hold',b9:'hold',aw:'wait',bw:''}},
+ {t:'B xin id 7: hai bên chờ nhau',d:'B muốn cộng tiền vào tài khoản 7, cần khoá row id 7, nhưng A đang giữ. Giờ A chờ B, và B chờ A: không bên nào có thể đi tiếp. Ngay khi B bắt đầu chờ, InnoDB kiểm tra và phát hiện deadlock.',s:{a7:'hold',b9:'hold',aw:'wait',bw:'wait'},cyc:true},
+ {t:'Huỷ một bên',d:'InnoDB chọn transaction nhỏ hơn (theo số row đã ghi) để huỷ. Ở đây hai bên ngang nhau; giả sử B bị chọn. B nhận ERROR 1213, toàn bộ thay đổi của B bị huỷ, và khoá trên id 9 được nhả.',s:{a7:'hold',b9:'',aw:'wait',bw:'dead'},c:'ERROR 1213 (40001): Deadlock found when trying to get lock; try restarting transaction'},
+ {t:'A đi tiếp',d:'A lấy được khoá id 9, cập nhật xong và commit. Ứng dụng của B phải chạy lại cả transaction từ đầu. Cách tránh: cả hai luôn khoá tài khoản có id nhỏ trước (7 rồi mới 9). Khi đó B sẽ phải chờ A ngay từ đầu, và không bao giờ có cảnh hai bên chờ nhau.',s:{a7:'hold',b9:'a',aw:'',bw:'dead'}}
+];
+(function(){
+  const el=$('dl');
+  el.innerHTML=`<div class="ph"><strong>Deadlock chuyển tiền chéo</strong><span class="meta"></span></div><div class="bd">
+  <h4 class="st-t"></h4><svg viewBox="0 0 680 190" role="img"></svg>
+  <div class="desc" aria-live="polite"><div class="st-d"></div><pre hidden></pre></div>
+  <div class="nav"><button data-d="-1">Trước</button><button data-d="1" class="primary">Tiếp</button></div></div>`;
+  const svg=el.querySelector('svg'),t=el.querySelector('.st-t'),d=el.querySelector('.st-d'),pre=el.querySelector('pre'),meta=el.querySelector('.meta');
+  const [pv,nx]=el.querySelectorAll('.nav button');let i=0;
+  function draw(s){
+    const z=s.s;let g='';
+    g+=B(40,20,150,56,'path','Transaction A','7 → 9, 100');
+    g+=B(490,20,150,56,z.bw==='dead'?'miss':'path','Transaction B',z.bw==='dead'?'đã bị huỷ':'9 → 7, 30');
+    g+=B(150,120,140,50,z.a7?'key':'','accounts id 7',z.a7?'A đang khoá':'chưa ai khoá');
+    g+=B(390,120,140,50,z.b9?'key':'','accounts id 9',z.b9==='a'?'A đang khoá':(z.b9?'B đang khoá':'chưa ai khoá'));
+    if(z.a7)g+=A('M115 76 L200 118','row');
+    if(z.b9==='hold')g+=A('M565 76 L480 118','row');
+    if(z.b9==='a')g+=A('M150 76 L410 118','row');
+    if(z.aw)g+=A('M190 56 L438 120',s.cyc?'miss':'hot');
+    if(z.bw==='wait')g+=A('M490 56 L242 120','miss');
+    g+=T(340,186,s.cyc?'A chờ B, B chờ A':'','middle','ts');
+    return DEFS+g;
+  }
+  function render(){const s=DL[i];svg.innerHTML=draw(s);svg.setAttribute('aria-label',s.t);t.textContent=s.t;d.textContent=s.d;pre.hidden=!s.c;pre.textContent=s.c||'';
+    meta.textContent=`bước ${i+1} / ${DL.length}`;pv.disabled=i===0;nx.disabled=i===DL.length-1;}
+  const go=k=>{i=Math.max(0,Math.min(DL.length-1,i+k));render();};
+  pv.onclick=()=>go(-1);nx.onclick=()=>go(1);
+  el.tabIndex=0;el.addEventListener('keydown',e=>{if(e.key==='ArrowRight')go(1);if(e.key==='ArrowLeft')go(-1);});
+  render();
+})();
+</script>
+</body>
+</html>
