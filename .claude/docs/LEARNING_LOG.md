@@ -62,6 +62,10 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 | InnoDB lock types (S/X, IS/IX, record, gap, next-key, insert intention) and what each statement locks under RR and RC | 2 (prov.) | [innodb-locking-deadlock](../topics/innodb-locking-deadlock/index.html) §01–§02 | 2026-10-19 | Exercise E21: match `data_locks` for 5 statements under RR and RC, and predict which inserts block |
 | Lost update: four fixes and their cost | 2 (prov.) | same, §02 | 2026-10-19 | Exercise E22: reproduce and fix it two ways |
 | Deadlocks: detection, victim, 1213 vs 1205, reading `LATEST DETECTED DEADLOCK`, lock ordering | 2 (prov.) | same, §02, §04 | 2026-10-19 | Exercise E22: reproduce a crossed-transfer deadlock and read the report; then diagnose one from work |
+| Lost update vs check-then-act on a balance; why a transaction under RR does not prevent either | 2 (prov.) | [concurrency-control-strategies](../topics/concurrency-control-strategies/index.html) §01–§02 | 2026-10-20 | Exercise E24: reproduce both failures with 50 concurrent withdrawals and count the missing money |
+| Three concurrency-control strategies (conditional UPDATE, `FOR UPDATE`, version column): mechanism, cost, when to use | 2 (prov.) | same, §02–§03, §06 | 2026-10-20 | Exercise E25: throughput, p99 and retries of the three at 1, 8, 32 clients; then choose and defend one for a real endpoint at work |
+| Checking write results: affected rows (changed vs matched, `CLIENT_FOUND_ROWS`, mysql2 default) | 2 (prov.) | same, §02, §04 | 2026-10-20 | Exercise E26: print mysql2 results with and without `FOUND_ROWS` |
+| Hot-row throughput: lock hold time as the ceiling, and the alternatives (append-only ledger, split balance, batching) | 2 (prov.) | same, §02 | 2026-10-20 | Exercise E25, then compare with the calculator; resolve open question 21 |
 
 "(prov.)" = provisional. Every row above rests on one artifact I wrote myself, with no measurement behind it. Week 1 of Month 1 includes a baseline assessment (TECHNICAL_GROWTH.md Section 11) that should confirm or cut these.
 
@@ -87,6 +91,8 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 18. Are the exact conditions that make a covering read on a secondary index fall back to PRIMARY (delete-marked entry, page modified by a transaction newer than the view) as described, and what does it cost on a table under writes? The manual names both conditions; the per-page transaction ID detail comes from the source code and is unchecked. E20.
 19. Under READ COMMITTED, an `UPDATE … WHERE` on an unindexed column uses a "semi-consistent read" to skip non-matching rows without waiting for their locks. How much does that change lock waits compared with REPEATABLE READ? Belongs to the locking page.
 20. On 8.4, is the first entry past a range on a secondary index, and on the PK, locked with a next-key lock or a gap lock only? This changed across 8.0 releases; the locking page's widget avoids ranges for that reason. E23.
+21. At COMMIT, does InnoDB release row locks before or after the redo log is flushed to disk? It decides whether commit time counts toward a hot row's lock hold time, which the concurrency-control page's calculator assumes it does. Read the source or measure with E25 under `innodb_flush_log_at_trx_commit` 1 and 2.
+22. With a version column and 32 clients writing one row, how many attempts and how much backoff does it take for nearly every request to succeed, and how much does jittered exponential backoff help over an immediate retry? E25.
 
 ## Pending verification (from the session's own exercise list)
 
@@ -120,8 +126,41 @@ These are written in the page as exercises; none have been run yet.
 - **E22** — Lost update reproduced and fixed two ways; crossed-transfer deadlock and its report; the same with ordered locking. *(The Month 1 Week 4 hands-on item.)*
 - **E23** — Lock on the first entry past a range, secondary index vs PK, on 8.4.
 - **Q35–Q40** — The six recall questions in section 08 of the locking page.
+- **E24** — 50 concurrent withdrawals of 30 from 1,000 with each of the five strategies in the concurrency-control simulator: successes, final balance, invariant. *(The Month 3 "reproducible concurrency experiment" deliverable.)*
+- **E25** — One hot row at 1, 8 and 32 clients for 30 s: tx/s, p50/p99, version retries, `Innodb_row_lock_waits`, with and without 5 ms of app work under the lock.
+- **E26** — `affectedRows` and `changedRows` in mysql2 with and without `FOUND_ROWS`, for a no-op update, a refused withdrawal and a missing account.
+- **Q41–Q46** — The six recall questions in section 08 of the concurrency-control page.
 - **Q11–Q16** — The six recall questions in section 08 of the composite-index page (answers are on the page, hidden).
 - **Q1–Q5** — The five check questions at the end of the page (leftmost prefix, `COUNT(*)` and the visibility map, full scan polluting the cache, TOAST, a `sessions` table updated 5,000×/sec). Answer in writing before looking anything up, then verify.
+
+---
+
+## 2026-10-20 — Concurrency control strategies on a balance
+
+**Topic and objective.** Month 3 topic, written ahead as documentation only (Phase 3 of the documentation plan): why read-check-write loses money or overdraws even inside a transaction, the three ways to hold `balance ≥ 0` under concurrent withdrawals, what each costs, and where all three stop working (a hot row).
+
+**Output.** [topics/concurrency-control-strategies/index.html](../topics/concurrency-control-strategies/index.html) — 10 sections. Widgets: a race simulator (N requests, five strategies, seeded interleaving, lock queue, per-tick timeline with lock-hold bars, invariant check); a 6-step conditional-UPDATE stepper showing the second request re-evaluate `WHERE` on the latest committed version and get 0 rows; a hot-row calculator (lock hold time, max tx/s, M/D/1 wait) comparing `FOR UPDATE` with a conditional UPDATE; a 6-step version-column stepper. Prediction templates for E24–E26.
+
+**What it covers.**
+
+- Lost update (read, compute, overwrite) and check-then-act (read, check, `balance = balance - x`); plain `SELECT` takes no lock under RR, and InnoDB raises no error when the later writer overwrites.
+- Conditional `UPDATE … WHERE balance >= ?`: locking read of the latest committed version, wait, re-evaluation; result read from affected rows. Affected rows means changed rows by default and matched rows with `CLIENT_FOUND_ROWS` (C API manual); mysql2 sets `FOUND_ROWS` by default (checked in `lib/connection_config.js`, mysql2 3.24.6), so `affectedRows` is matched and `changedRows` is changed.
+- `SELECT … FOR UPDATE`: reads the latest version, holds the X lock to the end of the transaction, needs an explicit transaction on one connection (autocommit releases it at once; a pool may spread statements over connections). Hold time as the ceiling on one row's throughput.
+- Version column: optimistic check in the same `UPDATE`, retry with jittered backoff, good for long think time and low contention, bad under high contention.
+- Hot rows: append-only ledger, split balances, batching, and what each gives up.
+- SERIALIZABLE on InnoDB turns the race into deadlocks; PostgreSQL RR raises a serialization error (40001) where InnoDB RR overwrites. `CHECK (balance >= 0)` as a safety net (catches overdraw, not lost update).
+
+**Initial understanding.** TODO — what did I believe about concurrent balance updates before this page? No prior belief was stated in the session.
+
+**Mistakes and misconceptions corrected.** TODO — only I know which. Traps the page writes down: a transaction makes read-then-write safe; `balance = balance - x` alone is safe; `FOR UPDATE` holds its lock under autocommit or across pool calls; `affectedRows` always counts changed rows; optimistic is always faster; SERIALIZABLE fixes it.
+
+**Experiments and results.** None. The simulator and the calculator are models built from the manual; nothing was run against MySQL. E24–E26 are the measurements; E24 is the Month 3 concurrency-experiment deliverable.
+
+**Competency level.** Level 2 provisional on four new matrix rows.
+
+**Remaining questions.** Open questions 21 and 22.
+
+**Next step.** Topic 11 of the plan, idempotency and retries.
 
 ---
 

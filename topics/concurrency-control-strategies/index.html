@@ -1,0 +1,796 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Giữ đúng số dư khi ghi đồng thời</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F2F4F6; --surface:#FFFFFF; --ink:#18203A; --ink-2:#56607A; --ink-3:#8A93A8;
+  --rule:#CCD3DD; --rule-strong:#8C96AB;
+  --struct:#3446B8; --struct-bg:#E6E9FA;            /* cấu trúc index, chrome của trang */
+  --row:#16795F;    --row-bg:#DDF2EA;               /* dữ liệu row thật */
+  --hot:#9A5F00;    --hot-bg:#FCEFD2; --hot-line:#E3A21A;  /* bị ghi, bị chạm, bị lọc */
+  --miss:#B5302B;   --miss-bg:#FBE1DF;              /* đọc từ disk, việc thừa, lỗi */
+  --path:#0B7A8A;   --path-bg:#D8F1F3;              /* đường đi hoặc khoảng đang đọc */
+  --key:#A8327A;    --key-bg:#F8E0EE;               /* con trỏ: PK, TID */
+  --ram:#5B4BB0;    --ram-bg:#E7E3FA;               /* hit trong buffer pool */
+  --grid:rgba(52,70,184,.06);
+  --r-s:4px; --r-m:8px;
+  --sans:"Instrument Sans",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --paper:#0F1320; --surface:#171C2B; --ink:#E6E9F2; --ink-2:#A3ABC0; --ink-3:#6E7790;
+  --rule:#2C3448; --rule-strong:#55607A;
+  --struct:#97A3FF; --struct-bg:#232A55;
+  --row:#5FD0AE;    --row-bg:#123A31;
+  --hot:#F2BE5C;    --hot-bg:#3B2C0E; --hot-line:#E3A21A;
+  --miss:#FF8A84;   --miss-bg:#3E1A1A;
+  --path:#5ED3E0;   --path-bg:#113A40;
+  --key:#F28DC4;    --key-bg:#3E1A2E;
+  --ram:#B7A8FF;    --ram-bg:#2A2350;
+  --grid:rgba(151,163,255,.05);
+}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important;animation:none!important}}
+body{margin:0;color:var(--ink);font:400 17px/1.65 var(--sans);
+  background-color:var(--paper);
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:24px 24px}
+a{color:var(--struct)}
+:focus-visible{outline:2px solid var(--struct);outline-offset:2px}
+
+/* layout */
+.shell{display:grid;grid-template-columns:230px minmax(0,1fr);gap:56px;max-width:1180px;margin:0 auto;padding:0 32px}
+nav.toc{position:sticky;top:0;align-self:start;height:100vh;padding:48px 0;overflow:auto}
+nav.toc p{font-weight:600;margin:0 0 12px;font-size:15px}
+nav.toc ol,.mobile-toc ol{list-style:none;margin:0;padding:0;counter-reset:s}
+nav.toc li,.mobile-toc li{counter-increment:s;margin:0}
+nav.toc a,.mobile-toc a{display:grid;grid-template-columns:28px 1fr;padding:5px 0;color:var(--ink-2);text-decoration:none;font-size:14.5px;line-height:1.4}
+nav.toc a::before,.mobile-toc a::before{content:counter(s,decimal-leading-zero);font:500 12px/1.9 var(--mono);color:var(--ink-3)}
+nav.toc a:hover,nav.toc a.on{color:var(--struct)}
+main{min-width:0;padding:56px 0 120px}
+.prose{max-width:720px}
+section{padding-top:72px}
+section>header{display:grid;grid-template-columns:auto 1fr;gap:0 18px;align-items:baseline;max-width:720px;margin-bottom:12px}
+section>header .num{font:500 15px var(--mono);color:var(--struct);border:1.5px solid var(--struct);border-radius:var(--r-s);padding:2px 7px;transform:translateY(-4px)}
+h1,h2,h3,h4{line-height:1.2;letter-spacing:-.015em;margin:0}
+h1{font-size:clamp(2.3rem,5.4vw,3.9rem);font-weight:700;letter-spacing:-.03em;line-height:1.02;max-width:14ch;margin-bottom:20px}
+.lede{font-size:19px;color:var(--ink-2);max-width:56ch;margin-bottom:28px}
+h2{font-size:clamp(1.6rem,3vw,2.1rem);font-weight:650}
+h3{font-size:1.2rem;font-weight:600;margin:36px 0 8px}
+p{margin:0 0 14px}
+ul,ol.list{margin:0 0 16px;padding-left:22px}
+li{margin:4px 0}
+code{font:0.88em var(--mono);background:var(--struct-bg);color:var(--ink);padding:1px 5px;border-radius:3px}
+pre{font:13.5px/1.6 var(--mono);background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:var(--r-s);padding:14px 16px;overflow-x:auto;margin:0 0 18px;max-width:720px}
+pre code{background:none;padding:0}
+.tablewrap{overflow-x:auto;max-width:720px;margin:0 0 20px}
+table{border-collapse:collapse;width:100%;max-width:720px;margin:0 0 20px;font-size:15px;background:var(--surface)}
+.tablewrap table{margin:0;min-width:560px}
+th,td{text-align:left;padding:9px 12px;border:1px solid var(--rule);vertical-align:top}
+th{font-weight:600;background:var(--struct-bg)}
+
+/* widget frame: styled like a page, header strip = page header */
+.frame{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);margin:22px 0 28px;max-width:920px;overflow:hidden}
+.frame>.ph{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:9px 16px;border-bottom:1px solid var(--rule);background:var(--struct-bg);font-size:14px}
+.frame>.ph strong{font-weight:600}
+.frame>.ph .meta{margin-left:auto;font:500 12.5px var(--mono);color:var(--ink-2)}
+.frame .bd{padding:16px;min-width:0}
+.frame svg{display:block;width:100%;height:auto}
+.st-t{font:600 16px var(--sans);margin:0 0 8px}
+.desc{background:var(--paper);border-radius:var(--r-s);padding:12px 14px;margin-top:12px;min-height:84px;font-size:15.5px;color:var(--ink-2)}
+.desc pre{margin:10px 0 0;font-size:12.5px;border-left-color:var(--rule-strong)}
+.nav{display:flex;gap:8px;margin-top:12px;align-items:center}
+button{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 14px;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--struct);color:var(--struct)}
+button:disabled{opacity:.4;cursor:default}
+button.primary,button[aria-pressed="true"]{background:var(--struct);border-color:var(--struct);color:var(--surface)}
+button.primary:hover:not(:disabled),button[aria-pressed="true"]:hover{color:var(--surface);filter:brightness(1.1)}
+input,select{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 10px}
+input[type=number]{width:84px}
+input[type=range],input[type=checkbox]{accent-color:var(--struct)}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-top:12px}
+.stat{background:var(--paper);border-radius:var(--r-s);padding:8px 12px}
+.stat span{display:block;font-size:13px;color:var(--ink-2)}
+.stat b{font:600 20px var(--sans);font-variant-numeric:tabular-nums}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;color:var(--ink-2);margin-top:12px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:14px;height:14px;border-radius:3px;border:2px solid;display:inline-block}
+.fine{font-size:13.5px;color:var(--ink-2);margin:10px 0 0}  /* chú thích nhỏ dưới widget */
+
+/* svg text */
+.tb{font:600 14px var(--sans)} .t{font:400 13px var(--sans)} .ts{font:400 12px var(--sans)} .tm{font:500 12.5px var(--mono)}
+.lbl{fill:var(--ink-2);font:400 12.5px var(--sans)}
+
+/* callouts */
+.note{border-left:3px solid var(--hot-line);background:var(--hot-bg);padding:12px 16px;border-radius:0 var(--r-s) var(--r-s) 0;margin:18px 0;max-width:720px;font-size:16px}
+.note strong{color:var(--hot)}
+.senior{border:1.5px solid var(--struct);border-radius:var(--r-m);padding:14px 18px;margin:22px 0;max-width:720px;background:var(--surface)}
+.senior h4{font-size:16px;margin-bottom:6px;color:var(--struct)}
+.senior p:last-child,.senior ul:last-child{margin-bottom:0}
+details{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-s);padding:10px 14px;margin:10px 0;max-width:720px}
+details summary{cursor:pointer;font-weight:600}
+details[open] summary{margin-bottom:8px}
+details.answer{background:var(--paper);border-style:dashed;margin:10px 0 0}
+details.answer summary{font-weight:500;color:var(--struct)}
+.tag{display:inline-block;font:500 12px var(--sans);color:var(--ink-2);border:1px solid var(--rule-strong);border-radius:999px;padding:0 8px;margin-right:6px;vertical-align:1px}
+
+/* hero brief: mục tiêu, cần biết trước, trạng thái */
+.brief{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px 24px;background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);padding:14px 18px;max-width:920px;margin:0 0 8px;font-size:15px}
+.brief h4{font-size:14px;color:var(--struct);margin:0 0 4px}
+.brief ul{margin:0;padding-left:18px}
+.brief p{margin:0}
+
+.mobile-toc{display:none}
+@media (max-width:900px){
+  .shell{grid-template-columns:1fr;padding:0 16px;gap:0}
+  nav.toc{display:none}
+  .mobile-toc{display:block;margin-top:20px}
+  main{padding-top:32px}
+  .frame .bd{padding:12px}
+  body{font-size:16px}
+}
+
+
+/* ---- page widgets ---- */
+.n rect{fill:var(--surface);stroke:var(--rule-strong);stroke-width:1}
+.n text{fill:var(--ink)}
+.n.struct rect{fill:var(--struct-bg);stroke:var(--struct)} .n.struct text{fill:var(--struct)}
+.n.row rect{fill:var(--row-bg);stroke:var(--row);stroke-width:1.6} .n.row text{fill:var(--row)}
+.n.hot rect{fill:var(--hot-bg);stroke:var(--hot);stroke-width:2} .n.hot text{fill:var(--hot)}
+.n.miss rect{fill:var(--miss-bg);stroke:var(--miss);stroke-width:2} .n.miss text{fill:var(--miss)}
+.n.key rect{fill:var(--key-bg);stroke:var(--key);stroke-width:2} .n.key text{fill:var(--key)}
+.n.path rect{fill:var(--path-bg);stroke:var(--path);stroke-width:2} .n.path text{fill:var(--path)}
+.n.ram rect{fill:var(--ram-bg);stroke:var(--ram);stroke-width:2} .n.ram text{fill:var(--ram)}
+.n.dim rect{fill:var(--paper);stroke:var(--rule)} .n.dim text{fill:var(--ink-3)}
+.edge{stroke:var(--rule-strong);stroke-width:1.2;fill:none}
+.edge.key{stroke:var(--key);stroke-width:2.2}
+.edge.hot{stroke:var(--hot);stroke-width:2.2;stroke-dasharray:5 4}
+.edge.row{stroke:var(--row);stroke-width:2}
+/* timeline cells: one meaning per color */
+.cl{stroke:var(--surface);stroke-width:1}
+.cl.read{fill:var(--path)} .cl.calc{fill:var(--rule)} .cl.wait{fill:var(--hot-line)}
+.cl.write{fill:var(--key)} .cl.commit{fill:var(--row)} .cl.rej{fill:var(--miss)} .cl.retry{fill:var(--ram)}
+.lockbar{fill:var(--key)}
+.cursor{stroke:var(--struct);stroke-width:1.5;stroke-dasharray:3 3}
+.out-ok{fill:var(--row);font:600 12.5px var(--sans)} .out-rej{fill:var(--miss);font:600 12.5px var(--sans)} .out-run{fill:var(--ink-3);font:400 12.5px var(--sans)}
+.lg-read{border-color:var(--path);background:var(--path)} .lg-calc{border-color:var(--rule);background:var(--rule)}
+.lg-wait{border-color:var(--hot-line);background:var(--hot-line)} .lg-write{border-color:var(--key);background:var(--key)}
+.lg-commit{border-color:var(--row);background:var(--row)} .lg-rej{border-color:var(--miss);background:var(--miss)}
+.lg-retry{border-color:var(--ram);background:var(--ram)}
+.lg-key{border-color:var(--key);background:var(--key-bg)} .lg-hot{border-color:var(--hot);background:var(--hot-bg)}
+.lg-row{border-color:var(--row);background:var(--row-bg)} .lg-miss{border-color:var(--miss);background:var(--miss-bg)}
+.calc{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px 14px;margin-bottom:12px}
+.calc label{display:flex;flex-direction:column;gap:4px;font-size:13.5px;color:var(--ink-2)}
+.calc label.chk{flex-direction:row;align-items:center;gap:8px}
+.log{font:12.5px/1.6 var(--mono);background:var(--paper);border-radius:var(--r-s);padding:8px 12px;margin:10px 0 0;min-height:60px;list-style:none}
+.log li{margin:0}
+.stat b.bad{color:var(--miss)} .stat b.good{color:var(--row)}
+</style>
+</head>
+<body>
+
+<div class="shell">
+<nav class="toc" aria-label="Mục lục">
+  <p>Ghi đồng thời lên số dư</p>
+  <ol>
+    <li><a href="#s1">Bản chất vấn đề</a></li>
+    <li><a href="#s2">Cơ chế hoạt động</a></li>
+    <li><a href="#s3">Vì sao thiết kế như vậy</a></li>
+    <li><a href="#s4">Ví dụ</a></li>
+    <li><a href="#s5">Thí nghiệm</a></li>
+    <li><a href="#s6">Ảnh hưởng khi chạy production</a></li>
+    <li><a href="#s7">Hiểu lầm thường gặp</a></li>
+    <li><a href="#s8">Câu hỏi ôn tập</a></li>
+    <li><a href="#s9">Câu hỏi còn mở</a></li>
+    <li><a href="#s10">Tài liệu tham khảo</a></li>
+  </ol>
+</nav>
+
+<main>
+<div class="hero">
+<h1>Giữ đúng số dư khi ghi đồng thời</h1>
+<p class="lede">Hai request cùng rút tiền từ một tài khoản. Code nào cũng kiểm tra số dư trước khi trừ, vậy mà số dư vẫn có thể sai hoặc âm. Bài này so sánh ba cách giữ đúng số dư trên MySQL 8.4: một câu <code>UPDATE</code> có điều kiện, khoá trước bằng <code>SELECT … FOR UPDATE</code>, và kiểm tra cột version. Mỗi cách đúng theo một kiểu, và trả giá theo một kiểu.</p>
+<div class="brief">
+  <div><h4>Mục tiêu</h4><ul>
+    <li>Giải thích được vì sao "đọc, kiểm tra, rồi ghi" làm mất tiền hoặc làm số dư âm, kể cả khi bọc trong transaction.</li>
+    <li>Viết được ba cách giữ bất biến <code>balance ≥ 0</code>, và kiểm tra đúng kết quả của câu ghi (<code>affectedRows</code>).</li>
+    <li>Dự đoán được với N request đồng thời, mỗi cách cho bao nhiêu lần thành công, bao nhiêu lần chờ khoá, bao nhiêu lần thử lại.</li>
+    <li>Chọn được cách phù hợp cho một tình huống, và ước lượng được một row "nóng" chịu được bao nhiêu giao dịch mỗi giây.</li>
+  </ul></div>
+  <div><h4>Cần biết trước</h4><ul>
+    <li><a href="../innodb-locking-deadlock/index.html">Locking và deadlock trong InnoDB</a>: khoá X trên entry, chờ khoá, lỗi 1205 và 1213.</li>
+    <li><a href="../mvcc-read-view/index.html">MVCC và read view</a>: <code>SELECT</code> thường đọc ảnh chụp, câu ghi đọc bản mới nhất.</li>
+  </ul></div>
+  <div><h4>Trạng thái</h4><p>Level 2 (prov.). Nội dung lấy từ manual MySQL 8.4 và mã nguồn mysql2. Bộ mô phỏng ở phần 01 là mô hình dựng từ manual, chưa đối chiếu với lab (E24).</p></div>
+</div>
+<details class="mobile-toc"><summary>Mục lục</summary><ol><li><a href="#s1">Bản chất vấn đề</a></li><li><a href="#s2">Cơ chế hoạt động</a></li><li><a href="#s3">Vì sao thiết kế như vậy</a></li><li><a href="#s4">Ví dụ</a></li><li><a href="#s5">Thí nghiệm</a></li><li><a href="#s6">Ảnh hưởng khi chạy production</a></li><li><a href="#s7">Hiểu lầm thường gặp</a></li><li><a href="#s8">Câu hỏi ôn tập</a></li><li><a href="#s9">Câu hỏi còn mở</a></li><li><a href="#s10">Tài liệu tham khảo</a></li></ol></details>
+</div>
+
+<!-- 1 -->
+<section id="s1">
+<header><span class="num">01</span><h2>Bản chất vấn đề</h2></header>
+<div class="prose">
+<p>Tài khoản 42 có <code>balance = 100</code>. Hai request rút 70 đến gần như cùng lúc. Mỗi request chạy cùng một đoạn code: đọc số dư, kiểm tra đủ tiền, tính số mới, ghi lại. Cả hai đọc được 100, cả hai thấy đủ, cả hai ghi 30. Kết quả: hệ thống trả ra 140 nhưng số dư chỉ giảm 70. Lỗi này gọi là mất thay đổi (lost update).</p>
+<p>Sửa nửa vời cũng không đủ. Nếu ghi bằng <code>balance = balance - 70</code> thay vì ghi 30, thì không còn mất thay đổi. Nhưng cả hai vẫn đã kiểm tra trên số 100 cũ, nên số dư thành −40. Lỗi này là "kiểm tra rồi mới làm" (check-then-act): điều kiện đúng lúc kiểm tra, sai lúc ghi.</p>
+<p>Gốc của cả hai lỗi là một: giữa lúc đọc và lúc ghi có một khoảng hở, và request khác chen vào được. Ba cách đúng chỉ khác nhau ở chỗ xử lý khoảng hở này:</p>
+<ul>
+<li><strong>UPDATE có điều kiện</strong>: xoá khoảng hở. Kiểm tra và ghi nằm trong cùng một câu lệnh.</li>
+<li><strong>FOR UPDATE</strong>: khoá khoảng hở. Ai đến sau phải đứng chờ.</li>
+<li><strong>Cột version</strong>: để khoảng hở mở, nhưng lúc ghi thì phát hiện có người chen vào, rồi làm lại.</li>
+</ul>
+<p>Hình dung một quầy vé còn đúng 1 vé. Cách thứ nhất: người bán tự trừ vé ngay khi nhận yêu cầu. Cách thứ hai: ai cầm sổ vé thì người khác phải xếp hàng. Cách thứ ba: ai cũng xem sổ, nhưng khi ghi phải đối chiếu số trang; trang đã đổi thì xem lại từ đầu. Chọn cách, số request và số tiền dưới đây rồi bấm <strong>Chạy từ đầu</strong>.</p>
+</div>
+
+<div class="frame" id="race">
+  <div class="ph"><strong>Bộ mô phỏng: N request cùng rút tiền</strong><span class="meta" id="rcMeta"></span></div>
+  <div class="bd">
+    <div class="calc">
+      <label>Cách ghi<select id="rcS">
+        <option value="rmw" selected>Đọc, tính, ghi đè (sai)</option>
+        <option value="chk">Kiểm tra rồi trừ (sai)</option>
+        <option value="atom">UPDATE có điều kiện</option>
+        <option value="fu">SELECT … FOR UPDATE</option>
+        <option value="ver">Cột version, tối đa 3 lần thử</option>
+      </select></label>
+      <label>Số request đồng thời<input id="rcN" type="number" min="2" max="8" value="2"></label>
+      <label>Mỗi request rút<input id="rcA" type="number" min="1" max="500" value="70"></label>
+      <label>Số dư ban đầu<input id="rcB" type="number" min="0" max="1000" value="100"></label>
+      <label>Thời gian tính trong app (tick)<input id="rcC" type="number" min="0" max="4" value="2"></label>
+    </div>
+    <svg id="rcSvg" viewBox="0 0 680 120" role="img" aria-label="Dòng thời gian của từng request theo tick"></svg>
+    <div class="stats" id="rcStats"></div>
+    <ul class="log" id="rcLog" aria-live="polite"></ul>
+    <div class="desc" aria-live="polite" id="rcDesc"></div>
+    <div class="nav">
+      <button id="rcRun" class="primary">Chạy từ đầu</button>
+      <button id="rcStep">Tiếp 1 tick</button>
+      <button id="rcSeed">Thứ tự khác</button>
+    </div>
+    <div class="legend">
+      <span><i class="lg-read"></i>đọc</span>
+      <span><i class="lg-calc"></i>tính trong app</span>
+      <span><i class="lg-wait"></i>chờ khoá</span>
+      <span><i class="lg-write"></i>ghi (vạch dưới: đang giữ khoá X)</span>
+      <span><i class="lg-commit"></i>commit, đã trừ tiền</span>
+      <span><i class="lg-rej"></i>kết thúc không trừ tiền</span>
+      <span><i class="lg-retry"></i>xung đột, chờ thử lại</span>
+    </div>
+    <p class="fine">Mỗi tick, các request đang chạy được xếp lượt ngẫu nhiên (theo seed), mỗi request làm một bước. Khoá X trên row id 42 được cấp theo thứ tự chờ. Đây là mô hình dựng từ manual 8.4, không phải số đo; E24 chạy đúng kịch bản này trên lab.</p>
+  </div>
+</div>
+</section>
+
+<!-- 2 -->
+<section id="s2">
+<header><span class="num">02</span><h2>Cơ chế hoạt động</h2></header>
+<div class="prose">
+<h3>Vì sao transaction không tự chặn lỗi</h3>
+<p>Ý chính: bọc code trong <code>START TRANSACTION … COMMIT</code> không làm cho "đọc rồi ghi" an toàn. Dưới REPEATABLE READ mặc định, <code>SELECT</code> thường không khoá gì.</p>
+<p>Câu <code>SELECT</code> thường đọc theo ảnh chụp (consistent read). Nó không đặt khoá, nên không chặn ai và không bị ai chặn. Hai transaction có thể cùng đọc 100 cùng lúc. Khoá chỉ xuất hiện khi một bên ghi. Lúc đó bên kia đã đọc xong và đã quyết định dựa trên số cũ.</p>
+<p>InnoDB cũng không báo lỗi khi bên ghi sau đè lên bên ghi trước. PostgreSQL thì khác: dưới REPEATABLE READ, nó huỷ bên ghi sau bằng lỗi serialization (xem phần 03). Vì vậy cùng một đoạn code có thể an toàn trên PostgreSQL RR mà mất tiền trên MySQL.</p>
+</div>
+
+<div class="prose">
+<h3>Cách 1: UPDATE có điều kiện</h3>
+<p>Ý chính: đặt điều kiện nghiệp vụ vào <code>WHERE</code> của chính câu ghi. Kiểm tra và ghi xảy ra trong một câu, dưới cùng một khoá, nên không còn khoảng hở.</p>
+<p>Câu lệnh là <code>UPDATE accounts SET balance = balance - 70 WHERE id = 42 AND balance &gt;= 70</code>. Câu ghi trong InnoDB không đọc ảnh chụp. Nó khoá X entry id 42, rồi đọc bản mới nhất đã commit (current read). Nếu row đang bị transaction khác giữ khoá, nó chờ. Khi được khoá, nó đọc lại bản mới nhất và xét lại điều kiện <code>WHERE</code> trên bản đó.</p>
+<p>Kết quả nghiệp vụ nằm ở số row bị ảnh hưởng: 1 là đã trừ, 0 là không đủ tiền (hoặc không có tài khoản). Bấm qua từng bước để xem request thứ hai nhận 0 row.</p>
+</div>
+<div class="frame" id="atomStep"></div>
+<div class="note"><strong>Lỗi hay gặp:</strong> chạy câu <code>UPDATE</code> có điều kiện rồi không xem số row bị ảnh hưởng. Câu lệnh trả 0 row không phải lỗi SQL, nên không có exception nào. Request vẫn trả "thành công" dù không trừ đồng nào. Quy tắc: câu ghi có điều kiện nghiệp vụ thì luôn kiểm tra <code>affectedRows</code>, và phân biệt "không đủ tiền" với "không có tài khoản".</div>
+<div class="prose">
+<p><strong>"Số row bị ảnh hưởng" có hai nghĩa.</strong> Mặc định, server MySQL đếm số row <em>thực sự đổi giá trị</em>. Client nào bật cờ <code>CLIENT_FOUND_ROWS</code> khi kết nối thì nhận số row <em>khớp <code>WHERE</code></em>. Thư viện mysql2 cho Node bật cờ này mặc định. Vì vậy trong mysql2, <code>affectedRows</code> là số row khớp, và <code>changedRows</code> mới là số row đổi giá trị. Client <code>mysql</code> dòng lệnh in cả hai: <code>Rows matched: 1  Changed: 1</code>.</p>
+<p>Với câu trừ tiền thì hai số luôn bằng nhau, vì row khớp nào cũng bị đổi. Chúng khác nhau ở câu kiểu <code>SET status = 'paid' WHERE id = 7</code> khi row đã là <code>'paid'</code>: khớp 1, đổi 0.</p>
+</div>
+
+<div class="prose">
+<h3>Cách 2: SELECT … FOR UPDATE</h3>
+<p>Ý chính: khoá row trước khi đọc, giữ khoá suốt lúc tính trong app, rồi mới ghi. Request đến sau phải chờ, nên nó luôn đọc được số đã cập nhật.</p>
+<p><code>FOR UPDATE</code> là locking read: nó đọc bản mới nhất, không đọc ảnh chụp, và đặt khoá X trên row đọc được. Khoá giữ tới khi transaction commit hoặc rollback. Nếu đang autocommit, mỗi câu lệnh là một transaction riêng, nên khoá nhả ngay khi câu <code>SELECT</code> chạy xong. Vì thế <code>FOR UPDATE</code> chỉ có tác dụng khi nằm giữa <code>START TRANSACTION</code> và <code>COMMIT</code>, và mọi câu phải đi qua cùng một connection.</p>
+<p>Cách này hợp khi logic không viết gọn được trong một câu SQL: kiểm tra hạn mức theo ngày, đọc thêm bảng khác, ghi thêm sổ cái. Cái giá là thời gian giữ khoá. Mọi thứ nằm giữa câu khoá và <code>COMMIT</code> đều kéo dài hàng chờ: mỗi vòng gọi tới database, mỗi phép tính, và tệ nhất là mỗi lần gọi API bên ngoài.</p>
+<p>Một row chỉ cho một transaction giữ khoá X tại một thời điểm. Nên số giao dịch tối đa mỗi giây trên một row xấp xỉ 1000 chia cho thời gian giữ khoá (ms). Thử với máy tính dưới đây.</p>
+</div>
+<div class="frame" id="hold">
+  <div class="ph"><strong>Một row nóng chịu được bao nhiêu giao dịch mỗi giây</strong><span class="meta" id="hdMeta"></span></div>
+  <div class="bd">
+    <div class="calc">
+      <label>Vòng gọi app ↔ DB (RTT, ms)<input id="hdRtt" type="number" min="0" max="50" step="0.1" value="0.5"></label>
+      <label>Số câu từ câu khoá tới COMMIT<input id="hdK" type="number" min="2" max="12" value="4"></label>
+      <label>Thời gian tính trong app khi giữ khoá (ms)<input id="hdApp" type="number" min="0" max="2000" step="0.5" value="5"></label>
+      <label>Thời gian COMMIT ghi redo (ms)<input id="hdF" type="number" min="0" max="20" step="0.1" value="1"></label>
+      <label>Request tới row này mỗi giây<input id="hdL" type="number" min="1" max="20000" value="150"></label>
+      <label class="chk"><input id="hdLed" type="checkbox" checked>UPDATE có điều kiện đi kèm INSERT sổ cái trong cùng transaction</label>
+    </div>
+    <svg id="hdSvg" viewBox="0 0 680 150" role="img" aria-label="Thời gian giữ khoá của hai cách, chia theo thành phần"></svg>
+    <div class="stats" id="hdStats"></div>
+    <div class="desc" aria-live="polite" id="hdDesc"></div>
+    <div class="legend">
+      <span><i class="lg-key"></i>vòng gọi khi đang giữ khoá</span>
+      <span><i class="lg-hot"></i>tính trong app khi đang giữ khoá</span>
+      <span><i class="lg-row"></i>COMMIT</span>
+    </div>
+    <p class="fine">Mô hình: một row phục vụ từng transaction một, thời gian giữ khoá cố định, thời gian chờ trung bình theo hàng đợi M/D/1. Bỏ qua thời gian thực thi câu lệnh. Khoá được nhả trước hay sau khi COMMIT ghi xong redo chưa được kiểm chứng (câu hỏi 21). Chưa đo (E25).</p>
+  </div>
+</div>
+<div class="note"><strong>Lỗi hay gặp:</strong> trong Node, gọi <code>pool.query('START TRANSACTION')</code>, rồi <code>pool.query('SELECT … FOR UPDATE')</code>, rồi <code>pool.query('UPDATE …')</code>. Mỗi lần gọi <code>pool</code> có thể lấy một connection khác, nên ba câu nằm ở ba transaction khác nhau và khoá không bảo vệ gì. Quy tắc: lấy một connection bằng <code>pool.getConnection()</code>, chạy cả transaction trên nó, rồi <code>release()</code> trong <code>finally</code>.</div>
+
+<div class="prose">
+<h3>Cách 3: kiểm tra cột version</h3>
+<p>Ý chính: không khoá lúc đọc. Lúc ghi, chỉ ghi nếu row vẫn đúng như lúc đã đọc; nếu không, đọc lại và làm lại. Cách này còn gọi là optimistic locking (khoá lạc quan).</p>
+<p>Bảng có thêm cột <code>version</code>. Request đọc <code>balance</code> cùng <code>version</code>, tính trong app, rồi ghi bằng <code>UPDATE … SET balance = ?, version = version + 1 WHERE id = ? AND version = ?</code>. Nếu có ai ghi trước, version đã tăng, câu ghi khớp 0 row. Request phải đọc lại và quyết định lại từ đầu.</p>
+<p>Câu ghi vẫn khoá X row, nhưng chỉ trong lúc câu đó chạy. Thời gian tính trong app nằm ngoài khoá. Vì vậy cách này hợp cho thao tác kéo dài: người dùng mở form, sửa vài phút, rồi lưu. Khi tranh chấp thấp, gần như không lần nào phải thử lại. Khi tranh chấp cao, phần lớn công việc bị bỏ đi và làm lại.</p>
+</div>
+<div class="frame" id="verStep"></div>
+<div class="note"><strong>Lỗi hay gặp:</strong> kiểm tra version bằng một câu <code>SELECT</code> riêng, rồi mới <code>UPDATE … WHERE id = ?</code>. Giữa hai câu lại có khoảng hở như cũ. Quy tắc: điều kiện <code>version = ?</code> phải nằm trong <code>WHERE</code> của chính câu ghi, và kết quả phải đọc qua số row bị ảnh hưởng.</div>
+
+<div class="prose">
+<h3>Khi một row trở thành điểm nóng</h3>
+<p>Ý chính: cả ba cách đều xếp hàng các lần ghi vào cùng một row. Nếu một tài khoản nhận quá nhiều giao dịch, không cách nào trong ba cách cứu được; phải đổi cách lưu dữ liệu.</p>
+<p>Ví dụ: ví của một sàn thương mại nhận tiền từ hàng nghìn đơn mỗi giây. Lúc đó có ba hướng, mỗi hướng bỏ đi một thứ:</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Hướng</th><th>Làm thế nào</th><th>Bỏ đi điều gì</th></tr></thead>
+<tbody>
+<tr><td>Sổ cái chỉ thêm</td><td>Mỗi giao dịch là một row mới trong <code>ledger</code>. Số dư là tổng các row, cập nhật định kỳ hoặc khi đọc</td><td>Kiểm tra <code>balance ≥ 0</code> ngay lúc ghi trở nên khó; hợp với tiền <em>vào</em> hơn tiền <em>ra</em></td></tr>
+<tr><td>Chia số dư thành nhiều ô</td><td>Tài khoản có 8 row con; mỗi lần cộng chọn ngẫu nhiên một row</td><td>Đọc số dư phải cộng 8 row; trừ tiền phải gom từ nhiều ô</td></tr>
+<tr><td>Gom lô</td><td>Một worker gom giao dịch trong 100 ms rồi ghi một lần</td><td>Thêm độ trễ; cần hàng đợi bền và xử lý lỗi từng phần</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- 3 -->
+<section id="s3">
+<header><span class="num">03</span><h2>Vì sao thiết kế như vậy</h2></header>
+<div class="prose">
+<p><strong>Vì sao InnoDB để câu ghi đọc bản mới nhất?</strong> Câu ghi phải sửa bản hiện tại của row. Nếu nó sửa dựa trên ảnh chụp cũ, nó sẽ xoá mất thay đổi của người khác ngay trong database. Đọc bản mới nhất dưới khoá X giúp <code>balance = balance - 70</code> luôn đúng. Đổi lại, <code>SELECT</code> và <code>UPDATE</code> trong cùng một transaction có thể thấy hai số khác nhau.</p>
+<p><strong>Vì sao không mặc định khoá mọi câu đọc?</strong> Phần lớn câu đọc không dẫn tới câu ghi. Khoá mọi câu đọc nghĩa là người đọc chặn người ghi, và ngược lại. InnoDB làm việc này ở SERIALIZABLE: mọi <code>SELECT</code> thành <code>FOR SHARE</code>. Với bài toán số dư, hai bên cùng giữ khoá đọc rồi cùng xin khoá ghi, nên thành deadlock, và một bên bị huỷ. Kết quả đúng, nhưng phải chạy lại thường xuyên.</p>
+<p><strong>Vì sao có cả khoá trước lẫn kiểm tra sau?</strong> Hai cách đặt cược ngược nhau. Khoá trước cược rằng tranh chấp hay xảy ra, nên trả tiền chờ để không phải làm lại. Kiểm tra sau cược rằng tranh chấp hiếm, nên không trả tiền chờ, và chấp nhận làm lại khi đoán sai.</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th></th><th>UPDATE có điều kiện</th><th>FOR UPDATE</th><th>Cột version</th></tr></thead>
+<tbody>
+<tr><td>Phát hiện xung đột lúc nào</td><td>Không có xung đột; câu sau chờ rồi xét lại</td><td>Không có; người sau chờ từ lúc đọc</td><td>Lúc ghi (0 row)</td></tr>
+<tr><td>Khoá giữ trong</td><td>Một câu lệnh (tới COMMIT)</td><td>Từ câu khoá tới COMMIT, gồm cả thời gian tính trong app</td><td>Một câu lệnh (tới COMMIT)</td></tr>
+<tr><td>Cần vòng thử lại</td><td>Không</td><td>Chỉ khi deadlock (1213) hoặc hết giờ chờ (1205)</td><td>Có, mỗi khi 0 row</td></tr>
+<tr><td>Kéo dài qua nhiều request HTTP</td><td>Không cần</td><td>Không được</td><td>Được</td></tr>
+<tr><td>Logic phức tạp</td><td>Phải viết được trong SQL</td><td>Tuỳ ý</td><td>Tuỳ ý</td></tr>
+<tr><td>Khi tranh chấp cao</td><td>Tốt nhất: khoá giữ ngắn nhất</td><td>Đúng, nhưng hàng chờ dài theo thời gian giữ khoá</td><td>Tệ nhất: nhiều lần làm lại</td></tr>
+</tbody></table></div>
+<div class="prose"><p><strong>So với PostgreSQL.</strong> Ở READ COMMITTED, hai engine giống nhau: câu <code>UPDATE</code> chờ bên kia commit, rồi xét lại <code>WHERE</code> trên bản mới. Ở REPEATABLE READ thì khác. Nếu row đã bị một transaction đã commit sửa sau khi ảnh chụp được lấy, PostgreSQL huỷ câu ghi bằng lỗi <code>could not serialize access due to concurrent update</code> (SQLSTATE 40001). InnoDB thì cứ ghi lên bản mới nhất. Vì vậy, trên PostgreSQL RR, kiểu "đọc, tính, ghi đè" bị chặn bằng lỗi, còn trên InnoDB RR nó làm mất dữ liệu.</p></div>
+</section>
+
+<!-- 4 -->
+<section id="s4">
+<header><span class="num">04</span><h2>Ví dụ</h2></header>
+<div class="prose"><p>Các đoạn dưới viết theo manual 8.4 và API của mysql2; chưa chạy trên lab. Số tiền lưu bằng đơn vị nhỏ nhất (đồng, xu) trong cột số nguyên, không bao giờ dùng số thực.</p><h3>Bảng</h3></div>
+<pre><code>CREATE TABLE accounts (
+  id      BIGINT PRIMARY KEY,
+  balance BIGINT NOT NULL,          -- đơn vị nhỏ nhất
+  version INT    NOT NULL DEFAULT 0,
+  CHECK (balance &gt;= 0)              -- lưới an toàn cuối cùng, MySQL 8.0.16+
+);</code></pre>
+<p class="prose">Ràng buộc <code>CHECK</code> làm câu ghi sai thất bại bằng lỗi 3819 thay vì lặng lẽ ghi số âm. Nó bắt được lỗi "kiểm tra rồi trừ", nhưng không bắt được lỗi mất thay đổi, vì số 30 vẫn hợp lệ.</p>
+
+<div class="prose"><h3>Cách 1 trong mysql2</h3></div>
+<pre><code>const [res] = await pool.execute&lt;ResultSetHeader&gt;(
+  'UPDATE accounts SET balance = balance - ? WHERE id = ? AND balance &gt;= ?',
+  [amount, accountId, amount],
+);
+if (res.affectedRows === 0) {
+  // 0 row: hoặc không đủ tiền, hoặc không có tài khoản. Đọc lại để phân biệt.
+  const [rows] = await pool.execute&lt;RowDataPacket[]&gt;(
+    'SELECT 1 FROM accounts WHERE id = ?', [accountId]);
+  throw rows.length ? new InsufficientFunds() : new AccountNotFound();
+}</code></pre>
+
+<div class="prose"><h3>Cách 2: một connection cho cả transaction</h3></div>
+<pre><code>const conn = await pool.getConnection();
+try {
+  await conn.beginTransaction();
+  const [rows] = await conn.execute&lt;RowDataPacket[]&gt;(
+    'SELECT balance FROM accounts WHERE id = ? FOR UPDATE', [accountId]);
+  if (rows.length === 0) throw new AccountNotFound();
+  if (rows[0].balance &lt; amount) throw new InsufficientFunds();
+  await conn.execute('UPDATE accounts SET balance = balance - ? WHERE id = ?', [amount, accountId]);
+  await conn.execute('INSERT INTO ledger (account_id, delta) VALUES (?, ?)', [accountId, -amount]);
+  await conn.commit();
+} catch (e) {
+  await conn.rollback();
+  throw e;               // 1213 (deadlock): chạy lại cả hàm từ đầu
+} finally {
+  conn.release();
+}</code></pre>
+
+<div class="prose"><h3>Cách 3: vòng thử lại</h3></div>
+<pre><code>for (let attempt = 1; attempt &lt;= 3; attempt++) {
+  const [rows] = await pool.execute&lt;RowDataPacket[]&gt;(
+    'SELECT balance, version FROM accounts WHERE id = ?', [accountId]);
+  const { balance, version } = rows[0];
+  if (balance &lt; amount) throw new InsufficientFunds();
+  const [res] = await pool.execute&lt;ResultSetHeader&gt;(
+    'UPDATE accounts SET balance = ?, version = version + 1 WHERE id = ? AND version = ?',
+    [balance - amount, accountId, version]);
+  if (res.affectedRows === 1) return;
+  await sleep(Math.random() * 10 * 2 ** attempt);   // chờ tăng dần, có ngẫu nhiên
+}
+throw new ConcurrentModification();</code></pre>
+
+<div class="prose"><h3>Số row khớp và số row đổi</h3></div>
+<pre><code>mysql&gt; UPDATE accounts SET balance = balance - 70 WHERE id = 42 AND balance &gt;= 70;
+Query OK, 0 rows affected
+Rows matched: 0  Changed: 0  Warnings: 0
+
+-- mysql2, mặc định có FOUND_ROWS:
+--   UPDATE orders SET status = 'paid' WHERE id = 7   (đã là 'paid')
+--   =&gt; affectedRows: 1, changedRows: 0
+-- tắt cờ: createPool({ ..., flags: ['-FOUND_ROWS'] })
+--   =&gt; affectedRows: 0</code></pre>
+<p class="prose">Dạng in của client <code>mysql</code> lấy theo manual; giá trị mysql2 suy ra từ mã nguồn (<code>connection_config.js</code> bật <code>FOUND_ROWS</code> mặc định) và manual C API. Chưa chạy; E26 kiểm tra.</p>
+</section>
+
+<!-- 5 -->
+<section id="s5">
+<header><span class="num">05</span><h2>Thí nghiệm</h2></header>
+<div class="prose"><p>Chạy trên lab MySQL 8.4, gọi từ một script Node dùng mysql2 với pool đủ lớn cho số request đồng thời. Viết dự đoán trước. E24 là thí nghiệm "so sánh hai cách kiểm soát đồng thời" mà Month 3 của roadmap yêu cầu.</p></div>
+<details><summary>E24. Năm cách ghi, 50 request rút tiền cùng lúc</summary>
+<p><strong>Câu hỏi.</strong> Tài khoản có 1.000, 50 request cùng rút 30. Với từng cách trong bộ mô phỏng phần 01, có bao nhiêu request thành công, số dư cuối là bao nhiêu, và bất biến "số dư cuối = 1.000 − 30 × số lần thành công, và không âm" có giữ không? Chạy mỗi cách 20 lần.</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e24/prediction.md</code></p>
+<p><strong>Chạy.</strong> Script Node gửi 50 lời gọi bằng <code>Promise.all</code>, ghi kết quả từng lời gọi; đọc <code>balance</code> và <code>SUM(delta)</code> của <code>ledger</code> sau mỗi lần.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+<details><summary>E25. Một row nóng: thông lượng và độ trễ của ba cách đúng</summary>
+<p><strong>Câu hỏi.</strong> Với 1, 8 và 32 client cùng ghi vào một tài khoản trong 30 giây, mỗi cách đạt bao nhiêu giao dịch mỗi giây, p50 và p99 bao nhiêu, cách version thử lại bao nhiêu lần? Thêm 5 ms "tính trong app" khi giữ khoá thì FOR UPDATE giảm còn bao nhiêu? So với máy tính ở phần 02.</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e25/prediction.md</code></p>
+<p><strong>Chạy.</strong> Script Node như E24, chạy theo thời gian; đọc <code>Innodb_row_lock_waits</code>, <code>Innodb_row_lock_time_avg</code> trước và sau.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+<details><summary>E26. affectedRows trong mysql2</summary>
+<p><strong>Câu hỏi.</strong> Với câu ghi không đổi giá trị (<code>SET status = 'paid'</code> trên row đã <code>'paid'</code>) và câu trừ tiền không đủ tiền, <code>affectedRows</code> và <code>changedRows</code> của mysql2 là bao nhiêu, khi để cờ mặc định và khi tắt <code>FOUND_ROWS</code>? Client <code>mysql</code> in gì?</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e26/prediction.md</code></p>
+<p><strong>Chạy.</strong> Bốn câu lệnh, hai pool khác cờ, in nguyên đối tượng kết quả.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+</section>
+
+<!-- 6 -->
+<section id="s6">
+<header><span class="num">06</span><h2>Ảnh hưởng khi chạy production</h2></header>
+<div class="prose">
+<h3>Khi nào dùng gì</h3>
+<ul>
+<li>Mặc định: UPDATE có điều kiện, khi điều kiện nghiệp vụ viết được trong <code>WHERE</code>. Đây là cách giữ khoá ngắn nhất và không cần thử lại.</li>
+<li>Logic cần đọc nhiều thứ rồi mới quyết định, và phải xong trong một request: <code>FOR UPDATE</code> trong một transaction ngắn. Không gọi mạng ra ngoài khi đang giữ khoá.</li>
+<li>Thao tác kéo dài qua nhiều request, hoặc tranh chấp hiếm: cột version.</li>
+<li>Khoá nhiều row (chuyển tiền giữa hai tài khoản): luôn khoá theo một thứ tự cố định, ví dụ id nhỏ trước.</li>
+<li>Một row nhận hàng trăm giao dịch mỗi giây trở lên: xem lại cách lưu (sổ cái, chia ô, gom lô) trước khi tối ưu câu lệnh.</li>
+</ul>
+<h3>Cái giá</h3>
+<ul>
+<li>UPDATE có điều kiện: logic phải nằm trong SQL; khó báo lỗi chi tiết ("thiếu bao nhiêu") nếu không đọc thêm.</li>
+<li>FOR UPDATE: thông lượng trên một row bị chặn bởi thời gian giữ khoá; connection bị giữ suốt transaction; có thể deadlock khi khoá nhiều row.</li>
+<li>Cột version: phải viết vòng thử lại và giới hạn số lần; khi tranh chấp cao thì tốn CPU và round trip cho phần việc bị bỏ đi.</li>
+</ul>
+<h3>Nhận ra trên production bằng gì</h3>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Triệu chứng</th><th>Xem ở đâu</th></tr></thead>
+<tbody>
+<tr><td>Tổng sổ cái lệch với số dư</td><td>Câu đối soát định kỳ: <code>balance</code> so với <code>SUM(delta)</code> theo tài khoản. Lệch là dấu hiệu mất thay đổi</td></tr>
+<tr><td>Số dư âm dù code có kiểm tra</td><td>Lỗi 3819 nếu có <code>CHECK</code>; nếu không, truy vấn <code>balance &lt; 0</code></td></tr>
+<tr><td>Request ghi chậm, CPU database thấp</td><td><code>Innodb_row_lock_waits</code>, <code>Innodb_row_lock_time_avg</code>; <code>sys.innodb_lock_waits</code> để xem ai đang giữ khoá</td></tr>
+<tr><td>Lỗi 1205 hoặc 1213 tăng</td><td>Log ứng dụng theo mã lỗi; <code>LATEST DETECTED DEADLOCK</code></td></tr>
+<tr><td>Cách version thử lại nhiều</td><td>Metric của ứng dụng: số lần 0 row trên mỗi lần ghi, số lần hết lượt thử</td></tr>
+</tbody></table></div>
+<div class="senior"><h4>Góc nhìn senior: viết bất biến ra trước, rồi mới chọn cách</h4><p>Câu hỏi đúng không phải "dùng optimistic hay pessimistic". Câu hỏi đúng là: bất biến nào phải luôn đúng, nó nằm trên một row hay nhiều row, và mỗi giây có bao nhiêu lần ghi vào cùng row đó. Bất biến trên một row và viết được bằng SQL thì đưa vào <code>WHERE</code>. Bất biến trải trên nhiều row thì cần khoá theo thứ tự hoặc đổi mô hình dữ liệu. Sau đó đặt thêm một lưới an toàn ở database (<code>CHECK</code>, <code>UNIQUE</code>) và một câu đối soát chạy định kỳ. Code đúng hôm nay có thể bị người khác sửa sai ngày mai.</p></div>
+<div class="prose">
+<h3>Checklist khi review code ghi số dư</h3>
+<ul>
+<li>Có chỗ nào đọc số dư, kiểm tra trong app, rồi ghi không? Khoảng hở đó được xử lý bằng cách nào trong ba cách?</li>
+<li>Câu ghi có điều kiện có kiểm tra <code>affectedRows</code> không? 0 row được phân biệt giữa "không đủ tiền" và "không có tài khoản" không?</li>
+<li>Transaction có chạy trên một connection duy nhất không?</li>
+<li>Có gọi mạng ra ngoài trong lúc giữ khoá không?</li>
+<li>Vòng thử lại có giới hạn số lần và có chờ ngẫu nhiên tăng dần không? Nó chạy lại cả việc đọc chứ không chỉ câu ghi?</li>
+<li>Tiền có lưu bằng số nguyên đơn vị nhỏ nhất không? Có <code>CHECK (balance &gt;= 0)</code> không?</li>
+</ul>
+</div>
+</section>
+
+<!-- 7 -->
+<section id="s7">
+<header><span class="num">07</span><h2>Hiểu lầm thường gặp</h2></header>
+<div class="prose"><ul>
+<li><strong>Hiểu lầm:</strong> bọc trong transaction là đủ an toàn. <strong>Vì sao sai:</strong> dưới RR, <code>SELECT</code> thường không khoá; hai transaction cùng đọc số cũ (<a href="#s2">phần 02</a>). <strong>Quy tắc:</strong> transaction cho tính nguyên tử, không tự cho tính đúng khi ghi đồng thời.</li>
+<li><strong>Hiểu lầm:</strong> đã ghi bằng <code>balance = balance - x</code> thì an toàn. <strong>Vì sao sai:</strong> hết mất thay đổi, nhưng phần kiểm tra vẫn dựa trên số cũ, nên số dư vẫn âm được. <strong>Quy tắc:</strong> điều kiện phải nằm trong cùng câu ghi.</li>
+<li><strong>Hiểu lầm:</strong> <code>FOR UPDATE</code> luôn khoá tới khi xong việc. <strong>Vì sao sai:</strong> ở autocommit, khoá nhả ngay sau câu <code>SELECT</code>; qua pool, các câu có thể nằm trên connection khác nhau. <strong>Quy tắc:</strong> một transaction tường minh trên một connection.</li>
+<li><strong>Hiểu lầm:</strong> <code>affectedRows</code> là số row bị đổi giá trị. <strong>Vì sao sai:</strong> phụ thuộc cờ <code>CLIENT_FOUND_ROWS</code>; mysql2 bật mặc định nên nó là số row khớp. <strong>Quy tắc:</strong> biết driver của mình đếm gì; cần số row đổi thì đọc <code>changedRows</code>.</li>
+<li><strong>Hiểu lầm:</strong> optimistic luôn nhanh hơn vì không khoá. <strong>Vì sao sai:</strong> khi nhiều bên ghi cùng row, phần lớn lần thử bị bỏ và làm lại. <strong>Quy tắc:</strong> optimistic cho tranh chấp thấp; tranh chấp cao thì để database xếp hàng.</li>
+<li><strong>Hiểu lầm:</strong> chuyển sang SERIALIZABLE là xong. <strong>Vì sao sai:</strong> trên InnoDB nó biến đọc thành <code>FOR SHARE</code>, hai bên cùng nâng lên khoá ghi và deadlock. <strong>Quy tắc:</strong> chọn một trong ba cách tường minh.</li>
+</ul></div>
+</section>
+
+<!-- 8 -->
+<section id="s8">
+<header><span class="num">08</span><h2>Câu hỏi ôn tập</h2></header>
+<p class="prose">Viết ngày 2026-10-20. Đánh số Q41 đến Q46.</p>
+<details><summary><span class="tag">Dự đoán</span>Q41. Ba request, số dư 100</summary>
+<p>Số dư 100, ba request cùng rút 40 bằng UPDATE có điều kiện. Có bao nhiêu request thành công, số dư cuối bao nhiêu? Nếu dùng "kiểm tra rồi trừ" và cả ba cùng đọc trước khi ai ghi thì sao?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>UPDATE có điều kiện: hai request thành công (100 → 60 → 20), request thứ ba thấy 20 &lt; 40 và nhận 0 row. Số dư cuối 20. Kiểm tra rồi trừ: cả ba đều thấy 100 ≥ 40, cả ba trừ, số dư thành −20.</p></details></details>
+<details><summary><span class="tag">Giải thích</span>Q42. Vì sao câu sau thấy số mới</summary>
+<p>Request B chạy <code>UPDATE … WHERE id = 42 AND balance &gt;= 70</code> trong một transaction RR đã đọc <code>balance = 100</code> từ trước. A vừa commit 30. B dùng số nào để xét điều kiện, và vì sao?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>B dùng 30. Câu ghi trong InnoDB không đọc ảnh chụp của transaction. Nó khoá X row rồi đọc bản mới nhất đã commit, sau đó mới xét <code>WHERE</code>. Ảnh chụp chỉ dùng cho <code>SELECT</code> thường. Vì vậy câu ghi nhận 0 row, dù <code>SELECT</code> trước đó trong cùng transaction vẫn thấy 100.</p></details></details>
+<details><summary><span class="tag">Chẩn đoán</span>Q43. FOR UPDATE mà vẫn mất tiền</summary>
+<p>Code NestJS gọi <code>this.pool.query('SELECT balance FROM accounts WHERE id = ? FOR UPDATE')</code>, kiểm tra, rồi <code>this.pool.query('UPDATE …')</code>. Không có <code>beginTransaction</code>. Đối soát vẫn thấy lệch. Vì sao?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Mỗi câu chạy ở autocommit, nên là một transaction riêng. Khoá của <code>FOR UPDATE</code> nhả ngay khi câu <code>SELECT</code> xong, trước khi app kiểm tra. Ngoài ra mỗi lần gọi pool có thể dùng connection khác. Sửa: lấy một connection, <code>beginTransaction</code>, chạy cả hai câu, <code>commit</code>, <code>release</code>. Hoặc gọn hơn: thay bằng một câu UPDATE có điều kiện.</p></details></details>
+<details><summary><span class="tag">Dự đoán</span>Q44. Row nóng</summary>
+<p>Một tài khoản nhận 300 request mỗi giây. Transaction <code>FOR UPDATE</code> giữ khoá 3 vòng gọi 0,5 ms, tính 4 ms, commit 1 ms. Hệ thống có theo kịp không? UPDATE có điều kiện đơn lẻ thì sao?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>FOR UPDATE giữ khoá khoảng 1,5 + 4 + 1 = 6,5 ms, nên tối đa khoảng 150 giao dịch mỗi giây trên row đó. 300 request mỗi giây vượt gấp đôi, hàng chờ tăng không ngừng, rồi các request nhận 1205. UPDATE đơn lẻ giữ khoá cỡ thời gian commit (1 ms), tối đa khoảng 1.000 mỗi giây, mức tải 30%: theo kịp. Đây là mô hình; E25 đo thật.</p></details></details>
+<details><summary><span class="tag">Giải thích</span>Q45. Chọn cách cho màn hình sửa hạn mức</summary>
+<p>Admin mở màn hình sửa hạn mức tín dụng của khách, cân nhắc vài phút rồi bấm lưu. Hai admin có thể sửa cùng lúc. Chọn cách nào, và vì sao không chọn hai cách kia?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Cột version. Lúc mở màn hình lưu version đã đọc; lúc lưu ghi với <code>WHERE version = ?</code>, 0 row thì báo "đã có người sửa, tải lại". <code>FOR UPDATE</code> phải giữ transaction và khoá suốt vài phút. UPDATE có điều kiện không diễn đạt được "đúng như lúc tôi đã xem".</p></details></details>
+<details><summary><span class="tag">Chẩn đoán</span>Q46. Optimistic chậm dần</summary>
+<p>Sau đợt khuyến mãi, endpoint cộng điểm thưởng (dùng cột version, thử tối đa 5 lần) có p99 tăng từ 20 ms lên 900 ms, và log có nhiều "ConcurrentModification". CPU database thấp. Chuyện gì xảy ra và sửa thế nào?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Nhiều request cùng ghi vào vài tài khoản nóng. Mỗi lần chỉ một bên thắng, các bên khác nhận 0 row, chờ, đọc lại, thử lại. Độ trễ cộng dồn qua nhiều vòng, và nhiều request hết lượt. Cộng điểm không cần đọc trước, nên đổi sang <code>UPDATE … SET points = points + ?</code>: không xung đột, không thử lại. Nếu vẫn quá nóng, chuyển sang sổ cái chỉ thêm.</p></details></details>
+</section>
+
+<!-- 9 -->
+<section id="s9">
+<header><span class="num">09</span><h2>Câu hỏi còn mở</h2></header>
+<p class="prose">Số thứ tự trùng với Open questions trong <code>.claude/docs/LEARNING_LOG.md</code>. Log là bản gốc.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>#</th><th>Câu hỏi</th><th>Trạng thái</th></tr></thead>
+<tbody>
+<tr><td>21</td><td>Khi COMMIT, InnoDB nhả khoá row trước hay sau khi ghi xong redo xuống disk? Câu trả lời quyết định thời gian commit có nằm trong thời gian giữ khoá của một row nóng hay không.</td><td>Mở. Cần đọc mã nguồn hoặc đo bằng E25 với <code>innodb_flush_log_at_trx_commit</code> 1 và 2.</td></tr>
+<tr><td>22</td><td>Với cột version, khi 32 client ghi vào một row, cần bao nhiêu lần thử và chờ bao lâu để gần như mọi request thành công? Chờ ngẫu nhiên tăng dần cải thiện bao nhiêu so với thử lại ngay?</td><td>Mở. E25.</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- 10 -->
+<section id="s10">
+<header><span class="num">10</span><h2>Tài liệu tham khảo</h2></header>
+<div class="prose"><ul>
+<li>MySQL 8.4 Reference Manual, <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-locking-reads.html">Locking Reads</a>: <code>FOR UPDATE</code> đọc bản mới nhất, khoá giữ tới hết transaction, chỉ có tác dụng khi tắt autocommit; <code>NOWAIT</code>, <code>SKIP LOCKED</code></li>
+<li><a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-consistent-read.html">Consistent Nonlocking Reads</a>: câu ghi thấy row do transaction khác đã commit</li>
+<li><a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-locks-set.html">Locks Set by Different SQL Statements in InnoDB</a></li>
+<li>MySQL 8.4 C API, <a href="https://dev.mysql.com/doc/c-api/8.4/en/mysql-affected-rows.html">mysql_affected_rows()</a>: số row đổi giá trị theo mặc định, số row khớp khi có <code>CLIENT_FOUND_ROWS</code></li>
+<li>mysql2 3.24.6, <code>lib/connection_config.js</code>, hàm <code>getDefaultFlags</code>: <code>FOUND_ROWS</code> nằm trong cờ mặc định</li>
+<li><a href="https://dev.mysql.com/doc/refman/8.4/en/create-table-check-constraints.html">CHECK Constraints</a></li>
+<li>PostgreSQL, <a href="https://www.postgresql.org/docs/current/transaction-iso.html">Transaction Isolation</a>: xét lại <code>WHERE</code> ở Read Committed, lỗi serialization ở Repeatable Read</li>
+<li>Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, chương 7, mục "Preventing Lost Updates"</li>
+</ul></div>
+<h3>Mức kiểm chứng</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>Khẳng định</th><th>Nguồn</th></tr></thead>
+<tbody>
+<tr><td>Locking read đọc bản mới nhất, khoá giữ tới commit hoặc rollback, cần transaction tường minh</td><td>manual 8.4 (Locking Reads)</td></tr>
+<tr><td>Câu ghi chờ khoá rồi xét lại <code>WHERE</code> trên bản mới nhất</td><td>manual 8.4 (Consistent Nonlocking Reads, Locks Set); chưa quan sát trên lab (E24)</td></tr>
+<tr><td>Affected rows: đổi giá trị theo mặc định, khớp khi có <code>CLIENT_FOUND_ROWS</code></td><td>manual C API 8.4</td></tr>
+<tr><td>mysql2 bật <code>FOUND_ROWS</code> mặc định</td><td>mã nguồn mysql2 3.24.6; chưa chạy (E26)</td></tr>
+<tr><td>PostgreSQL RR huỷ câu ghi bằng lỗi serialization khi row đã bị sửa</td><td>tài liệu PostgreSQL</td></tr>
+<tr><td>Kết quả của bộ mô phỏng phần 01</td><td>mô hình; chưa đo (E24)</td></tr>
+<tr><td>Thông lượng tối đa ≈ 1000 / thời gian giữ khoá; thời gian chờ M/D/1</td><td>mô hình; commit có nằm trong thời gian giữ khoá hay không còn mở (câu hỏi 21); chưa đo (E25)</td></tr>
+</tbody></table></div>
+</section>
+</main>
+
+</div>
+
+<script>
+const DEFS=`<defs><marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>`;
+function B(x,y,w,h,cls,t,sub){
+  const tx=x+w/2;
+  return `<g class="n ${cls||''}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="5"/>`+
+  `<text class="tb" x="${tx}" y="${y+(sub?h/2-8:h/2)}" text-anchor="middle" dominant-baseline="central">${t}</text>`+
+  (sub?`<text class="ts" x="${tx}" y="${y+h/2+10}" text-anchor="middle" dominant-baseline="central">${sub}</text>`:'')+`</g>`;
+}
+const A=(d,cls)=>`<path d="${d}" class="edge ${cls||''}" marker-end="url(#arw)"/>`;
+const T=(x,y,t,anchor,cls)=>`<text class="${cls||'lbl'}" x="${x}" y="${y}" text-anchor="${anchor||'start'}">${t}</text>`;
+const $=id=>document.getElementById(id);
+const RM=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const fmt=n=>(Math.round(n*10)/10).toLocaleString('vi-VN');
+
+/* ---------- 01: race simulator ---------- */
+const STRATS={
+ rmw:{ops:c=>['read',...Array(c).fill('calc'),'check','wabs','commit']},
+ chk:{ops:c=>['read',...Array(c).fill('calc'),'check','wdec','commit']},
+ atom:{ops:()=>['wcond','commit']},
+ fu:{ops:c=>['rlock',...Array(c).fill('calc'),'check','wdec','commit']},
+ ver:{ops:c=>['read',...Array(c).fill('calc'),'check','wver','commit']}
+};
+const LOCKOPS=['rlock','wabs','wdec','wcond','wver'];
+function rng(seed){let s=(seed*2654435761)>>>0||1;return()=>{s=(Math.imul(s,1664525)+1013904223)>>>0;return s/4294967296;};}
+function simulate(S,n,amt,bal0,c,seed){
+  const r=rng(seed),db={bal:bal0,ver:7},lock={h:null,q:[]},MAXATT=3,MAXT=200;
+  const ops=STRATS[S].ops(c);
+  const reqs=[...Array(n)].map((_,i)=>({i,L:`R${i+1}`,start:Math.floor(r()*3),pc:0,att:1,rv:null,rver:null,pend:null,pver:null,aff:null,rej:false,hold:false,out:null,outT:null,back:0,waited:0,trace:[]}));
+  const ev=[],balHist=[],st={wait:0,retry:0};let paid=0,t=0;
+  const log=(txt)=>ev.push({t,txt});
+  const rec=(q,k)=>{q.trace[t]={k,h:q.hold};};
+  const release=q=>{if(q.hold){lock.h=null;q.hold=false;}};
+  function step(q){
+    if(t<q.start){rec(q,'idle');return;}
+    if(q.back>0){q.back--;rec(q,'retry');return;}
+    const op=ops[q.pc];
+    if(LOCKOPS.includes(op)&&!q.hold){
+      if(lock.h===null&&(lock.q.length===0||lock.q[0]===q)){
+        if(lock.q[0]===q)lock.q.shift();lock.h=q;q.hold=true;
+        if(q.waited){log(`${q.L} được khoá sau ${q.waited} tick chờ`);q.waited=0;}
+      }else{
+        if(!lock.q.includes(q)){lock.q.push(q);log(`${q.L} chờ khoá X (${(lock.h||lock.q[0]).L} ${lock.h?"đang giữ":"được cấp trước"})`);}
+        q.waited++;st.wait++;rec(q,'wait');return;
+      }
+    }
+    switch(op){
+      case 'read':q.rv=db.bal;q.rver=db.ver;log(`${q.L} đọc balance = ${q.rv}`+(S==='ver'?`, version = ${q.rver}`:''));rec(q,'read');break;
+      case 'rlock':q.rv=db.bal;log(`${q.L} khoá row, đọc bản mới nhất: ${q.rv}`);rec(q,'read');break;
+      case 'calc':rec(q,'calc');break;
+      case 'check':rec(q,'calc');
+        if(q.rv<amt){q.rej=true;log(`${q.L} thấy ${q.rv} < ${amt}: từ chối`);q.pc=ops.length-1;return;}
+        break;
+      case 'wabs':q.pend=q.rv-amt;q.aff=1;
+        log(`${q.L} ghi balance = ${q.pend}`+(db.bal!==q.rv?` (tính từ ${q.rv} đã đọc), đè lên ${db.bal}: mất một lần trừ`:''));rec(q,'write');break;
+      case 'wdec':q.pend=db.bal-amt;q.aff=1;log(`${q.L} ghi ${db.bal} − ${amt} = ${q.pend}`+(q.pend<0?': âm':''));rec(q,'write');break;
+      case 'wcond':if(db.bal>=amt){q.pend=db.bal-amt;q.aff=1;log(`${q.L} khoá, bản mới nhất ${db.bal} ≥ ${amt}: ghi ${q.pend}, 1 row`);}
+        else{q.aff=0;log(`${q.L} khoá, bản mới nhất ${db.bal} < ${amt}: 0 row`);}rec(q,'write');break;
+      case 'wver':if(db.ver===q.rver){q.pend=q.rv-amt;q.pver=db.ver+1;q.aff=1;log(`${q.L} version vẫn ${q.rver}: ghi ${q.pend}, version ${q.pver}`);}
+        else{q.aff=0;log(`${q.L} version đã là ${db.ver}, không còn ${q.rver}: 0 row`);}rec(q,'write');break;
+      case 'commit':
+        if(q.aff===1&&!q.rej){db.bal=q.pend;if(q.pver)db.ver=q.pver;paid+=amt;rec(q,'commit');release(q);q.out='ok';q.outT=t;log(`${q.L} commit: balance = ${db.bal}`);}
+        else if(S==='ver'&&!q.rej&&q.aff===0){rec(q,'retry');release(q);
+          if(q.att<MAXATT){q.att++;st.retry++;q.back=1+Math.floor(r()*2*(q.att-1));q.pc=0;q.aff=q.pend=q.pver=null;log(`${q.L} thử lại lần ${q.att}`);}
+          else{q.out='conf';q.outT=t;log(`${q.L} hết ${MAXATT} lần thử: báo lỗi xung đột`);}}
+        else{rec(q,'rej');release(q);q.out='rej';q.outT=t;}
+        return;
+    }
+    q.pc++;
+  }
+  while(reqs.some(q=>!q.out)&&t<MAXT){
+    const order=reqs.filter(q=>!q.out).map(q=>[r(),q]).sort((a,b)=>a[0]-b[0]).map(x=>x[1]);
+    for(const q of order)step(q);
+    for(const q of reqs)if(!q.trace[t])q.trace[t]={k:'done',h:false};
+    balHist[t]=db.bal;t++;
+  }
+  return {S,reqs,ev,balHist,ticks:t,st,paid,final:db.bal,bal0,amt};
+}
+let RC=null,RT=0,timer=null,seed=3;
+function rcParams(){
+  const cl=(v,a,b,d)=>{v=parseInt(v,10);return isNaN(v)?d:Math.max(a,Math.min(b,v));};
+  return [$('rcS').value,cl($('rcN').value,2,8,2),cl($('rcA').value,1,500,70),cl($('rcB').value,0,1000,100),cl($('rcC').value,0,4,2)];
+}
+function rcSim(){stop();const p=rcParams();RC=simulate(...p,seed);RT=RC.ticks;rcDraw();}
+function stop(){if(timer){clearInterval(timer);timer=null;}}
+const OUTTXT={ok:'trừ tiền',rej:'từ chối',conf:'xung đột'};
+const DESC={
+ rmw:'Mỗi request đọc số dư bằng SELECT thường, không khoá, rồi ghi đè con số tự tính. Nếu hai request đọc trước khi bên kia commit, bên ghi sau xoá mất lần trừ của bên ghi trước. InnoDB không báo lỗi gì.',
+ chk:'Câu ghi dùng balance = balance − x nên không còn mất thay đổi. Nhưng phần kiểm tra "đủ tiền" vẫn dựa trên số đọc từ trước, không khoá. Nhiều request cùng qua được kiểm tra, nên số dư có thể âm.',
+ atom:'Kiểm tra nằm trong WHERE của câu ghi. Request sau chờ khoá X, rồi xét điều kiện trên bản mới nhất đã commit. Không có khoảng hở, không cần thử lại.',
+ fu:'Request khoá row trước khi đọc và giữ khoá suốt lúc tính trong app. Request sau chờ ngay từ bước đọc, nên luôn đọc được số đã cập nhật. Vạch dưới các ô cho thấy khoá giữ lâu thế nào.',
+ ver:'Không ai chờ lúc đọc. Lúc ghi, câu UPDATE chỉ khớp nếu version chưa đổi. Bên thua nhận 0 row, chờ một chút, rồi đọc lại và quyết định lại từ đầu.'
+};
+function rcDraw(){
+  const R=RC,n=R.reqs.length,tot=R.ticks,LW=44,RW=78,cw=Math.max(4,Math.min(20,(680-LW-RW)/tot)),rh=24,top=26;
+  const H=top+n*(rh+6)+8;
+  let g=T(LW,14,'tick 0','start','ts')+T(LW+tot*cw,14,`tick ${tot}`,'end','ts');
+  R.reqs.forEach((q,i)=>{
+    const y=top+i*(rh+6);
+    g+=T(4,y+rh/2+5,q.L,'start','tb');
+    for(let t=0;t<Math.min(RT,tot);t++){
+      const s=q.trace[t];if(!s||s.k==='idle'||s.k==='done')continue;
+      g+=`<rect class="cl ${s.k}" x="${LW+t*cw}" y="${y}" width="${cw}" height="${rh-6}"/>`;
+      if(s.h)g+=`<rect class="lockbar" x="${LW+t*cw}" y="${y+rh-4}" width="${cw}" height="3"/>`;
+    }
+    const done=q.outT!==null&&q.outT<RT;
+    g+=`<text class="${done?(q.out==='ok'?'out-ok':'out-rej'):'out-run'}" x="${LW+tot*cw+8}" y="${y+rh/2+2}">${done?OUTTXT[q.out]:'…'}</text>`;
+  });
+  if(RT<tot)g+=`<line class="cursor" x1="${LW+RT*cw}" y1="${top-6}" x2="${LW+RT*cw}" y2="${H-4}"/>`;
+  const svg=$('rcSvg');svg.setAttribute('viewBox',`0 0 680 ${H}`);svg.innerHTML=g;
+  const done=R.reqs.filter(q=>q.outT!==null&&q.outT<RT);
+  const ok=done.filter(q=>q.out==='ok').length,rej=done.filter(q=>q.out==='rej').length,conf=done.filter(q=>q.out==='conf').length;
+  const bal=RT>0?R.balHist[RT-1]:R.bal0,finished=RT>=tot;
+  const waits=R.reqs.reduce((s,q)=>s+q.trace.slice(0,RT).filter(x=>x.k==='wait').length,0);
+  const retries=R.reqs.reduce((s,q)=>s+q.trace.slice(0,RT).filter((x,i,a)=>x.k==='retry'&&(i===0||a[i-1].k!=='retry')).length,0);
+  const inv=bal===R.bal0-ok*R.amt&&bal>=0;
+  $('rcStats').innerHTML=[
+    ['Trừ tiền thành công',ok,''],['Từ chối (thiếu tiền)',rej,''],['Hết lượt thử',conf,''],['Tick chờ khoá',waits,''],['Lần thử lại',retries,''],
+    ['Số dư',bal,bal<0?'bad':''],['Tiền đã trả ra',ok*R.amt,''],
+    ['Bất biến',finished?(inv?'đúng':'sai'):'…',finished?(inv?'good':'bad'):'']
+  ].map(([k,v,c])=>`<div class="stat"><span>${k}</span><b${c?` class="${c}"`:''}>${v}</b></div>`).join('');
+  const evs=R.ev.filter(e=>e.t<RT).slice(-7).reverse();
+  $('rcLog').innerHTML=evs.length?evs.map(e=>`<li>t${e.t}: ${e.txt}</li>`).join(''):'<li>Chưa có sự kiện. Bấm "Tiếp 1 tick" hoặc "Chạy từ đầu".</li>';
+  let d=DESC[R.S];
+  if(finished){
+    const drop=R.bal0-bal;
+    d+=` Kết quả: trả ra ${ok*R.amt}, số dư giảm ${drop}`+(drop!==ok*R.amt?` — lệch ${ok*R.amt-drop}, đây là tiền mất do ghi đè.`:(bal<0?` — số dư âm.`:` — khớp.`));
+  }
+  $('rcDesc').textContent=d;
+  $('rcMeta').textContent=`tick ${Math.min(RT,tot)} / ${tot} · seed ${seed}`;
+}
+$('rcRun').onclick=()=>{stop();RT=0;rcDraw();if(RM){RT=RC.ticks;rcDraw();return;}timer=setInterval(()=>{RT++;rcDraw();if(RT>=RC.ticks)stop();},160);};
+$('rcStep').onclick=()=>{stop();if(RT>=RC.ticks)RT=0;RT++;rcDraw();};
+$('rcSeed').onclick=()=>{seed++;rcSim();};
+['rcS','rcN','rcA','rcB','rcC'].forEach(id=>$(id).addEventListener('change',rcSim));
+rcSim();
+
+/* ---------- 02: two-transaction steppers ---------- */
+function drawTwo(s,showVer){
+  let g='';
+  g+=B(20,20,170,58,s.c1||'path','R1',s.p1||'');
+  g+=B(490,20,170,58,s.c2||'path','R2',s.p2||'');
+  const rowCls=s.hold?'key':'struct';
+  g+=B(230,110,220,64,rowCls,'accounts id 42',`đã commit: ${s.bal}`+(showVer?` · version ${s.ver}`:''));
+  if(s.pend)g+=T(340,196,s.pend,'middle','ts');
+  if(s.hold==='R1')g+=A('M120 78 L268 108','key');
+  if(s.hold==='R2')g+=A('M560 78 L412 108','key');
+  if(s.wait==='R2')g+=A('M540 78 L420 108','hot');
+  if(s.wait==='R1')g+=A('M140 78 L260 108','hot');
+  return g;
+}
+function twoStepper(id,title,steps,showVer){
+  const el=$(id);
+  el.innerHTML=`<div class="ph"><strong>${title}</strong><span class="meta"></span></div><div class="bd">
+  <h4 class="st-t"></h4><svg viewBox="0 0 680 210" role="img"></svg>
+  <div class="desc" aria-live="polite"><div class="st-d"></div><pre hidden></pre></div>
+  <div class="nav"><button data-d="-1">Trước</button><button data-d="1" class="primary">Tiếp</button></div>
+  <div class="legend"><span><i class="lg-key"></i>đang giữ khoá X</span><span><i class="lg-hot"></i>đang chờ khoá</span><span><i class="lg-row"></i>đã commit</span><span><i class="lg-miss"></i>0 row, không ghi gì</span></div></div>`;
+  const svg=el.querySelector('svg'),t=el.querySelector('.st-t'),d=el.querySelector('.st-d'),pre=el.querySelector('pre'),meta=el.querySelector('.meta');
+  const [pv,nx]=el.querySelectorAll('.nav button');let i=0;
+  function render(){const s=steps[i];svg.innerHTML=DEFS+drawTwo(s,showVer);svg.setAttribute('aria-label',s.t);t.textContent=s.t;d.textContent=s.d;
+    pre.hidden=!s.c;pre.textContent=s.c||'';meta.textContent=`bước ${i+1} / ${steps.length}`;pv.disabled=i===0;nx.disabled=i===steps.length-1;}
+  const go=k=>{i=Math.max(0,Math.min(steps.length-1,i+k));render();};
+  pv.onclick=()=>go(-1);nx.onclick=()=>go(1);
+  el.tabIndex=0;el.addEventListener('keydown',e=>{if(e.key==='ArrowRight')go(1);if(e.key==='ArrowLeft')go(-1);});
+  render();
+}
+const UPD='UPDATE accounts SET balance = balance - 70\n WHERE id = 42 AND balance >= 70;';
+twoStepper('atomStep','UPDATE có điều kiện: request thứ hai nhận 0 row',[
+ {t:'Hai request, cùng một câu lệnh',d:'Số dư 100. R1 và R2 cùng muốn rút 70, mỗi bên gửi đúng một câu UPDATE có điều kiện. Không bên nào đọc trước bằng SELECT.',bal:100,p1:'rút 70',p2:'rút 70',c:UPD},
+ {t:'R1 khoá row và xét điều kiện',d:'R1 khoá X entry id 42 trong PRIMARY, rồi đọc bản mới nhất: 100. Điều kiện 100 ≥ 70 đúng, nên R1 ghi 30. Số 30 chưa commit; R1 giữ khoá tới lúc commit.',bal:100,hold:'R1',c1:'key',p1:'giữ khoá, ghi 30',p2:'rút 70',pend:'R1 đã ghi 30, chưa commit'},
+ {t:'R2 phải chờ',d:'R2 chạy cùng câu lệnh và cũng cần khoá X trên id 42. R1 đang giữ, nên R2 đứng chờ. R2 chưa xét điều kiện nào cả.',bal:100,hold:'R1',wait:'R2',c1:'key',c2:'hot',p1:'giữ khoá, ghi 30',p2:'chờ khoá',pend:'R1 đã ghi 30, chưa commit'},
+ {t:'R1 commit',d:'R1 commit. Số dư đã commit thành 30 và khoá được nhả. Phía ứng dụng, R1 nhận affectedRows = 1: đã trừ tiền.',bal:30,c1:'row',p1:'1 row, xong',c2:'hot',p2:'sắp được khoá',wait:'R2'},
+ {t:'R2 xét lại trên bản mới nhất',d:'R2 lấy được khoá, rồi đọc bản mới nhất đã commit: 30, không phải 100. Đây là điểm mấu chốt: câu ghi không dùng ảnh chụp. Điều kiện 30 ≥ 70 sai.',bal:30,hold:'R2',c1:'row',p1:'1 row, xong',c2:'key',p2:'đọc 30, 30 < 70'},
+ {t:'R2 nhận 0 row',d:'Không row nào khớp, nên không có gì bị ghi. Câu lệnh vẫn thành công về mặt SQL, không có lỗi. Ứng dụng phải nhìn affectedRows = 0 để trả "không đủ tiền". Số dư cuối 30, đúng một lần trừ.',bal:30,c1:'row',p1:'1 row, xong',c2:'miss',p2:'0 row: không đủ tiền',c:'Query OK, 0 rows affected\nRows matched: 0  Changed: 0  Warnings: 0'}
+],false);
+twoStepper('verStep','Cột version: bên ghi sau nhận 0 row rồi làm lại',[
+ {t:'Cả hai đọc, không khoá',d:'Số dư 100, version 7. R1 muốn rút 70, R2 muốn rút 20. Cả hai đọc bằng SELECT thường nên không ai chờ ai, và cả hai cùng thấy (100, 7).',bal:100,ver:7,p1:'đọc 100, v7',p2:'đọc 100, v7',c:'SELECT balance, version FROM accounts WHERE id = 42;'},
+ {t:'Cả hai tính trong app',d:'Mỗi bên tự tính số mới: R1 được 30, R2 được 80. Không ai giữ khoá trong lúc này, dù việc tính có mất vài phút.',bal:100,ver:7,c1:'dim',c2:'dim',p1:'tính: 30',p2:'tính: 80'},
+ {t:'R1 ghi trước',d:'R1 ghi kèm điều kiện version = 7. Version vẫn là 7, nên câu ghi khớp 1 row: balance thành 30, version thành 8. Khoá chỉ giữ trong lúc câu này chạy tới commit.',bal:100,ver:7,hold:'R1',c1:'key',p1:'ghi 30, v8',c2:'dim',p2:'tính: 80',pend:'R1 đã ghi 30, version 8, chưa commit',c:'UPDATE accounts SET balance = 30, version = version + 1\n WHERE id = 42 AND version = 7;   -- 1 row'},
+ {t:'R1 commit',d:'Số dư đã commit là 30, version 8. R1 xong.',bal:30,ver:8,c1:'row',p1:'1 row, xong',c2:'dim',p2:'tính: 80'},
+ {t:'R2 ghi: version đã đổi',d:'R2 ghi kèm điều kiện version = 7. Bản mới nhất có version 8, nên câu ghi khớp 0 row. Không có gì bị ghi đè: lần trừ của R1 an toàn.',bal:30,ver:8,c1:'row',p1:'1 row, xong',c2:'miss',p2:'0 row',c:'UPDATE accounts SET balance = 80, version = version + 1\n WHERE id = 42 AND version = 7;   -- 0 row'},
+ {t:'R2 đọc lại và làm lại',d:'R2 đọc lại: (30, 8). Nó kiểm tra lại 30 ≥ 20, tính 10, rồi ghi với version = 8. Lần này khớp 1 row. Số dư cuối 10 = 100 − 70 − 20. Cái giá: R2 làm mọi việc hai lần.',bal:10,ver:9,c1:'row',p1:'1 row, xong',c2:'row',p2:'lần 2: 1 row',c:'SELECT balance, version FROM accounts WHERE id = 42;   -- 30, 8\nUPDATE accounts SET balance = 10, version = version + 1\n WHERE id = 42 AND version = 8;   -- 1 row'}
+],true);
+
+/* ---------- 02: hold-time calculator ---------- */
+function hd(){
+  const num=(id,d)=>{const v=parseFloat($(id).value);return isNaN(v)||v<0?d:v;};
+  const rtt=num('hdRtt',0.5),k=Math.max(2,Math.round(num('hdK',4))),app=num('hdApp',5),f=num('hdF',1),lam=Math.max(1,num('hdL',150));
+  const ka=$('hdLed').checked?3:1;
+  const rows=[
+    {name:'FOR UPDATE',parts:[[(k-1)*rtt,'key'],[app,'hot'],[f,'row']]},
+    {name:'UPDATE có điều kiện',parts:[[(ka-1)*rtt,'key'],[0,'hot'],[f,'row']]}
+  ];
+  rows.forEach(r=>{r.hold=r.parts.reduce((s,p)=>s+p[0],0);r.max=r.hold>0?1000/r.hold:Infinity;r.rho=lam*r.hold/1000;
+    r.wq=r.rho<1?r.rho*r.hold/(2*(1-r.rho)):Infinity;});
+  const mx=Math.max(...rows.map(r=>r.hold),0.1),W=400,x0=180;
+  let g='';
+  rows.forEach((r,i)=>{const y=20+i*62;g+=T(10,y+24,r.name,'start','tb');let x=x0;
+    r.parts.forEach(([v,c])=>{const w=v/mx*W;if(w>0.5){g+=`<g class="n ${c}"><rect x="${x}" y="${y+6}" width="${w}" height="30" rx="3"/></g>`;}x+=w;});
+    g+=T(x+8,y+26,`${fmt(r.hold)} ms`,'start','tm');
+    g+=T(x0,y+52,r.rho>=1?`tải ${fmt(r.rho*100)}%: hàng chờ tăng mãi`:`tải ${fmt(r.rho*100)}%, chờ trung bình ${fmt(r.wq)} ms`,'start',r.rho>=1?'ts':'ts');});
+  $('hdSvg').innerHTML=g;
+  $('hdStats').innerHTML=rows.map(r=>`<div class="stat"><span>${r.name}: tối đa mỗi giây</span><b${r.rho>=1?' class="bad"':''}>${r.max===Infinity?'∞':fmt(r.max)}</b></div>`).join('');
+  const fu=rows[0],at=rows[1];
+  $('hdDesc').textContent=`FOR UPDATE giữ khoá ${fmt(fu.hold)} ms: ${k-1} vòng gọi sau câu khoá, ${fmt(app)} ms tính trong app, ${fmt(f)} ms commit. Row này phục vụ tối đa khoảng ${fmt(fu.max)} giao dịch mỗi giây. `+
+    `UPDATE có điều kiện giữ khoá ${fmt(at.hold)} ms vì việc tính đã xong trước khi khoá. `+
+    (fu.rho>=1?`Với ${fmt(lam)} request mỗi giây, FOR UPDATE quá tải: request tới nhanh hơn row xử lý được, hàng chờ dài dần cho tới khi gặp lỗi 1205.`:`Với ${fmt(lam)} request mỗi giây, cả hai còn theo kịp.`);
+  $('hdMeta').textContent=`${fmt(lam)} request/giây`;
+}
+['hdRtt','hdK','hdApp','hdF','hdL','hdLed'].forEach(id=>$(id).addEventListener('input',hd));hd();
+</script>
+</body>
+</html>
