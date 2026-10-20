@@ -450,11 +450,11 @@ CREATE TABLE processed_messages (
 
 // BullMQ: delay = 2^(attemptsMade-1) × delay; jitter 1 = full jitter, 0.5 ≈ equal jitter
 await queue.add('import-row', data, {
-  jobId: `import:${fileId}:${rowNo}`,   // trùng jobId khi job còn tồn tại thì không thêm
+  jobId: `import-${fileId}-${rowNo}`,   // không dùng ':'; trùng jobId khi job còn tồn tại thì không thêm
   attempts: 5,
   backoff: { type: 'exponential', delay: 1_000, jitter: 1 },
 });</code></pre>
-<p class="prose">Công thức backoff của BullMQ đọc từ <code>dist/cjs/classes/backoffs.js</code> (bản 6.3.17). <code>jobId</code> chỉ chặn trùng khi job cũ còn trong Redis; nếu đã bị xoá bởi <code>removeOnComplete</code> thì thêm lại được.</p>
+<p class="prose">Công thức backoff của BullMQ đọc từ <code>dist/cjs/classes/backoffs.js</code> (bản 6.3.17). <code>jobId</code> chỉ chặn trùng khi job cũ còn trong Redis; nếu đã bị xoá bởi <code>removeOnComplete</code> thì thêm lại được. <code>jobId</code> không được chứa dấu <code>:</code>: bản 6.3.17 báo lỗi <code>Custom Id cannot contain :</code> (trừ dạng đúng ba phần, giữ lại cho repeatable job cũ).</p>
 </section>
 
 <!-- 5 -->
@@ -597,7 +597,7 @@ await queue.add('import-row', data, {
 <h4 class="ah">2. Ước lượng</h4>
 <ul>
 <li>2.000 đơn mỗi giờ là khoảng 0,6 đơn mỗi giây: tải không phải vấn đề, tính đúng mới là vấn đề.</li>
-<li>Webhook có thể lặp tới 10 lần. Bảng lưu sự kiện thô tăng nhiều nhất khoảng 20.000 row mỗi giờ; giữ 30 ngày là khoảng 15 triệu row, nên cần index và job dọn.</li>
+<li>Webhook có thể lặp tới 10 lần, nhưng bảng sự kiện loại trùng theo <code>event_id</code>, nên mỗi sự kiện chỉ thành một row. Khoảng 1–2 sự kiện cho mỗi lần thử là 2.000–4.000 row mỗi giờ cao điểm; giữ 30 ngày là tối đa khoảng 3 triệu row. Vẫn cần job dọn.</li>
 <li>0,3% đơn kẹt là khoảng 6 đơn mỗi giờ cao điểm: đủ ít để tra từng đơn bằng API của cổng.</li>
 </ul>
 <h4 class="ah">3. Các phương án</h4>
@@ -627,6 +627,7 @@ await queue.add('import-row', data, {
   open_order_id BIGINT NULL,                      -- = order_id khi lần thử còn mở, NULL khi đã xong
   status        ENUM('created','pending','succeeded','failed','expired') NOT NULL,
   provider_id   VARCHAR(64) NULL,
+  payment_url   VARCHAR(512) NULL,
   updated_at    DATETIME(3) NOT NULL,
   UNIQUE KEY uq_open (open_order_id)              -- nhiều NULL được phép: mỗi đơn chỉ một lần thử mở
 );
@@ -639,7 +640,7 @@ CREATE TABLE payment_events (event_id VARCHAR(64) PRIMARY KEY, attempt_id CHAR(3
 <li><code>succeeded</code>: <code>UPDATE payment_attempts SET status = 'succeeded', open_order_id = NULL WHERE id = ? AND status &lt;&gt; 'succeeded'</code>; rồi <code>UPDATE orders SET status = 'paid' WHERE id = ? AND status IN ('awaiting_payment','payment_failed')</code>. Nếu câu thứ hai trả 0 row vì đơn đã <code>paid</code> bởi lần thử khác: tạo lệnh hoàn tiền tự động.</li>
 <li><code>failed</code>: <code>UPDATE payment_attempts SET status = 'failed', open_order_id = NULL WHERE id = ? AND status IN ('created','pending')</code>. 0 row nghĩa là lần thử đã <code>succeeded</code>: bỏ qua sự kiện, ghi log.</li>
 </ul></li>
-<li><strong>Đối soát:</strong> lần thử <code>pending</code> quá 10 phút thì gọi <code>GET</code> và áp dụng kết quả như một sự kiện. Lần thử <code>created</code> quá 30 phút mà cổng không biết thì chuyển <code>expired</code>, mở lại cho khách thanh toán.</li>
+<li><strong>Đối soát:</strong> lần thử <code>pending</code> quá 10 phút thì gọi <code>GET</code> và áp dụng kết quả như một sự kiện. Lần thử <code>created</code> chưa có <code>provider_id</code> (lời gọi <code>POST</code> đã timeout) thì gọi lại <code>POST</code> với đúng key, trong vòng 24 giờ. Nếu lần đầu đã tới cổng, cổng trả lại giao dịch đã tạo. Quá 30 phút mà vẫn chưa thanh toán thì chuyển <code>expired</code>, mở lại cho khách thanh toán. Nếu sau đó vẫn có webhook <code>succeeded</code> cho lần thử này, luật "<code>succeeded</code> thắng" và hoàn tiền tự động ở bước 2 xử lý được.</li>
 </ol>
 <h4 class="ah">6. Rủi ro và cách kiểm chứng</h4>
 <ul>
