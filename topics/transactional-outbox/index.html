@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Transactional outbox</title>
+<title>Transactional outbox: gửi event cùng transaction</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -193,7 +193,7 @@ details.answer summary{font-weight:500;color:var(--struct)}
 
 <main>
 <div class="hero">
-<h1>Transactional outbox</h1>
+<h1>Transactional outbox: gửi event cùng transaction</h1>
 <p class="lede">Service lưu đơn hàng vào MySQL, rồi gửi event "đơn đã tạo" lên message broker. Hai việc ghi vào hai hệ thống, không có transaction nào bao được cả hai. Bài này giải thích vì sao cách làm đó lúc thì mất event, lúc thì tạo event cho đơn không tồn tại, và cách outbox sửa nó: ghi event vào chính database, trong cùng transaction, rồi để một tiến trình khác chuyển đi.</p>
 <div class="brief">
   <div><h4>Mục tiêu</h4><ul>
