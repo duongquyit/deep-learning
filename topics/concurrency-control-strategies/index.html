@@ -631,13 +631,13 @@ CREATE TABLE reservations (id BIGINT PRIMARY KEY, sale_id BIGINT, user_id BIGINT
 <li>Chèn <code>reservations</code> với <code>expires_at = NOW() + INTERVAL 10 MINUTE</code>, rồi <code>COMMIT</code>.</li>
 </ul></li>
 <li><strong>MySQL từ chối</strong> (0 row ở bất kỳ bước nào): rollback, <code>INCRBY gate:7 qty</code> để trả vé.</li>
-<li><strong>Hết hạn:</strong> một job mỗi 30 giây lấy reservation hết hạn bằng <code>FOR UPDATE SKIP LOCKED</code>. Trong một transaction: <code>UPDATE reservations SET status = 'expired' WHERE id = ? AND status = 'held'</code>, cộng lại <code>stock</code>, trừ <code>qty</code> ở quota. Sau commit: trả vé vào Redis, xoá cờ hết hàng.</li>
-<li><strong>Thanh toán thành công:</strong> <code>UPDATE reservations SET status = 'paid' WHERE id = ? AND status = 'held'</code>. 0 row nghĩa là suất đã hết hạn và đã bán cho người khác: hoàn tiền tự động. Câu ghi có điều kiện này giải quyết cuộc đua giữa thanh toán và hết hạn.</li>
+<li><strong>Hết hạn:</strong> một job mỗi 30 giây lấy reservation hết hạn bằng <code>FOR UPDATE SKIP LOCKED</code>. Trong một transaction: <code>UPDATE reservations SET status = 'expired' WHERE id = ? AND status = 'held'</code>; nếu được 1 row thì trừ <code>qty</code> ở quota trước, rồi mới cộng lại <code>stock</code>. Thứ tự quota trước, tồn kho sau phải giống hệt luồng mua. Đảo lại thì job hết hạn và một lần mua của cùng khách có thể deadlock. Sau commit: trả vé vào Redis, xoá cờ hết hàng.</li>
+<li><strong>Thanh toán thành công:</strong> <code>UPDATE reservations SET status = 'paid' WHERE id = ? AND status = 'held'</code>. 0 row nghĩa là suất đã hết hạn và đã được trả lại kho, có thể đã bán cho người khác: hoàn tiền tự động. Câu ghi có điều kiện này giải quyết cuộc đua giữa thanh toán và hết hạn.</li>
 </ol>
 <p>Vì sao quota trước, tồn kho sau: khoá trên row nóng được lấy muộn nhất, nên giữ ngắn nhất (chỉ còn một INSERT và COMMIT). Mọi transaction đi cùng thứ tự, nên hai bảng không deadlock với nhau.</p>
 <h4 class="ah">6. Rủi ro và cách kiểm chứng</h4>
 <ul>
-<li><strong>Redis lệch MySQL</strong> (Redis khởi động lại, app chết sau khi lấy vé): chỉ gây bán thiếu. Một job mỗi 5 giây đặt lại <code>gate:7</code> bằng <code>stock</code> trong MySQL.</li>
+<li><strong>Redis lệch MySQL</strong> (Redis khởi động lại, app chết sau khi lấy vé): chỉ gây bán thiếu, vì MySQL vẫn quyết định cuối cùng. Một job mỗi 5 giây đặt lại <code>gate:7</code> bằng <code>stock</code> trong MySQL. Lúc đặt lại, các request đang giữ vé mà chưa commit được tính hai lần, nên cổng mở rộng hơn thực tế một chút. Việc này chỉ thêm tải cho MySQL, không gây bán quá.</li>
 <li><strong>Đối soát sau sale:</strong> <code>stock</code> cộng tổng <code>qty</code> của reservation <code>held</code> và <code>paid</code> phải bằng 500; tổng <code>qty</code> theo người không vượt 2.</li>
 <li><strong>Test tải trước ngày sale:</strong> 30.000 user ảo, đỉnh 2.000 request mỗi giây; kiểm tra 0 bán quá, p99, thời gian chờ pool, <code>Innodb_row_lock_waits</code>.</li>
 <li><strong>Đường lui:</strong> một feature flag tắt cổng Redis, quay về B. Vẫn đúng, chỉ chậm hơn.</li>
@@ -681,7 +681,7 @@ COMMIT;</code></pre>
 <p>Câu hỏi cần hỏi: app có gửi idempotency key không? Khi app trả 500 sau deadlock, transaction đã rollback nên bấm lại là an toàn. Nhưng khi app trả 500 vì timeout sau commit, bấm lại sẽ trừ hai lần. Giả định hiện chưa có key.</p>
 <h4 class="ah">2. Ước lượng</h4>
 <ul>
-<li>400 lần mỗi giây, khoảng 35 triệu lần mỗi ngày; 50 deadlock là khoảng 0,00015%. Hiếm, nhưng mỗi lần là một lỗi người dùng thấy.</li>
+<li>Đỉnh là 400 lần mỗi giây. Giả sử trung bình cả ngày 100 lần mỗi giây, tức khoảng 8,6 triệu lần mỗi ngày; 50 deadlock là khoảng 0,0006%. Hiếm, nhưng mỗi lần là một lỗi người dùng thấy.</li>
 <li>Ví shop: 30 lần cộng mỗi giây. Nếu mỗi transaction giữ khoá ví shop khoảng 3 ms (vài vòng gọi cộng commit), mức tải khoảng 9%. Chưa nóng. Ngưỡng cần lo là khi tải vượt khoảng 50%, tức khoảng 150 lần mỗi giây với cùng thời gian giữ khoá.</li>
 </ul>
 <h4 class="ah">3. Các phương án</h4>
@@ -767,14 +767,14 @@ async function transfer(t: { id: string; from: number; to: number; amount: numbe
 </ul>
 <h4 class="ah">2. Ước lượng</h4>
 <ul>
-<li>Job chạm mọi khách mỗi giờ. Một form mở 10 phút có khoảng 10/60, tức khoảng 17%, khả năng bị job cập nhật trong lúc mở.</li>
-<li>Khoảng 200 nhân viên × 8 giờ × 8 form mỗi giờ là khoảng 12.800 lần lưu mỗi ngày. Nếu dùng một version cho cả row, khoảng 2.000 lần lưu mỗi ngày sẽ báo xung đột, hầu hết là xung đột giả. Nhân viên sẽ ghét tính năng này và tìm cách lách.</li>
+<li>Job chạm mọi khách mỗi giờ. Form mở trung bình 7,5 phút, nên có khoảng 7,5/60, tức khoảng 12%, khả năng bị job cập nhật trong lúc mở.</li>
+<li>Mỗi nhân viên xử lý khoảng 6 form mỗi giờ (6 × 7,5 phút đã là 45 phút). 200 nhân viên × 8 giờ × 6 form là khoảng 9.600 lần lưu mỗi ngày. Nếu dùng một version cho cả row, khoảng 1.200 lần lưu mỗi ngày sẽ báo xung đột, gần như tất cả là xung đột giả. Nhân viên sẽ ghét tính năng này và tìm cách lách.</li>
 </ul>
 <h4 class="ah">3. Các phương án</h4>
 <div class="tablewrap"><table>
 <thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
 <tbody>
-<tr><td>A. Một version cho cả row</td><td>Bắt mọi mất thay đổi; dễ làm</td><td>Job tăng version, gây khoảng 17% xung đột giả</td></tr>
+<tr><td>A. Một version cho cả row</td><td>Bắt mọi mất thay đổi; dễ làm</td><td>Job tăng version, gây khoảng 12% xung đột giả</td></tr>
 <tr><td>B. Khoá mềm "đang được X sửa", có hạn</td><td>Tránh hai người cùng sửa</td><td>Khoá treo khi đóng tab; không giải quyết job</td></tr>
 <tr><td>C. PATCH chỉ field đã đổi, kèm giá trị gốc</td><td>Xung đột chỉ khi cùng field</td><td>Câu ghi phức tạp; so sánh giá trị gốc với text dài, NULL</td></tr>
 <tr><td>D. Tách nhóm field theo người sở hữu</td><td>Job và nhân viên không đụng nhau; mỗi nhóm có version riêng</td><td>Đổi schema và API</td></tr>
