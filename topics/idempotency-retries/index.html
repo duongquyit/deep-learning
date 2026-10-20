@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Idempotency và retry</title>
+<title>Idempotency và retry: gửi lại mà không trùng</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -200,7 +200,7 @@ details.answer summary{font-weight:500;color:var(--struct)}
 
 <main>
 <div class="hero">
-<h1>Idempotency và retry</h1>
+<h1>Idempotency và retry: gửi lại mà không trùng</h1>
 <p class="lede">Mạng có thể làm mất request, và cũng có thể làm mất response sau khi server đã làm xong. Client không phân biệt được hai trường hợp này, nên nó phải gửi lại. Bài này giải thích cách làm cho việc gửi lại an toàn: idempotency key ở API, dấu "đã xử lý" ở phía nhận message, và cách thử lại sao cho không tự đánh sập hệ thống.</p>
 <div class="brief">
   <div><h4>Mục tiêu</h4><ul>
