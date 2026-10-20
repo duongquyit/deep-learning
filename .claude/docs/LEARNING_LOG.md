@@ -66,6 +66,10 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 | Three concurrency-control strategies (conditional UPDATE, `FOR UPDATE`, version column): mechanism, cost, when to use | 2 (prov.) | same, §02–§03, §06 | 2026-10-20 | Exercise E25: throughput, p99 and retries of the three at 1, 8, 32 clients; then choose and defend one for a real endpoint at work |
 | Checking write results: affected rows (changed vs matched, `CLIENT_FOUND_ROWS`, mysql2 default) | 2 (prov.) | same, §02, §04 | 2026-10-20 | Exercise E26: print mysql2 results with and without `FOUND_ROWS` |
 | Hot-row throughput: lock hold time as the ceiling, and the alternatives (append-only ledger, split balance, batching) | 2 (prov.) | same, §02 | 2026-10-20 | Exercise E25, then compare with the calculator; resolve open question 21 |
+| Delivery semantics: at-most-once, at-least-once, effectively-once; why a timeout means "unknown" | 2 (prov.) | [idempotency-retries](../topics/idempotency-retries/index.html) §01, §03 | 2026-10-20 | Explain the three timeout cases for an endpoint at work and what its clients do on each |
+| Idempotency keys for a POST API: storage, fingerprint, same-transaction design vs `processing` state, 409/422, expiry | 2 (prov.) | same, §02, §04 | 2026-10-20 | Exercise E27: concurrent duplicates against a real implementation, read `data_locks` while they wait |
+| Consumer-side dedup: where to write the processed marker, ack after commit | 2 (prov.) | same, §02 | 2026-10-20 | Exercise E28: kill the consumer at each point for four designs and count the effects |
+| Retry policy: retryable errors, exponential backoff with full/equal jitter, attempt limits, retry budget, DLQ | 2 (prov.) | same, §02, §06 | 2026-10-20 | Exercise E29: measure a retry storm with and without jitter; then audit the retry layers of one call path at work |
 
 "(prov.)" = provisional. Every row above rests on one artifact I wrote myself, with no measurement behind it. Week 1 of Month 1 includes a baseline assessment (TECHNICAL_GROWTH.md Section 11) that should confirm or cut these.
 
@@ -93,6 +97,8 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 20. On 8.4, is the first entry past a range on a secondary index, and on the PK, locked with a next-key lock or a gap lock only? This changed across 8.0 releases; the locking page's widget avoids ranges for that reason. E23.
 21. At COMMIT, does InnoDB release row locks before or after the redo log is flushed to disk? It decides whether commit time counts toward a hot row's lock hold time, which the concurrency-control page's calculator assumes it does. Read the source or measure with E25 under `innodb_flush_log_at_trx_commit` 1 and 2.
 22. With a version column and 32 clients writing one row, how many attempts and how much backoff does it take for nearly every request to succeed, and how much does jittered exponential backoff help over an immediate retry? E25.
+23. Three requests with the same idempotency key, the first rolls back on a business error: do the other two deadlock, as in the manual's three-session duplicate-key example? If so, how should `transfer()` handle 1213 and still return one result? E27.
+24. How long should idempotency keys be kept when the client is a mobile app with an offline queue that may resend days later? Should finished keys (fingerprint and response only) be kept apart from in-flight ones?
 
 ## Pending verification (from the session's own exercise list)
 
@@ -131,8 +137,39 @@ These are written in the page as exercises; none have been run yet.
 - **E26** — `affectedRows` and `changedRows` in mysql2 with and without `FOUND_ROWS`, for a no-op update, a refused withdrawal and a missing account.
 - **Q41–Q46** — The six recall questions in section 08 of the concurrency-control page.
 - **C1–C3** — The three real-world cases in section 09 of the concurrency-control page (flash sale stock and per-user limit, crossed-transfer deadlocks, long-lived edit form vs a batch job). Solve in writing before opening the answers.
+- **E27** — 2 and 10 concurrent requests with one idempotency key: ledger rows, status codes, `data_locks` of the waiting requests, deadlock when the first rolls back.
+- **E28** — Kill a consumer at three points for four marker designs; count how many times the effect happens. *(Month 3 deliverable: tests for duplicate processing and retries.)*
+- **E29** — Retry storm against a rate-limited endpoint: immediate, exponential, full jitter, equal jitter. Checks the page's model against the AWS article.
+- **Q47–Q52** — The six recall questions in section 08 of the idempotency page.
 - **Q11–Q16** — The six recall questions in section 08 of the composite-index page (answers are on the page, hidden).
 - **Q1–Q5** — The five check questions at the end of the page (leftmost prefix, `COUNT(*)` and the visibility map, full scan polluting the cache, TOAST, a `sessions` table updated 5,000×/sec). Answer in writing before looking anything up, then verify.
+
+---
+
+## 2026-10-20 — Idempotency and retries
+
+**Topic and objective.** Month 3 topic, written ahead as documentation only (Phase 3 of the documentation plan): why retries are unavoidable and duplicates come with them, how to make the receiving side idempotent at the API and at a queue consumer, and how to retry without making an outage worse.
+
+**Output.** [topics/idempotency-retries/index.html](../topics/idempotency-retries/index.html) — 10 sections. Widgets: a configurable stepper for one transfer over an unreliable network (four failure scenarios × retry on/off × idempotency key on/off, counting transfers); a 7-step stepper of two requests with the same key (INSERT, S-lock wait on the uncommitted duplicate, 1062, return the stored response; 422 and rollback variants); a dedup-placement matrix that runs a small model for four marker designs × three crash points; a retry-storm simulator (outage, fixed capacity, immediate / exponential / full jitter / equal jitter). Prediction templates for E27–E29.
+
+**What it covers.**
+
+- At-most-once vs at-least-once; idempotent receiver gives effectively-once; naturally idempotent operations and RFC 9110 method semantics.
+- Idempotency key: client-generated per operation, `(owner, key)` unique, fingerprint, stored response; key and effect in one transaction when the effect is in the same database, `processing` state plus recovery when it is external; pass the key downstream. IETF draft 07 (expired) codes 400 / 422 / 409; Stripe v1 behaviour (stored response including 500, ≥ 24 h, 255 chars).
+- Consumer dedup: marker before (loses), after (duplicates), same transaction (correct); ack after commit; Redis `SET NX` as a separate-store marker.
+- Backoff: exponential with cap, full and equal jitter, attempt limits, retry budget, retry amplification across layers; which errors to retry; DLQ and redrive. BullMQ backoff formula and `jobId` dedup read from the 6.3.17 source; SQS FIFO 5-minute dedup window.
+
+**Initial understanding.** TODO — what did I believe about idempotency and retries before this page? No prior belief was stated in the session.
+
+**Mistakes and misconceptions corrected.** TODO — only I know which. Traps the page writes down: an "exactly-once" queue removes the need for idempotent consumers; a timeout means the server did nothing; a new key per attempt; write the marker first to be safe; exponential backoff alone is enough; retry every error.
+
+**Experiments and results.** None. All four widgets are models. One discrepancy is already visible inside the model: equal jitter needs fewer calls than full jitter in the page's outage-then-fixed-capacity model, while the AWS article found full jitter cheapest in its own model; E29 is meant to settle it on a real endpoint.
+
+**Competency level.** Level 2 provisional on four new matrix rows.
+
+**Remaining questions.** Open questions 23 and 24.
+
+**Next step.** Topic 12 of the plan, transactional outbox.
 
 ---
 
