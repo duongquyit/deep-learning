@@ -554,14 +554,14 @@ SHOW BINARY LOG STATUS;                    -- 8.4: thay cho SHOW MASTER STATUS
 <p>Chọn B, thiết kế để thay bằng C sau này mà không đổi gì phía consumer.</p>
 <ul>
 <li>B giải quyết cả ba triệu chứng và vừa sức team. Bảng outbox dùng đúng tên cột mặc định của Debezium (<code>id</code>, <code>aggregatetype</code>, <code>aggregateid</code>, <code>type</code>, <code>payload</code>), nên khi lên C chỉ cần thay relay.</li>
-<li><strong>Thứ tự:</strong> partition key trên Kafka là <code>order_id</code>. Chạy một relay hoạt động, có bản dự phòng. Relay chính giữ một named lock của MySQL (<code>GET_LOCK('outbox_relay', 0)</code>); bản dự phòng chỉ chạy khi lấy được lock. Một relay đủ thông lượng, và giữ thứ tự theo <code>id</code> trong cùng một đơn, vì event "huỷ" luôn được tạo sau khi event "tạo" đã commit.</li>
+<li><strong>Thứ tự:</strong> partition key trên Kafka là <code>order_id</code>. Chạy một relay hoạt động, có bản dự phòng. Relay chính giữ một named lock của MySQL (<code>GET_LOCK('outbox_relay', 0)</code>); bản dự phòng chỉ chạy khi lấy được lock. Lock gắn với một connection, nên relay giữ một connection riêng cho nó, không lấy từ pool. Một relay đủ thông lượng, và giữ thứ tự theo <code>id</code> trong cùng một đơn, vì event "huỷ" luôn được tạo sau khi event "tạo" đã commit.</li>
 <li>Khi nào đổi ý: lượng event vượt vài nghìn mỗi giây, hoặc công ty dựng Kafka Connect cho việc khác. Khi đó chuyển sang C.</li>
 </ul>
 <h4 class="ah">5. Triển khai</h4>
 <ol class="list">
-<li><strong>Consumer idempotent trước:</strong> mỗi event có <code>event_id</code> (UUID). Email, kho, analytics lưu <code>event_id</code> đã xử lý cùng transaction với kết quả. Bắt đầu gửi <code>event_id</code> ngay cả trong luồng cũ.</li>
+<li><strong>Consumer idempotent trước:</strong> mỗi event có <code>event_id</code> (UUID). Email, kho, analytics lưu <code>event_id</code> đã xử lý cùng transaction với kết quả. Luồng cũ cũng bắt đầu gửi <code>event_id</code>; từ bước 2, nó dùng đúng <code>event_id</code> của row outbox tương ứng.</li>
 <li><strong>Ghi outbox trong transaction</strong> ở mọi đường tạo đơn, kể cả admin. Relay chạy chế độ "bóng": gửi lên một topic phụ <code>orders.shadow</code>. So số event mỗi giờ giữa hai luồng trong một tuần.</li>
-<li><strong>Chuyển:</strong> bật cờ. Code bỏ <code>producer.send</code> trực tiếp; relay gửi lên topic thật. Trong vài phút chuyển, có thể có event trùng giữa hai luồng; consumer đã loại được.</li>
+<li><strong>Chuyển, theo đúng thứ tự:</strong> trước hết cho relay gửi lên topic thật, trong khi code vẫn gửi trực tiếp. Lúc này mỗi event tới hai lần, và consumer loại được vì hai luồng dùng chung <code>event_id</code>. Sau đó mới tắt <code>producer.send</code> trực tiếp. Làm ngược lại thì trong khoảng giữa hai bước, event không đi theo luồng nào và bị mất.</li>
 <li><strong>Bù dữ liệu cũ:</strong> đối soát 30 ngày gần nhất: đơn không có email hoặc không được giữ hàng. Chèn event bù vào outbox với <code>type</code> có cờ <code>replay</code>, để consumer email quyết định có gửi lại hay chỉ ghi nhận.</li>
 <li><strong>Dọn bảng:</strong> job mỗi giờ xoá row đã gửi quá 24 giờ, mỗi lần 5.000 row.</li>
 </ol>
@@ -587,14 +587,14 @@ SHOW BINARY LOG STATUS;                    -- 8.4: thay cho SHOW MASTER STATUS
 <h3>C8. Relay outbox chậm dần sau 8 tháng</h3>
 <p class="src">Dựa trên: phần 02, 04 và 06 của trang này; <a href="../innodb-locking-deadlock/index.html">Locking và deadlock</a>.</p>
 <dl>
-<dt>Bối cảnh</dt><dd><p>Outbox polling đã chạy 8 tháng. Bảng có 80 triệu row, 99,9% đã gửi; chưa từng có job dọn. Index: <code>PRIMARY (id)</code> và <code>KEY (created_at)</code>. Ba relay chạy song song, mỗi relay lặp lại:</p>
+<dt>Bối cảnh</dt><dd><p>Outbox polling đã chạy 8 tháng. Bảng có 80 triệu row (payload nhỏ, khoảng 25 GB), 99,9% đã gửi; chưa từng có job dọn. Buffer pool 32 GB. Index: <code>PRIMARY (id)</code> và <code>KEY (created_at)</code>. Ba relay chạy song song, mỗi relay lặp lại:</p>
 <pre><code>START TRANSACTION;
 SELECT * FROM outbox WHERE sent_at IS NULL ORDER BY id LIMIT 500 FOR UPDATE SKIP LOCKED;
 -- gửi từng event lên broker, mỗi lần khoảng 5 ms
 UPDATE outbox SET sent_at = NOW() WHERE id IN (...);
 COMMIT;
 -- nghỉ 100 ms</code></pre>
-<p>Giờ cao điểm: tuổi event chưa gửi lâu nhất lên 15 phút. CPU của MySQL 70%. Slow log đầy câu polling, mỗi câu 0,8–1,5 giây, <code>rows_examined</code> hàng chục triệu. Thỉnh thoảng <code>INSERT</code> vào outbox của API tạo đơn bị lỗi 1205.</p></dd>
+<p>Giờ cao điểm: tuổi event chưa gửi lâu nhất lên 15 phút. CPU của MySQL 70%. Slow log đầy câu polling, mỗi câu 8–15 giây, <code>rows_examined</code> khoảng 80 triệu. Thỉnh thoảng <code>INSERT</code> vào outbox của API tạo đơn bị lỗi 1205.</p></dd>
 <dt>Yêu cầu</dt><dd>Lag dưới 5 giây ở p99. CPU MySQL dưới 40%. Không mất event trong lúc sửa.</dd>
 <dt>Ràng buộc</dt><dd>Không downtime. MySQL 8.4. Đỉnh khoảng 300 event mỗi giây.</dd>
 <dt>Nhiệm vụ</dt><dd>Chẩn đoán từng triệu chứng. Đề xuất cách sửa theo thứ tự. Nói cách dọn 80 triệu row an toàn.</dd>
@@ -607,14 +607,14 @@ COMMIT;
 <details class="answer"><summary>Xem lời giải</summary>
 <h4 class="ah">1. Làm rõ đề bài: chẩn đoán</h4>
 <ul>
-<li><strong>Câu polling chậm:</strong> không có index trên <code>sent_at</code>. Với <code>ORDER BY id</code>, MySQL quét PRIMARY từ đầu, đi qua gần 80 triệu row đã gửi rồi mới tới các row chưa gửi ở cuối. <code>rows_examined</code> hàng chục triệu trong slow log khớp với điều đó.</li>
-<li><strong>Lỗi 1205 ở API:</strong> câu khoá dưới REPEATABLE READ khoá mọi entry nó quét qua, kèm khoảng trống. Quét tới cuối PRIMARY nghĩa là khoá cả vùng nơi row mới được chèn vào. Đây là suy luận từ trang locking; hành vi chính xác khi có <code>SKIP LOCKED</code> chưa được kiểm chứng (câu hỏi 25), nên phải xác nhận bằng <code>data_locks</code>.</li>
+<li><strong>Câu polling chậm:</strong> không có index trên <code>sent_at</code>. Với <code>ORDER BY id</code>, MySQL quét PRIMARY từ đầu, đi qua gần 80 triệu row đã gửi rồi mới tới các row chưa gửi ở cuối. <code>rows_examined</code> khoảng 80 triệu khớp với điều đó. Quét chừng ấy row trong 8–15 giây chỉ được vì phần lớn bảng nằm trong buffer pool, và đó cũng là chỗ CPU 70% đi vào.</li>
+<li><strong>Lỗi 1205 ở API:</strong> câu khoá dưới REPEATABLE READ khoá mọi entry nó quét qua, kèm khoảng trống phía trước. Khi hàng chờ ngắn (ngoài giờ đỉnh), câu quét tới tận cuối PRIMARY và khoá cả khoảng sau row cuối cùng (supremum), đúng chỗ mọi row mới được chèn vào. Mỗi <code>INSERT</code> của API phải chờ relay commit: 8–15 giây truy vấn cộng 2,5 giây gửi. Ba relay nối nhau có lúc vượt 50 giây, thành lỗi 1205. Đây là suy luận từ trang locking; hành vi chính xác khi có <code>SKIP LOCKED</code> chưa được kiểm chứng (câu hỏi 25), nên phải xác nhận bằng <code>data_locks</code>.</li>
 <li><strong>Ba relay không nhanh hơn một:</strong> chúng quét cùng một vùng và vướng khoá của nhau.</li>
 <li><strong>Giữ khoá lâu:</strong> gửi từng event 5 ms × 500 = 2,5 giây, trong lúc vẫn giữ khoá và transaction.</li>
 </ul>
 <h4 class="ah">2. Ước lượng</h4>
 <ul>
-<li>Hiện tại: mỗi vòng khoảng 1 giây truy vấn cộng 2,5 giây gửi cộng 0,1 giây nghỉ, cho tối đa 500 event. Khoảng 140 event mỗi giây cho một relay; ba relay vướng nhau nên không cộng lên được. Dưới mức đỉnh 300, nên lag tăng dần.</li>
+<li>Hiện tại: mỗi vòng khoảng 12 giây truy vấn cộng 2,5 giây gửi cộng 0,1 giây nghỉ, cho tối đa 500 event. Khoảng 35 event mỗi giây cho một relay; ba relay vướng nhau nên không cộng lên được. Ở đỉnh 300 event mỗi giây, hàng chờ tăng thêm khoảng 265 event mỗi giây, nên vài phút đỉnh là đủ đẩy tuổi event lên 15 phút. Tám tháng trước, bảng còn nhỏ và câu truy vấn nhanh, nên không ai thấy.</li>
 <li>Sau khi sửa: câu polling có index chỉ đọc vài trăm entry, khoảng vài ms. Gửi theo lô lên broker khoảng 20 ms. Một relay đạt cỡ hàng nghìn event mỗi giây.</li>
 <li>Dọn 80 triệu row bằng <code>DELETE</code> theo lô 5.000 row: 16.000 lô. Mỗi lô giả sử 0,3–0,5 giây cộng nghỉ, tổng vài giờ, và sinh nhiều undo, redo, binlog; replica có thể trễ.</li>
 </ul>
@@ -622,7 +622,7 @@ COMMIT;
 <div class="tablewrap"><table>
 <thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
 <tbody>
-<tr><td>A. Thêm index <code>(sent_at, id)</code> trên bảng hiện tại</td><td>Sửa thẳng câu polling; thêm index là thao tác online</td><td>Dựng index trên 80 triệu row tốn I/O hàng giờ, cho dữ liệu sắp xoá</td></tr>
+<tr><td>A. Thêm index <code>(sent_at, id)</code> trên bảng hiện tại</td><td>Sửa thẳng câu polling; thêm index là thao tác online</td><td>Dựng index trên bảng 25 GB tốn I/O hàng chục phút tới hàng giờ, cho dữ liệu sắp xoá</td></tr>
 <tr><td>B. Xoá theo lô trên bảng hiện tại</td><td>Không đổi code</td><td>Vài giờ ghi nặng; vẫn cần A</td></tr>
 <tr><td>C. Đổi sang bảng mới nhỏ</td><td>Bảng mới có index đúng ngay; bảng cũ chỉ cần xả nốt vài nghìn row chưa gửi rồi bỏ</td><td>Cần một giai đoạn relay đọc cả hai bảng</td></tr>
 <tr><td>D. Đổi bảng cũ sang partition theo ngày</td><td>Dọn bằng drop partition, rất rẻ</td><td>Đổi bảng có sẵn sang partition phải dựng lại cả bảng; khoá chính phải chứa cột partition</td></tr>
@@ -633,7 +633,7 @@ COMMIT;
 <h4 class="ah">4. Đánh đổi và quyết định</h4>
 <p>Điểm mấu chốt: 99,9% bảng là rác. Đừng tốn công dựng index hay xoá từng row cho dữ liệu sắp bỏ. Chuyển sang bảng mới, rồi bỏ bảng cũ.</p>
 <ol class="list">
-<li><strong>Cứu ngay trong ngày:</strong> giảm còn một relay; gửi theo lô lên broker thay vì từng event. Không cần deploy schema.</li>
+<li><strong>Cứu ngay trong ngày, không đổi schema:</strong> thêm điều kiện <code>created_at &gt; NOW() - INTERVAL 1 DAY</code> vào câu polling, để MySQL đi theo index <code>created_at</code> có sẵn và chỉ quét các row gần đây. Xem <code>EXPLAIN</code>; nếu optimizer vẫn quét PRIMARY vì <code>ORDER BY id</code>, thêm <code>FORCE INDEX (created_at)</code>. Trước đó, đếm một lần số row chưa gửi cũ hơn 1 ngày để chắc không bỏ sót. Giảm còn một relay, và gửi theo lô lên broker thay vì từng event.</li>
 <li><strong>Bảng mới <code>outbox_v2</code></strong> có <code>KEY (sent_at, id)</code>. App ghi vào bảng mới (bật cờ). Relay đọc cả hai bảng trong giai đoạn chuyển.</li>
 <li><strong>Xả bảng cũ</strong> bằng index <code>created_at</code> có sẵn, vì các row chưa gửi đều mới: <code>WHERE created_at &gt; NOW() - INTERVAL 1 DAY AND sent_at IS NULL</code>. Khi bảng cũ không còn row chưa gửi, relay thôi đọc nó.</li>
 <li><strong>Bỏ bảng cũ</strong> ngoài giờ cao điểm: <code>RENAME</code> sang tên lưu trữ, giữ vài ngày, rồi <code>DROP</code>.</li>
