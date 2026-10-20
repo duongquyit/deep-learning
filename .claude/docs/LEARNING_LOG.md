@@ -86,6 +86,10 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 | Write-path races (set after write, delete before write, write then delete, version/lease, double delete) and stale fills from replicas | 2 (prov.) | same, §01–§03 | 2026-10-20 | Exercise E38: count stale keys for each write path, with and without replica fills |
 | Cache stampede and mass expiry: single flight, stale-while-revalidate, XFetch, TTL jitter | 2 (prov.) | same, §02 | 2026-10-20 | Exercise E39: recompute queries and p99 at expiry for each strategy |
 | Hit ratio vs database load; Redis eviction policies and `maxmemory` | 2 (prov.) | same, §02 | 2026-10-20 | Exercise E40: hit ratio by cache size and policy under a Zipf workload |
+| MySQL replication pipeline (two-phase commit with binlog, receiver, relay log, parallel applier, commit order) and where lag comes from | 2 (prov.) | [replication-read-your-writes](../topics/replication-read-your-writes/index.html) §02 | 2026-10-20 | Exercise E42: lag shape for one big transaction vs batches, three ways of measuring |
+| Async vs semi-sync (`AFTER_SYNC`, `AFTER_COMMIT`): commit latency, failover data loss, fallback to async on timeout | 2 (prov.) | same, §02–§03 | 2026-10-20 | Exercise E43: commit latency and the timeout fallback when the replica stops |
+| Read-your-writes and monotonic reads: primary window, GTID wait (`session_track_gtids`, `WAIT_FOR_EXECUTED_GTID_SET`), sticky replicas | 2 (prov.) | same, §01–§02, §04 | 2026-10-20 | Exercise E41: stale-read rates by delay and the cost of GTID waits |
+| Measuring replication lag correctly (performance_schema timestamps, heartbeat, limits of `Seconds_Behind_Source`) | 2 (prov.) | same, §02, §04 | 2026-10-20 | Exercise E42; then set up lag alerting on a replica at work |
 
 "(prov.)" = provisional. Every row above rests on one artifact I wrote myself, with no measurement behind it. Week 1 of Month 1 includes a baseline assessment (TECHNICAL_GROWTH.md Section 11) that should confirm or cut these.
 
@@ -123,6 +127,8 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 30. What is the real "index and overhead" factor of the tables at work? Is the capacity page's default of 2 too low for tables with many secondary indexes? Measure with `information_schema.tables`.
 31. When the fill after a miss reads from a replica, how often does the cache keep an old value at the lab's real replica lag, and how long must the second delete wait to remove nearly all of them? Variant of E38.
 32. Under a Zipf workload, how many points of hit ratio does `allkeys-lfu` gain over `allkeys-lru` on Redis 7, and is the gap larger when a job scans rare keys? E40.
+33. During a big transaction, how do heartbeat lag, performance_schema lag and `Seconds_Behind_Source` differ over time? Is applying a 6-million-row update on the replica slower than running it on the primary? E42.
+34. Does `WAIT_FOR_EXECUTED_GTID_SET` accept a fractional timeout on 8.4, and what does it cost the replica when thousands of sessions wait at once? Variant of E41.
 
 ## Pending verification (from the session's own exercise list)
 
@@ -185,8 +191,40 @@ These are written in the page as exercises; none have been run yet.
 - **E40** — Hit ratio for 1%, 5%, 20% cache sizes under Zipf access, `allkeys-lru` vs `allkeys-lfu`, with a scanning job.
 - **Q71–Q76** — The six recall questions in section 08 of the caching page.
 - **C16–C18** — The three real-world cases in section 09 of the caching page (price shown differs from price charged, a 9:00 homepage stampede, revoking access within 5 seconds). Solve in writing before opening the answers.
+- **E41** — Stale reads on a replica at 0–100 ms after a write, idle and under load, and the added wait with GTID waits.
+- **E42** — One 2M-row delete vs 400 batches vs throttled batches: maximum lag by heartbeat, performance_schema and `Seconds_Behind_Source`.
+- **E43** — Semi-sync `AFTER_SYNC` vs async commit latency; replica stopped: first-commit wait and the switch to async.
+- **Q77–Q82** — The six recall questions in section 08 of the replication page.
+- **C19–C21** — The three real-world cases in section 09 of the replication page (orders missing right after checkout, a nightly 40-minute lag, losing 3 seconds of paid orders in a failover). Solve in writing before opening the answers.
 - **Q11–Q16** — The six recall questions in section 08 of the composite-index page (answers are on the page, hidden).
 - **Q1–Q5** — The five check questions at the end of the page (leftmost prefix, `COUNT(*)` and the visibility map, full scan polluting the cache, TOAST, a `sessions` table updated 5,000×/sec). Answer in writing before looking anything up, then verify.
+
+---
+
+## 2026-10-20 — Replication and read-your-writes
+
+**Topic and objective.** Month 5 topic, written ahead as documentation only (Phase 5 of the documentation plan, 3 of 4): how a transaction reaches a MySQL replica, what semi-sync does and does not guarantee, why replicas lag, and how to make users always read their own writes.
+
+**Output.** [topics/replication-read-your-writes/index.html](../topics/replication-read-your-writes/index.html) — 11 sections, including section 09 with cases C19–C21. Widgets: a read-routing simulator (two replicas with different lag; always replica, sticky, primary window, GTID wait, always primary; five reads after a write; stale and backwards reads, primary share, added wait); a pipeline stepper (two-phase commit, binlog, receiver, relay log, applier, replica commit) switchable between async and semi-sync `AFTER_SYNC`; a queueing model of replica lag after one big transaction vs batches. Prediction templates for E41–E43.
+
+**What it covers.**
+
+- Pipeline and 8.4 defaults read from the MySQL 8.4 source: `sync_binlog` 1, `replica_parallel_workers` 4, `replica_parallel_type` `LOGICAL_CLOCK` (deprecated variable), `replica_preserve_commit_order` ON.
+- Semi-sync from the 8.4 manual: `AFTER_SYNC` default, all clients see the transaction after the ack, lossless failover; `AFTER_COMMIT` lets other clients see data a promoted replica may lack; timeout 10,000 ms then fallback to async; ack means written to the relay log, not applied.
+- Lag sources (big transactions, applier capacity, schema changes) and measurement: `Seconds_Behind_Source` caveats from the manual, performance_schema timestamp columns (checked in source), heartbeat table.
+- Read-your-writes: primary window, GTID wait with `session_track_gtids = OWN_GTID` (mysql2 exposes `stateChanges.gtids`, checked in source) and `WAIT_FOR_EXECUTED_GTID_SET`, own-data-from-primary; monotonic reads via sticky replicas; PostgreSQL `remote_apply` as contrast.
+
+**Initial understanding.** TODO — what did I believe about replication before this page? No prior belief was stated in the session.
+
+**Mistakes and misconceptions corrected.** TODO — only I know which. Traps the page writes down: replicas lag only milliseconds; semi-sync makes replica reads fresh; `Seconds_Behind_Source` = 0 means caught up; sticky replicas give read-your-writes; replicas add write capacity; semi-sync never loses data.
+
+**Experiments and results.** None. The widgets are models; E41–E43 need a primary and a replica on the lab.
+
+**Competency level.** Level 2 provisional on four new matrix rows.
+
+**Remaining questions.** Open questions 33 and 34.
+
+**Next step.** Topic 23 of the plan, distributed consistency.
 
 ---
 
