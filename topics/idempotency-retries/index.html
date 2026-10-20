@@ -1,0 +1,1087 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Idempotency và retry: gửi lại mà không trùng</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F2F4F6; --surface:#FFFFFF; --ink:#18203A; --ink-2:#56607A; --ink-3:#8A93A8;
+  --rule:#CCD3DD; --rule-strong:#8C96AB;
+  --struct:#3446B8; --struct-bg:#E6E9FA;            /* cấu trúc index, chrome của trang */
+  --row:#16795F;    --row-bg:#DDF2EA;               /* dữ liệu row thật */
+  --hot:#9A5F00;    --hot-bg:#FCEFD2; --hot-line:#E3A21A;  /* bị ghi, bị chạm, bị lọc */
+  --miss:#B5302B;   --miss-bg:#FBE1DF;              /* đọc từ disk, việc thừa, lỗi */
+  --path:#0B7A8A;   --path-bg:#D8F1F3;              /* đường đi hoặc khoảng đang đọc */
+  --key:#A8327A;    --key-bg:#F8E0EE;               /* con trỏ: PK, TID */
+  --ram:#5B4BB0;    --ram-bg:#E7E3FA;               /* hit trong buffer pool */
+  --grid:rgba(52,70,184,.06);
+  --r-s:4px; --r-m:8px;
+  --sans:"Instrument Sans",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --paper:#0F1320; --surface:#171C2B; --ink:#E6E9F2; --ink-2:#A3ABC0; --ink-3:#6E7790;
+  --rule:#2C3448; --rule-strong:#55607A;
+  --struct:#97A3FF; --struct-bg:#232A55;
+  --row:#5FD0AE;    --row-bg:#123A31;
+  --hot:#F2BE5C;    --hot-bg:#3B2C0E; --hot-line:#E3A21A;
+  --miss:#FF8A84;   --miss-bg:#3E1A1A;
+  --path:#5ED3E0;   --path-bg:#113A40;
+  --key:#F28DC4;    --key-bg:#3E1A2E;
+  --ram:#B7A8FF;    --ram-bg:#2A2350;
+  --grid:rgba(151,163,255,.05);
+}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important;animation:none!important}}
+body{margin:0;color:var(--ink);font:400 17px/1.65 var(--sans);
+  background-color:var(--paper);
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:24px 24px}
+a{color:var(--struct)}
+:focus-visible{outline:2px solid var(--struct);outline-offset:2px}
+
+/* layout */
+.shell{display:grid;grid-template-columns:230px minmax(0,1fr);gap:56px;max-width:1180px;margin:0 auto;padding:0 32px}
+nav.toc{position:sticky;top:0;align-self:start;height:100vh;padding:48px 0;overflow:auto}
+nav.toc p{font-weight:600;margin:0 0 12px;font-size:15px}
+nav.toc ol,.mobile-toc ol{list-style:none;margin:0;padding:0;counter-reset:s}
+nav.toc li,.mobile-toc li{counter-increment:s;margin:0}
+nav.toc a,.mobile-toc a{display:grid;grid-template-columns:28px 1fr;padding:5px 0;color:var(--ink-2);text-decoration:none;font-size:14.5px;line-height:1.4}
+nav.toc a::before,.mobile-toc a::before{content:counter(s,decimal-leading-zero);font:500 12px/1.9 var(--mono);color:var(--ink-3)}
+nav.toc a:hover,nav.toc a.on{color:var(--struct)}
+main{min-width:0;padding:56px 0 120px}
+.prose{max-width:720px}
+section{padding-top:72px}
+section>header{display:grid;grid-template-columns:auto 1fr;gap:0 18px;align-items:baseline;max-width:720px;margin-bottom:12px}
+section>header .num{font:500 15px var(--mono);color:var(--struct);border:1.5px solid var(--struct);border-radius:var(--r-s);padding:2px 7px;transform:translateY(-4px)}
+h1,h2,h3,h4{line-height:1.2;letter-spacing:-.015em;margin:0}
+h1{font-size:clamp(2.3rem,5.4vw,3.9rem);font-weight:700;letter-spacing:-.03em;line-height:1.02;max-width:14ch;margin-bottom:20px}
+.lede{font-size:19px;color:var(--ink-2);max-width:56ch;margin-bottom:28px}
+h2{font-size:clamp(1.6rem,3vw,2.1rem);font-weight:650}
+h3{font-size:1.2rem;font-weight:600;margin:36px 0 8px}
+p{margin:0 0 14px}
+ul,ol.list{margin:0 0 16px;padding-left:22px}
+li{margin:4px 0}
+code{font:0.88em var(--mono);background:var(--struct-bg);color:var(--ink);padding:1px 5px;border-radius:3px}
+pre{font:13.5px/1.6 var(--mono);background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:var(--r-s);padding:14px 16px;overflow-x:auto;margin:0 0 18px;max-width:720px}
+pre code{background:none;padding:0}
+.tablewrap{overflow-x:auto;max-width:720px;margin:0 0 20px}
+table{border-collapse:collapse;width:100%;max-width:720px;margin:0 0 20px;font-size:15px;background:var(--surface)}
+.tablewrap table{margin:0;min-width:560px}
+th,td{text-align:left;padding:9px 12px;border:1px solid var(--rule);vertical-align:top}
+th{font-weight:600;background:var(--struct-bg)}
+
+/* widget frame: styled like a page, header strip = page header */
+.frame{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);margin:22px 0 28px;max-width:920px;overflow:hidden}
+.frame>.ph{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:9px 16px;border-bottom:1px solid var(--rule);background:var(--struct-bg);font-size:14px}
+.frame>.ph strong{font-weight:600}
+.frame>.ph .meta{margin-left:auto;font:500 12.5px var(--mono);color:var(--ink-2)}
+.frame .bd{padding:16px;min-width:0}
+.frame svg{display:block;width:100%;height:auto}
+.st-t{font:600 16px var(--sans);margin:0 0 8px}
+.desc{background:var(--paper);border-radius:var(--r-s);padding:12px 14px;margin-top:12px;min-height:84px;font-size:15.5px;color:var(--ink-2)}
+.desc pre{margin:10px 0 0;font-size:12.5px;border-left-color:var(--rule-strong)}
+.nav{display:flex;gap:8px;margin-top:12px;align-items:center}
+button{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 14px;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--struct);color:var(--struct)}
+button:disabled{opacity:.4;cursor:default}
+button.primary,button[aria-pressed="true"]{background:var(--struct);border-color:var(--struct);color:var(--surface)}
+button.primary:hover:not(:disabled),button[aria-pressed="true"]:hover{color:var(--surface);filter:brightness(1.1)}
+input,select{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 10px}
+input[type=number]{width:84px}
+input[type=range],input[type=checkbox]{accent-color:var(--struct)}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-top:12px}
+.stat{background:var(--paper);border-radius:var(--r-s);padding:8px 12px}
+.stat span{display:block;font-size:13px;color:var(--ink-2)}
+.stat b{font:600 20px var(--sans);font-variant-numeric:tabular-nums}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;color:var(--ink-2);margin-top:12px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:14px;height:14px;border-radius:3px;border:2px solid;display:inline-block}
+.fine{font-size:13.5px;color:var(--ink-2);margin:10px 0 0}  /* chú thích nhỏ dưới widget */
+
+/* svg text */
+.tb{font:600 14px var(--sans)} .t{font:400 13px var(--sans)} .ts{font:400 12px var(--sans)} .tm{font:500 12.5px var(--mono)}
+.lbl{fill:var(--ink-2);font:400 12.5px var(--sans)}
+
+/* callouts */
+.note{border-left:3px solid var(--hot-line);background:var(--hot-bg);padding:12px 16px;border-radius:0 var(--r-s) var(--r-s) 0;margin:18px 0;max-width:720px;font-size:16px}
+.note strong{color:var(--hot)}
+.senior{border:1.5px solid var(--struct);border-radius:var(--r-m);padding:14px 18px;margin:22px 0;max-width:720px;background:var(--surface)}
+.senior h4{font-size:16px;margin-bottom:6px;color:var(--struct)}
+.senior p:last-child,.senior ul:last-child{margin-bottom:0}
+details{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-s);padding:10px 14px;margin:10px 0;max-width:720px}
+details summary{cursor:pointer;font-weight:600}
+details[open] summary{margin-bottom:8px}
+details.answer{background:var(--paper);border-style:dashed;margin:10px 0 0}
+details.answer summary{font-weight:500;color:var(--struct)}
+.tag{display:inline-block;font:500 12px var(--sans);color:var(--ink-2);border:1px solid var(--rule-strong);border-radius:999px;padding:0 8px;margin-right:6px;vertical-align:1px}
+
+/* hero brief: mục tiêu, cần biết trước, trạng thái */
+.brief{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px 24px;background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);padding:14px 18px;max-width:920px;margin:0 0 8px;font-size:15px}
+.brief h4{font-size:14px;color:var(--struct);margin:0 0 4px}
+.brief ul{margin:0;padding-left:18px}
+.brief p{margin:0}
+
+.mobile-toc{display:none}
+@media (max-width:900px){
+  .shell{grid-template-columns:1fr;padding:0 16px;gap:0}
+  nav.toc{display:none}
+  .mobile-toc{display:block;margin-top:20px}
+  main{padding-top:32px}
+  .frame .bd{padding:12px}
+  body{font-size:16px}
+}
+
+
+/* ---- page widgets ---- */
+.n rect{fill:var(--surface);stroke:var(--rule-strong);stroke-width:1}
+.n text{fill:var(--ink)}
+.n.struct rect{fill:var(--struct-bg);stroke:var(--struct)} .n.struct text{fill:var(--struct)}
+.n.row rect{fill:var(--row-bg);stroke:var(--row);stroke-width:1.6} .n.row text{fill:var(--row)}
+.n.hot rect{fill:var(--hot-bg);stroke:var(--hot);stroke-width:2} .n.hot text{fill:var(--hot)}
+.n.miss rect{fill:var(--miss-bg);stroke:var(--miss);stroke-width:2} .n.miss text{fill:var(--miss)}
+.n.key rect{fill:var(--key-bg);stroke:var(--key);stroke-width:2} .n.key text{fill:var(--key)}
+.n.path rect{fill:var(--path-bg);stroke:var(--path);stroke-width:2} .n.path text{fill:var(--path)}
+.n.dim rect{fill:var(--paper);stroke:var(--rule)} .n.dim text{fill:var(--ink-3)}
+.edge{stroke:var(--rule-strong);stroke-width:1.2;fill:none}
+.edge.path{stroke:var(--path);stroke-width:2.2}
+.edge.row{stroke:var(--row);stroke-width:2.2}
+.edge.miss{stroke:var(--miss);stroke-width:2.2;stroke-dasharray:5 4}
+.edge.hot{stroke:var(--hot);stroke-width:2.2;stroke-dasharray:5 4}
+.edge.key{stroke:var(--key);stroke-width:2.2}
+.xmark{stroke:var(--miss);stroke-width:3;stroke-linecap:round}
+.bar{fill:var(--path)} .bar.over{fill:var(--miss)}
+.capline{stroke:var(--row);stroke-width:2;stroke-dasharray:6 4}
+.axis{stroke:var(--rule-strong);stroke-width:1}
+.lg-path{border-color:var(--path);background:var(--path-bg)} .lg-row{border-color:var(--row);background:var(--row-bg)}
+.lg-miss{border-color:var(--miss);background:var(--miss-bg)} .lg-hot{border-color:var(--hot);background:var(--hot-bg)}
+.lg-key{border-color:var(--key);background:var(--key-bg)}
+.lg-bar{border-color:var(--path);background:var(--path)} .lg-over{border-color:var(--miss);background:var(--miss)} .lg-cap{border-color:var(--row);background:transparent;border-style:dashed}
+.calc{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px 14px;margin-bottom:12px}
+.calc label{display:flex;flex-direction:column;gap:4px;font-size:13.5px;color:var(--ink-2)}
+.calc label.chk{flex-direction:row;align-items:center;gap:8px}
+.stat b.bad{color:var(--miss)} .stat b.good{color:var(--row)}
+.mx{width:100%;border-collapse:collapse;font-size:14px;margin:0}
+.mx th,.mx td{padding:7px 9px;text-align:center}
+.mx th:first-child,.mx td:first-child{text-align:left}
+.mx td button{width:100%;font:600 13px var(--sans);padding:5px 6px}
+.mx td button.r1{color:var(--row);border-color:var(--row);background:var(--row-bg)}
+.mx td button.r2{color:var(--miss);border-color:var(--miss);background:var(--miss-bg)}
+.mx td button.r0{color:var(--hot);border-color:var(--hot);background:var(--hot-bg)}
+.mx td button[aria-pressed="true"]{outline:2.5px solid var(--struct);outline-offset:1px}
+.mx td.na{color:var(--ink-3);font-size:13px}
+.trace{font:12.5px/1.6 var(--mono);background:var(--paper);border-radius:var(--r-s);padding:10px 12px;margin:10px 0 0;white-space:pre-wrap}
+/* bài toán thực tế */
+.case{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:0 var(--r-m) var(--r-m) 0;padding:16px 20px;margin:22px 0;max-width:720px}
+.case>h3{margin:0 0 6px;font-size:1.15rem}
+.case .src{font-size:13.5px;color:var(--ink-2);margin:0 0 12px}
+.case dl{margin:0;display:grid;grid-template-columns:104px minmax(0,1fr);gap:8px 16px}
+.case dt{font-weight:600;color:var(--struct);font-size:15px}
+.case dd{margin:0}
+.case dd p:last-child,.case dd ul:last-child{margin-bottom:0}
+.case details{max-width:none;margin:12px 0 0}
+.case details.hint{background:var(--paper)}
+.case details.answer[open]{background:var(--surface)}
+.ah{font-size:15.5px;color:var(--struct);margin:20px 0 6px}
+.answer .tablewrap{max-width:none}
+@media (max-width:900px){.case{padding:14px}.case dl{grid-template-columns:minmax(0,1fr);gap:2px}.case dd{margin-bottom:8px}}
+</style>
+</head>
+<body>
+
+<div class="shell">
+<nav class="toc" aria-label="Mục lục">
+  <p>Idempotency và retry</p>
+  <ol>
+    <li><a href="#s1">Bản chất vấn đề</a></li>
+    <li><a href="#s2">Cơ chế hoạt động</a></li>
+    <li><a href="#s3">Vì sao thiết kế như vậy</a></li>
+    <li><a href="#s4">Ví dụ</a></li>
+    <li><a href="#s5">Thí nghiệm</a></li>
+    <li><a href="#s6">Ảnh hưởng khi chạy production</a></li>
+    <li><a href="#s7">Hiểu lầm thường gặp</a></li>
+    <li><a href="#s8">Câu hỏi ôn tập</a></li>
+    <li><a href="#s9">Bài toán thực tế</a></li>
+    <li><a href="#s10">Câu hỏi còn mở</a></li>
+    <li><a href="#s11">Tài liệu tham khảo</a></li>
+  </ol>
+</nav>
+
+<main>
+<div class="hero">
+<h1>Idempotency và retry: gửi lại mà không trùng</h1>
+<p class="lede">Mạng có thể làm mất request, và cũng có thể làm mất response sau khi server đã làm xong. Client không phân biệt được hai trường hợp này, nên nó phải gửi lại. Bài này giải thích cách làm cho việc gửi lại an toàn: idempotency key ở API, dấu "đã xử lý" ở phía nhận message, và cách thử lại sao cho không tự đánh sập hệ thống.</p>
+<div class="brief">
+  <div><h4>Mục tiêu</h4><ul>
+    <li>Phân biệt được at-most-once, at-least-once và "xử lý đúng một lần", và nói được vì sao mạng không cho "giao đúng một lần".</li>
+    <li>Thiết kế được idempotency key cho một API <code>POST</code>: lưu gì, ở đâu, và trả gì khi hai request cùng key đến cùng lúc.</li>
+    <li>Đặt được dấu "đã xử lý" ở phía nhận message sao cho không xử lý trùng mà cũng không làm mất.</li>
+    <li>Chọn được chính sách thử lại: lỗi nào thử lại, chờ bao lâu, khi nào bỏ cuộc và đưa vào dead-letter queue.</li>
+  </ul></div>
+  <div><h4>Cần biết trước</h4><ul>
+    <li><a href="../concurrency-control-strategies/index.html">Giữ đúng số dư khi ghi đồng thời</a>: câu ghi có điều kiện, kiểm tra số row bị ảnh hưởng.</li>
+    <li><a href="../innodb-locking-deadlock/index.html">Locking và deadlock trong InnoDB</a>: <code>INSERT</code> trùng khoá đặt khoá S và phải chờ.</li>
+  </ul></div>
+  <div><h4>Trạng thái</h4><p>Level 2 (prov.). Nội dung lấy từ bản nháp IETF về header <code>Idempotency-Key</code>, tài liệu Stripe, AWS, manual MySQL 8.4 và mã nguồn BullMQ. Các widget là mô hình, chưa đo (E27–E29).</p></div>
+</div>
+<details class="mobile-toc"><summary>Mục lục</summary><ol><li><a href="#s1">Bản chất vấn đề</a></li><li><a href="#s2">Cơ chế hoạt động</a></li><li><a href="#s3">Vì sao thiết kế như vậy</a></li><li><a href="#s4">Ví dụ</a></li><li><a href="#s5">Thí nghiệm</a></li><li><a href="#s6">Ảnh hưởng khi chạy production</a></li><li><a href="#s7">Hiểu lầm thường gặp</a></li><li><a href="#s8">Câu hỏi ôn tập</a></li><li><a href="#s9">Bài toán thực tế</a></li><li><a href="#s10">Câu hỏi còn mở</a></li><li><a href="#s11">Tài liệu tham khảo</a></li></ol></details>
+</div>
+
+<!-- 1 -->
+<section id="s1">
+<header><span class="num">01</span><h2>Bản chất vấn đề</h2></header>
+<div class="prose">
+<p>App gọi <code>POST /transfers</code> để chuyển 500.000 đồng. Sau 3 giây không thấy response, app báo timeout. Tiền đã chuyển chưa? App không biết. Có ba khả năng: request chưa tới server, server lỗi giữa chừng, hoặc server đã chuyển xong nhưng response bị mất trên đường về. Nhìn từ phía app, cả ba giống hệt nhau.</p>
+<p>Nếu app không gửi lại, trường hợp đầu làm mất giao dịch. Nếu app gửi lại, trường hợp cuối chuyển tiền hai lần. Hai cách gọi tên:</p>
+<ul>
+<li><strong>At-most-once</strong> (nhiều nhất một lần): không gửi lại. Không bao giờ trùng, nhưng có thể mất.</li>
+<li><strong>At-least-once</strong> (ít nhất một lần): gửi lại tới khi có xác nhận. Không bao giờ mất, nhưng có thể trùng.</li>
+</ul>
+<p>Không có cách thứ ba ở tầng mạng. Cách làm đúng là chọn at-least-once, rồi làm cho phía nhận <strong>idempotent</strong>: nhận cùng một yêu cầu nhiều lần thì kết quả vẫn như nhận một lần. Gửi lại cộng với xử lý idempotent cho ra hiệu quả "xử lý đúng một lần".</p>
+<p>Hình dung bấm nút thang máy. Bấm năm lần thì thang vẫn chỉ đến một lần, vì nút chỉ ghi nhận "có người chờ ở tầng 3". Đó là idempotent. Ngược lại, mỗi lần bấm nút chuyển tiền tạo một giao dịch mới. Chọn kịch bản lỗi dưới đây, bật hoặc tắt việc gửi lại và idempotency key, rồi bấm Tiếp.</p>
+</div>
+<div class="frame" id="net"></div>
+</section>
+
+<!-- 2 -->
+<section id="s2">
+<header><span class="num">02</span><h2>Cơ chế hoạt động</h2></header>
+<div class="prose">
+<h3>Thao tác nào vốn đã idempotent</h3>
+<p>Ý chính: thao tác đặt trạng thái thì idempotent; thao tác cộng dồn hoặc tạo mới thì không. Trước khi thêm bảng hay key, hãy xem có viết lại được thao tác thành dạng đặt trạng thái không.</p>
+<ul>
+<li><code>UPDATE orders SET status = 'paid' WHERE id = 7</code>: chạy hai lần vẫn là <code>'paid'</code>. Idempotent.</li>
+<li><code>UPDATE accounts SET balance = balance - 500 WHERE id = 42</code>: chạy hai lần trừ hai lần. Không idempotent.</li>
+<li><code>INSERT INTO ledger (...)</code> với id tự tăng: chạy hai lần tạo hai row. Không idempotent.</li>
+<li><code>INSERT</code> với khoá do client sinh, cột có <code>UNIQUE</code>: lần hai bị từ chối vì trùng khoá. Trở thành idempotent.</li>
+</ul>
+<p>Theo chuẩn HTTP (RFC 9110), <code>GET</code>, <code>PUT</code> và <code>DELETE</code> được định nghĩa là idempotent; <code>POST</code> và <code>PATCH</code> thì không. Định nghĩa này là lời hứa của API, không phải điều server tự có. Một <code>PUT</code> viết sai vẫn có thể cộng dồn.</p>
+</div>
+
+<div class="prose">
+<h3>Idempotency key ở API</h3>
+<p>Ý chính: client sinh một khoá ngẫu nhiên cho mỗi thao tác, và gửi lại đúng khoá đó mỗi lần thử lại. Server lưu khoá cùng kết quả. Gặp lại khoá thì trả lại kết quả đã lưu, không làm lại.</p>
+<p>Khoá thường là một UUID, gửi trong header <code>Idempotency-Key</code>. Server lưu một row cho mỗi khoá, gồm: chủ sở hữu (user hoặc API key), khoá, dấu vân tay của body request (fingerprint, ví dụ hash SHA-256), trạng thái, và response đã trả. Cặp (chủ sở hữu, khoá) có <code>UNIQUE</code>.</p>
+<p>Khi việc cần làm nằm trong cùng database, cách chắc nhất là ghi row khoá và kết quả nghiệp vụ trong <strong>cùng một transaction</strong>. Hoặc cả hai cùng có, hoặc cả hai cùng không. Bấm qua từng bước để xem hai request trùng khoá đến cùng lúc.</p>
+</div>
+<div class="frame" id="keyStep"></div>
+<div class="note"><strong>Lỗi hay gặp:</strong> sinh idempotency key mới ở mỗi lần thử lại, ví dụ đặt <code>uuid()</code> bên trong hàm gọi API có retry. Mỗi lần thử có khoá khác nhau, nên server coi là ba thao tác khác nhau. Quy tắc: khoá được sinh một lần khi người dùng bắt đầu thao tác (lúc bấm nút, lúc tạo bản nháp), và đi theo thao tác qua mọi lần thử.</div>
+<div class="prose">
+<p><strong>Khi việc cần làm nằm ngoài database</strong>, ví dụ gọi cổng thanh toán, không có một transaction nào bao được cả hai. Server phải ghi row khoá với trạng thái <code>processing</code> và commit trước, rồi mới gọi ra ngoài. Request trùng khoá đến lúc này nhận <code>409 Conflict</code>. Nếu server chết giữa chừng, row kẹt ở <code>processing</code>; cần một job dọn và hỏi lại phía ngoài. Tốt nhất là truyền tiếp chính khoá đó xuống phía ngoài (Stripe nhận <code>Idempotency-Key</code>), để lần gọi lại cũng không bị trùng ở đó.</p>
+</div>
+
+<div class="prose">
+<h3>Dấu "đã xử lý" ở phía nhận message</h3>
+<p>Ý chính: hàng đợi gần như luôn giao at-least-once, nên consumer sẽ nhận trùng. Dấu "đã xử lý" phải được ghi trong cùng transaction với kết quả. Ghi trước hay sau trong transaction riêng đều hỏng, chỉ hỏng theo hai hướng khác nhau.</p>
+<p>Consumer nhận message, xử lý, rồi báo cho hàng đợi là đã xong (ack). Nếu consumer chết trước khi ack, hàng đợi giao lại message. Bảng <code>processed_messages</code> với <code>message_id</code> là khoá chính giúp nhận ra lần giao lại. Câu hỏi là ghi row này lúc nào. Chọn một ô trong bảng để xem diễn biến: mỗi ô là một cách ghi cùng một chỗ consumer chết, sau đó message được giao lại và chạy hết.</p>
+</div>
+<div class="frame" id="dedup">
+  <div class="ph"><strong>Consumer chết ở đâu thì kết quả xảy ra mấy lần</strong><span class="meta" id="ddMeta"></span></div>
+  <div class="bd">
+    <div class="tablewrap" style="margin:0"><table class="mx" id="ddTable"></table></div>
+    <div class="trace" id="ddTrace" aria-live="polite"></div>
+    <div class="desc" aria-live="polite" id="ddDesc"></div>
+    <div class="legend"><span><i class="lg-row"></i>đúng 1 lần</span><span><i class="lg-miss"></i>2 lần (trùng)</span><span><i class="lg-hot"></i>0 lần (mất)</span></div>
+    <p class="fine">Mỗi ô chạy thật một mô hình nhỏ: lần giao đầu chạy tới điểm chết, hàng đợi giao lại, lần hai chạy hết. "Kết quả" là thao tác nghiệp vụ, ví dụ cộng điểm thưởng. Chưa đo (E28).</p>
+  </div>
+</div>
+<div class="note"><strong>Lỗi hay gặp:</strong> dùng Redis <code>SET message_id NX</code> làm dấu, còn kết quả ghi vào MySQL. Hai hệ thống không chung transaction, nên đây chính là cách "ghi dấu trước, transaction riêng": consumer chết sau khi đặt dấu và trước khi ghi MySQL thì message bị bỏ qua mãi mãi. Quy tắc: dấu nằm cùng chỗ với kết quả. Nếu không thể, làm cho chính kết quả idempotent (khoá tự nhiên, <code>UNIQUE</code>, câu ghi đặt trạng thái).</div>
+
+<div class="prose">
+<h3>Thử lại: chờ bao lâu</h3>
+<p>Ý chính: thử lại ngay lập tức, hoặc chờ theo luỹ thừa mà không có ngẫu nhiên, làm mọi client cùng quay lại một lúc. Thêm ngẫu nhiên (jitter) trải các lần thử ra theo thời gian, nên server hồi phục nhanh hơn.</p>
+<p>Chờ theo luỹ thừa (exponential backoff) nghĩa là lần thử thứ <em>n</em> chờ <code>base × 2<sup>n−1</sup></code>, có trần <code>cap</code>. Nếu 200 client cùng lỗi ở một thời điểm, cả 200 cùng chờ 1, rồi cùng chờ 2, rồi cùng chờ 4. Chúng vẫn dồn thành từng đợt. Full jitter chọn thời gian chờ ngẫu nhiên trong khoảng từ 0 tới giá trị luỹ thừa đó. Equal jitter giữ một nửa cố định và ngẫu nhiên nửa còn lại.</p>
+<p>Mô phỏng dưới đây: server ngừng một lúc, rồi hồi phục với sức chứa cố định mỗi khe thời gian. Request vượt sức chứa thì lỗi và phải thử lại.</p>
+</div>
+<div class="frame" id="storm">
+  <div class="ph"><strong>Thử lại sau sự cố: request tới server theo thời gian</strong><span class="meta" id="smMeta"></span></div>
+  <div class="bd">
+    <div class="calc">
+      <label>Cách chờ<select id="smS">
+        <option value="now">Thử lại ngay</option>
+        <option value="exp" selected>Luỹ thừa, không jitter</option>
+        <option value="full">Luỹ thừa, full jitter</option>
+        <option value="equal">Luỹ thừa, equal jitter</option>
+      </select></label>
+      <label>Số client<input id="smN" type="number" min="10" max="1000" value="200"></label>
+      <label>Sức chứa mỗi khe<input id="smC" type="number" min="1" max="500" value="25"></label>
+      <label>Server ngừng (khe)<input id="smD" type="number" min="0" max="30" value="4"></label>
+      <label>Tối đa số lần thử<input id="smM" type="number" min="1" max="20" value="8"></label>
+    </div>
+    <svg id="smSvg" viewBox="0 0 680 220" role="img" aria-label="Biểu đồ số request tới server trong mỗi khe thời gian"></svg>
+    <div class="stats" id="smStats"></div>
+    <div class="desc" aria-live="polite" id="smDesc"></div>
+    <div class="nav"><button id="smSeed">Chạy lại với số ngẫu nhiên khác</button></div>
+    <div class="legend"><span><i class="lg-bar"></i>request được phục vụ</span><span><i class="lg-over"></i>request bị từ chối, phải thử lại</span><span><i class="lg-cap"></i>sức chứa</span></div>
+    <p class="fine">base = 1 khe, cap = 32 khe. Khe 0 là lúc mọi client gặp lỗi lần đầu. Mô hình dựa trên bài "Exponential Backoff And Jitter" của AWS. Ở mô hình này, equal jitter thường cần ít lần gọi hơn full jitter; bài AWS dùng mô hình khác (nhiều client tranh một tài nguyên) và thấy ngược lại. Chưa đo (E29).</p>
+  </div>
+</div>
+
+<div class="prose">
+<h3>Thử lại cái gì, và khi nào bỏ cuộc</h3>
+<p>Ý chính: chỉ thử lại lỗi tạm thời, và chỉ thử lại thao tác idempotent. Sau một số lần, đưa việc sang dead-letter queue để người xem, thay vì thử mãi.</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Lỗi</th><th>Thử lại?</th><th>Ghi chú</th></tr></thead>
+<tbody>
+<tr><td>Timeout, mất kết nối</td><td>Có, nếu idempotent</td><td>Không biết phía kia đã làm chưa: chính là lý do cần idempotency key</td></tr>
+<tr><td><code>503</code>, <code>429</code></td><td>Có</td><td>Tôn trọng header <code>Retry-After</code> nếu có</td></tr>
+<tr><td><code>500</code></td><td>Có, ít lần</td><td>Có thể là bug; thử lại mãi chỉ nhân bản tải</td></tr>
+<tr><td><code>400</code>, <code>422</code>, <code>404</code></td><td>Không</td><td>Gửi lại y nguyên vẫn sai</td></tr>
+<tr><td><code>409</code> do trùng idempotency key đang chạy</td><td>Có, sau một lúc</td><td>Request gốc đang chạy; lần sau sẽ nhận kết quả của nó</td></tr>
+<tr><td>MySQL 1213 (deadlock), 1205 (chờ khoá quá lâu)</td><td>Có, chạy lại cả transaction</td><td>Xem trang locking</td></tr>
+<tr><td>MySQL 1062 (trùng khoá)</td><td>Không</td><td>Thường là dấu hiệu đã xử lý rồi: đọc lại kết quả</td></tr>
+</tbody></table></div>
+<div class="prose">
+<p><strong>Dead-letter queue</strong> (DLQ) là nơi chứa message đã thử hết số lần mà vẫn lỗi. Nó tách message "độc" (poison message, lỗi mãi vì dữ liệu sai) ra khỏi luồng chính, để các message khác không bị kẹt sau nó. DLQ chỉ có ích khi có người nhìn vào: cần cảnh báo khi DLQ có message mới, và cần cách đưa message trở lại hàng đợi (redrive) sau khi sửa lỗi. Vì message có thể được đưa lại, consumer càng phải idempotent.</p>
+</div>
+</section>
+
+<!-- 3 -->
+<section id="s3">
+<header><span class="num">03</span><h2>Vì sao thiết kế như vậy</h2></header>
+<div class="prose">
+<p><strong>Vì sao không có "giao đúng một lần"?</strong> Bên gửi chỉ biết bên nhận đã làm xong khi nhận được xác nhận. Xác nhận cũng đi qua mạng và cũng có thể mất. Mất xác nhận thì bên gửi phải chọn: gửi lại (có thể trùng) hoặc thôi (có thể mất). Không có lựa chọn thứ ba. Vì vậy các hệ thống nói "exactly-once" thực ra là at-least-once cộng với loại trùng ở một phạm vi nhất định. Ví dụ, SQS FIFO loại trùng các lần gửi cùng mã trong 5 phút; gửi lại sau 5 phút vẫn trùng, và việc consumer xử lý trùng vẫn là chuyện của consumer.</p>
+<p><strong>Vì sao lưu cả response, không chỉ đánh dấu "đã làm"?</strong> Client gửi lại để biết kết quả. Nếu server chỉ trả "đã xử lý rồi", client không biết giao dịch có id gì, số dư còn bao nhiêu. Stripe lưu mã trạng thái và body của lần đầu, và trả lại y nguyên, kể cả khi lần đầu là lỗi 500.</p>
+<p><strong>Vì sao so fingerprint?</strong> Để bắt lỗi của client dùng lại khoá cho một thao tác khác. Cùng khoá mà body khác thì trả lỗi, không trả kết quả cũ, vì kết quả cũ không phải câu trả lời cho request này.</p>
+<p><strong>Vì sao khoá có hạn dùng?</strong> Bảng khoá lớn lên theo số request. Giữ mãi thì tốn chỗ; xoá sớm quá thì một lần gửi lại muộn thành thao tác mới. Thời hạn phải dài hơn khoảng thời gian client còn có thể gửi lại.</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th></th><th>Bản nháp IETF <code>Idempotency-Key</code></th><th>Stripe (API v1)</th></tr></thead>
+<tbody>
+<tr><td>Định dạng khoá</td><td>Khuyên dùng UUID hoặc chuỗi ngẫu nhiên tương tự</td><td>Khuyên dùng UUID v4; tối đa 255 ký tự</td></tr>
+<tr><td>Thiếu khoá ở API bắt buộc</td><td><code>400</code></td><td>Không bắt buộc</td></tr>
+<tr><td>Cùng khoá, body khác</td><td><code>422</code></td><td>Báo lỗi</td></tr>
+<tr><td>Cùng khoá, request gốc đang chạy</td><td><code>409</code></td><td>Lỗi xung đột, không lưu kết quả, có thể thử lại</td></tr>
+<tr><td>Thời hạn</td><td>Server tự định và công bố</td><td>Có thể bị xoá sau ít nhất 24 giờ</td></tr>
+<tr><td>Trạng thái</td><td>Bản nháp, đã hết hạn (bản 07, 10/2025)</td><td>Đang dùng</td></tr>
+</tbody></table></div>
+<div class="prose"><p><strong>Vì sao cần jitter?</strong> Theo phân tích của AWS, chờ luỹ thừa mà không có jitter tốn nhiều công và nhiều thời gian nhất, vì các client vẫn đồng bộ với nhau. Full jitter giảm tổng số lần gọi nhiều nhất. Jitter không thay đổi bản chất: càng nhiều client tranh nhau thì tổng công càng tăng nhanh. Giới hạn số lần thử và giới hạn tỉ lệ request là thử lại (retry budget) vẫn cần.</p></div>
+</section>
+
+<!-- 4 -->
+<section id="s4">
+<header><span class="num">04</span><h2>Ví dụ</h2></header>
+<div class="prose"><p>Viết theo manual MySQL 8.4, API mysql2 và BullMQ; chưa chạy trên lab.</p><h3>Bảng khoá và bảng dấu</h3></div>
+<pre><code>CREATE TABLE idempotency_keys (
+  owner_id      BIGINT       NOT NULL,
+  idem_key      VARCHAR(255) NOT NULL,
+  fingerprint   BINARY(32)   NOT NULL,          -- SHA-256 của body
+  status_code   SMALLINT     NULL,
+  response_body JSON         NULL,
+  created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (owner_id, idem_key),
+  KEY idx_created (created_at)                  -- để job dọn khoá hết hạn
+);
+
+CREATE TABLE processed_messages (
+  message_id   VARCHAR(64) PRIMARY KEY,
+  processed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);</code></pre>
+
+<div class="prose"><h3>API: khoá và kết quả trong một transaction</h3></div>
+<pre><code>async function transfer(ownerId: number, key: string, body: TransferBody) {
+  const fp = sha256(canonicalJson(body));
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    try {
+      // Nếu một transaction khác đang giữ cùng khoá, câu này chờ tới khi nó xong.
+      await conn.execute(
+        'INSERT INTO idempotency_keys (owner_id, idem_key, fingerprint) VALUES (?, ?, ?)',
+        [ownerId, key, fp]);
+    } catch (e: any) {
+      if (e.errno !== 1062) throw e;              // ER_DUP_ENTRY: khoá đã có
+      await conn.rollback();
+      const [rows] = await pool.execute&lt;RowDataPacket[]&gt;(
+        'SELECT fingerprint, status_code, response_body FROM idempotency_keys WHERE owner_id = ? AND idem_key = ?',
+        [ownerId, key]);
+      if (!rows[0].fingerprint.equals(fp)) return { status: 422, body: { title: 'Idempotency-Key is already used' } };
+      return { status: rows[0].status_code, body: rows[0].response_body };   // trả lại y nguyên
+    }
+    const result = await doTransfer(conn, body);   // UPDATE có điều kiện + INSERT ledger
+    await conn.execute(
+      'UPDATE idempotency_keys SET status_code = ?, response_body = ? WHERE owner_id = ? AND idem_key = ?',
+      [201, JSON.stringify(result), ownerId, key]);
+    await conn.commit();
+    return { status: 201, body: result };
+  } catch (e) {
+    await conn.rollback();
+    throw e;
+  } finally {
+    conn.release();
+  }
+}</code></pre>
+<p class="prose">Ở cách này, lỗi nghiệp vụ (không đủ tiền) làm rollback cả row khoá, nên lần gửi lại sẽ chạy lại từ đầu. Nếu muốn lần gửi lại nhận đúng lỗi cũ, hãy lưu cả response lỗi: ghi row khoá với mã 422 rồi commit, thay vì rollback.</p>
+
+<div class="prose"><h3>Consumer: dấu và kết quả trong một transaction</h3></div>
+<pre><code>async function handle(msg: { id: string; userId: number; points: number }) {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [r] = await conn.execute&lt;ResultSetHeader&gt;(
+      'INSERT IGNORE INTO processed_messages (message_id) VALUES (?)', [msg.id]);
+    if (r.affectedRows === 0) { await conn.rollback(); return; }   // đã xử lý: chỉ cần ack
+    await conn.execute('UPDATE users SET points = points + ? WHERE id = ?', [msg.points, msg.userId]);
+    await conn.commit();
+  } catch (e) { await conn.rollback(); throw e; } finally { conn.release(); }
+  // ack chỉ sau khi commit; chết ở giữa thì lần giao lại thấy dấu và bỏ qua
+}</code></pre>
+<p class="prose"><code>INSERT IGNORE</code> ở đây gọn, nhưng nó biến cả các lỗi khác (dữ liệu bị cắt, NULL sai chỗ) thành cảnh báo. Với bảng chỉ có một cột khoá thì chấp nhận được; với bảng khác nên bắt riêng lỗi 1062.</p>
+
+<div class="prose"><h3>Thử lại với full jitter</h3></div>
+<pre><code>async function withRetry&lt;T&gt;(fn: () =&gt; Promise&lt;T&gt;, isRetryable: (e: unknown) =&gt; boolean,
+                            { attempts = 5, base = 100, cap = 5_000 } = {}) {
+  for (let n = 1; ; n++) {
+    try { return await fn(); }
+    catch (e) {
+      if (n &gt;= attempts || !isRetryable(e)) throw e;
+      const ceiling = Math.min(cap, base * 2 ** (n - 1));
+      await sleep(Math.random() * ceiling);          // full jitter
+    }
+  }
+}
+
+// BullMQ: delay = 2^(attemptsMade-1) × delay; jitter 1 = full jitter, 0.5 ≈ equal jitter
+await queue.add('import-row', data, {
+  jobId: `import-${fileId}-${rowNo}`,   // không dùng ':'; trùng jobId khi job còn tồn tại thì không thêm
+  attempts: 5,
+  backoff: { type: 'exponential', delay: 1_000, jitter: 1 },
+});</code></pre>
+<p class="prose">Công thức backoff của BullMQ đọc từ <code>dist/cjs/classes/backoffs.js</code> (bản 6.3.17). <code>jobId</code> chỉ chặn trùng khi job cũ còn trong Redis; nếu đã bị xoá bởi <code>removeOnComplete</code> thì thêm lại được. <code>jobId</code> không được chứa dấu <code>:</code>: bản 6.3.17 báo lỗi <code>Custom Id cannot contain :</code> (trừ dạng đúng ba phần, giữ lại cho repeatable job cũ).</p>
+</section>
+
+<!-- 5 -->
+<section id="s5">
+<header><span class="num">05</span><h2>Thí nghiệm</h2></header>
+<div class="prose"><p>Chạy trên lab MySQL 8.4 với một service Node nhỏ. Viết dự đoán trước. E28 là phần "test cho xử lý trùng và thử lại" trong deliverable của Month 3.</p></div>
+<details><summary>E27. Hai và mười request cùng idempotency key</summary>
+<p><strong>Câu hỏi.</strong> Gửi 2, rồi 10 request <code>POST /transfers</code> cùng khoá, cùng body, cùng lúc, vào hàm ở phần 04. Có bao nhiêu row ledger, mỗi request nhận mã gì? Trong lúc request đầu đang chạy, <code>data_locks</code> cho thấy các request sau đang chờ khoá gì? Nếu request đầu bị buộc rollback (không đủ tiền), các request còn lại có deadlock không?</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e27/prediction.md</code></p>
+<p><strong>Chạy.</strong> Thêm <code>SLEEP(2)</code> giả lập vào <code>doTransfer</code>, gọi bằng <code>Promise.all</code>; một session khác đọc <code>performance_schema.data_locks</code>.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+<details><summary>E28. Giết consumer ở từng điểm</summary>
+<p><strong>Câu hỏi.</strong> Với bốn cách ghi dấu ở phần 02 và ba điểm chết, kết quả nghiệp vụ xảy ra mấy lần sau khi message được giao lại? Có khớp với bảng trong widget không?</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e28/prediction.md</code></p>
+<p><strong>Chạy.</strong> Consumer đọc biến môi trường <code>CRASH_AT</code> và gọi <code>process.exit(1)</code> ở đúng điểm đó; một script chạy lại consumer và đếm <code>points</code>.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+<details><summary>E29. Bão thử lại</summary>
+<p><strong>Câu hỏi.</strong> 200 client cùng gặp lỗi khi endpoint ngừng 2 giây, sau đó endpoint chỉ phục vụ được 250 request mỗi giây. Với thử lại ngay, luỹ thừa không jitter, và full jitter: tổng số lần gọi, thời điểm client cuối cùng thành công, và đỉnh request mỗi giây là bao nhiêu? So với widget phần 02.</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e29/prediction.md</code></p>
+<p><strong>Chạy.</strong> Một endpoint giới hạn tốc độ bằng token bucket, một script Node tạo 200 client dùng <code>withRetry</code>, ghi thời điểm từng lần gọi.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+</section>
+
+<!-- 6 -->
+<section id="s6">
+<header><span class="num">06</span><h2>Ảnh hưởng khi chạy production</h2></header>
+<div class="prose">
+<h3>Khi nào dùng gì</h3>
+<ul>
+<li>Mọi API tạo hoặc thay đổi tiền, đơn hàng, tồn kho: nhận <code>Idempotency-Key</code>. Client di động và client gọi qua mạng không ổn định nên gửi khoá mặc định.</li>
+<li>Thao tác viết được dưới dạng đặt trạng thái hoặc có khoá tự nhiên (<code>order_id</code>, số dòng trong file nhập): dùng <code>UNIQUE</code> trên khoá đó, không cần bảng khoá riêng.</li>
+<li>Consumer của hàng đợi: luôn giả định nhận trùng. Ghi dấu cùng transaction với kết quả.</li>
+<li>Gọi dịch vụ ngoài có hỗ trợ idempotency key: truyền khoá của mình xuống, không sinh khoá mới.</li>
+</ul>
+<h3>Cái giá</h3>
+<ul>
+<li>Thêm một row và một index cho mỗi request ghi; thêm job dọn khoá hết hạn.</li>
+<li>Request trùng khoá đến cùng lúc phải chờ nhau (cách cùng transaction) hoặc nhận <code>409</code> (cách commit trước).</li>
+<li>Thử lại nhân tải lên dịch vụ đang yếu. Mỗi tầng tự thử lại 3 lần thì 3 tầng thành 27 lần gọi tới tầng dưới cùng.</li>
+</ul>
+<h3>Nhận ra trên production bằng gì</h3>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Triệu chứng</th><th>Xem ở đâu</th></tr></thead>
+<tbody>
+<tr><td>Khách bị trừ tiền hai lần</td><td>Ledger: hai row cùng người, cùng số tiền, cách nhau vài giây; log có timeout ở client cùng lúc</td></tr>
+<tr><td>Tải tăng vọt ngay sau khi dịch vụ phục hồi</td><td>Request mỗi giây theo từng giây, tách theo lần thử (header hoặc log ghi số lần thử)</td></tr>
+<tr><td>Tỉ lệ thử lại cao</td><td>Metric: số lần thử trên mỗi request thành công; số request nhận <code>409</code> do trùng khoá</td></tr>
+<tr><td>Message không bao giờ được xử lý</td><td>Kích thước DLQ, tuổi của message cũ nhất trong DLQ; dấu "đã xử lý" có mà kết quả không có</td></tr>
+<tr><td>Bảng khoá phình to</td><td>Số row theo <code>created_at</code>; job dọn có chạy không</td></tr>
+</tbody></table></div>
+<div class="senior"><h4>Góc nhìn senior: chỉ thử lại ở một tầng</h4><p>Khi client, API gateway, service và driver database cùng có retry, một lỗi nhỏ ở tầng dưới thành hàng chục lần gọi. Senior quyết định tầng nào được thử lại (thường là tầng gần người dùng nhất, có idempotency key), các tầng khác trả lỗi nhanh. Kèm theo một retry budget: ví dụ số lần thử lại không vượt 10% số request mới trong cùng khoảng thời gian. Khi vượt, ngừng thử lại và trả lỗi, vì lúc đó thử lại chỉ làm sự cố dài thêm.</p></div>
+<div class="prose">
+<h3>Checklist khi review một API hoặc consumer</h3>
+<ul>
+<li>Gọi hai lần với cùng input thì có tạo hai kết quả không? Nếu có, idempotency key hoặc khoá tự nhiên nằm ở đâu?</li>
+<li>Khoá có được sinh một lần cho mỗi thao tác, không phải mỗi lần thử?</li>
+<li>Khoá và kết quả có cùng transaction không? Nếu không, trạng thái <code>processing</code> bị kẹt được dọn thế nào?</li>
+<li>Cùng khoá mà body khác thì trả gì?</li>
+<li>Consumer ghi dấu ở đâu so với kết quả? Ack sau commit?</li>
+<li>Retry chỉ cho lỗi tạm thời? Có trần số lần, có jitter, có DLQ và cảnh báo?</li>
+</ul>
+</div>
+</section>
+
+<!-- 7 -->
+<section id="s7">
+<header><span class="num">07</span><h2>Hiểu lầm thường gặp</h2></header>
+<div class="prose"><ul>
+<li><strong>Hiểu lầm:</strong> hàng đợi "exactly-once" thì consumer không cần idempotent. <strong>Vì sao sai:</strong> các bảo đảm đó chỉ loại trùng trong một phạm vi (một khoảng thời gian, một phiên producer); consumer chết trước khi ack vẫn nhận lại. <strong>Quy tắc:</strong> consumer luôn idempotent.</li>
+<li><strong>Hiểu lầm:</strong> timeout nghĩa là server chưa làm. <strong>Vì sao sai:</strong> server có thể đã commit, chỉ response bị mất. <strong>Quy tắc:</strong> timeout là "không biết", và chỉ được thử lại khi thao tác idempotent.</li>
+<li><strong>Hiểu lầm:</strong> sinh khoá mới trong mỗi lần thử. <strong>Vì sao sai:</strong> mỗi lần thử thành một thao tác mới (<a href="#s2">phần 02</a>). <strong>Quy tắc:</strong> khoá gắn với thao tác của người dùng.</li>
+<li><strong>Hiểu lầm:</strong> ghi dấu "đã xử lý" trước để chắc chắn không trùng. <strong>Vì sao sai:</strong> chết sau khi ghi dấu và trước khi xử lý thì message mất. <strong>Quy tắc:</strong> dấu và kết quả cùng một transaction.</li>
+<li><strong>Hiểu lầm:</strong> backoff luỹ thừa là đủ. <strong>Vì sao sai:</strong> không có jitter thì các client vẫn quay lại cùng lúc. <strong>Quy tắc:</strong> luỹ thừa có trần, có jitter, có giới hạn số lần.</li>
+<li><strong>Hiểu lầm:</strong> lỗi nào cũng nên thử lại. <strong>Vì sao sai:</strong> lỗi 4xx gửi lại vẫn sai, và lỗi 500 do bug thì thử lại chỉ nhân tải. <strong>Quy tắc:</strong> chỉ thử lại lỗi tạm thời.</li>
+</ul></div>
+</section>
+
+<!-- 8 -->
+<section id="s8">
+<header><span class="num">08</span><h2>Câu hỏi ôn tập</h2></header>
+<p class="prose">Viết ngày 2026-10-20. Đánh số Q47 đến Q52.</p>
+<details><summary><span class="tag">Giải thích</span>Q47. Ba khả năng sau timeout</summary>
+<p>Client gửi <code>POST /transfers</code> và nhận timeout. Kể ba điều có thể đã xảy ra, và với mỗi điều, việc gửi lại không có idempotency key dẫn tới gì?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Request mất trước khi tới server: gửi lại thì chuyển đúng một lần. Server lỗi trước khi commit: gửi lại thì chuyển đúng một lần. Server đã commit nhưng response mất: gửi lại thì chuyển hai lần. Client không phân biệt được ba trường hợp, nên chỉ có idempotency key mới làm việc gửi lại an toàn trong cả ba.</p></details></details>
+<details><summary><span class="tag">Dự đoán</span>Q48. Hai request cùng khoá</summary>
+<p>Theo hàm <code>transfer</code> ở phần 04, R1 và R2 cùng khoá đến cách nhau 10 ms; <code>doTransfer</code> mất 200 ms. R2 làm gì trong 200 ms đó, và cuối cùng nhận gì?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>R2 chạy <code>INSERT</code> vào <code>idempotency_keys</code>, gặp entry trùng mà R1 chưa commit, nên đặt khoá S và chờ. Khi R1 commit, R2 nhận lỗi 1062, rollback, đọc row khoá và trả lại đúng response 201 mà R1 đã lưu. Chỉ có một lần chuyển tiền.</p></details></details>
+<details><summary><span class="tag">Chẩn đoán</span>Q49. Điểm thưởng bị mất</summary>
+<p>Consumer cộng điểm dùng Redis <code>SET msg:{id} 1 NX EX 86400</code> để chống trùng, rồi mới ghi MySQL. Đối soát thấy vài khách thiếu điểm, đúng vào những lúc pod bị khởi động lại. Vì sao?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Đây là cách "ghi dấu trước, transaction riêng". Pod chết sau khi Redis đã có dấu và trước khi MySQL commit. Hàng đợi giao lại message, consumer thấy dấu và bỏ qua: điểm mất. Sửa: chuyển dấu vào bảng MySQL và ghi cùng transaction với việc cộng điểm.</p></details></details>
+<details><summary><span class="tag">Giải thích</span>Q50. Vì sao jitter</summary>
+<p>500 client cùng lỗi lúc 10:00:00. Tất cả dùng backoff luỹ thừa 1 s, 2 s, 4 s, không jitter. Điều gì xảy ra với server lúc 10:00:01, 10:00:03, 10:00:07? Full jitter thay đổi gì?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Không jitter: cả 500 cùng quay lại ở mỗi mốc. Server nhận đúng 500 request ở 10:00:01, phục vụ được một phần, phần còn lại lại cùng quay lại ở 10:00:03, và cứ thế. Mỗi đợt là một đỉnh tải. Full jitter chọn thời gian chờ ngẫu nhiên trong [0, 1 s], [0, 2 s], [0, 4 s], nên các lần thử trải đều, gần với sức chứa hơn, và tổng số lần gọi giảm.</p></details></details>
+<details><summary><span class="tag">Dự đoán</span>Q51. Retry nhân lên qua các tầng</summary>
+<p>Mobile app thử 3 lần, gateway thử 3 lần, service A thử 3 lần khi gọi service B. B chết hẳn. Một lần bấm nút tạo ra bao nhiêu request tới B?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>3 × 3 × 3 = 27 request tới B. Với 1.000 người dùng bấm cùng lúc là 27.000 request vào một service đang chết. Cách sửa: chỉ một tầng thử lại, các tầng khác trả lỗi nhanh, và có retry budget.</p></details></details>
+<details><summary><span class="tag">Chẩn đoán</span>Q52. Khoá cũ, body mới</summary>
+<p>Sau một bản cập nhật app, nhiều request nhận <code>422 Idempotency-Key is already used</code>. Log cho thấy cùng khoá, nhưng số tiền khác. Nguyên nhân có thể là gì?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>App dùng lại khoá cho một thao tác khác, ví dụ khoá được lưu theo màn hình thay vì theo lần bấm, nên lần chuyển thứ hai trên cùng màn hình gửi lại khoá cũ với số tiền mới. Server so fingerprint, thấy body khác và từ chối đúng. Sửa ở app: sinh khoá mới cho mỗi thao tác mới của người dùng, giữ khoá đó qua các lần thử của thao tác ấy.</p></details></details>
+</section>
+
+<!-- 9 -->
+<section id="s9">
+<header><span class="num">09</span><h2>Bài toán thực tế</h2></header>
+<div class="prose"><p>Ba tình huống giống việc thật. Đọc đề, tự viết lời giải ra giấy (phương án, con số, đánh đổi), rồi mới mở lời giải. Gợi ý chỉ mở khi bí. Lời giải là lập luận từ tài liệu, không phải số đo; con số trong đó là ước lượng. Viết ngày 2026-10-20.</p></div>
+
+<div class="case" id="c4">
+<h3>C4. Cổng thanh toán: trừ tiền hai lần và webhook đến sai thứ tự</h3>
+<p class="src">Dựa trên: phần 02–03 của trang này; <a href="../concurrency-control-strategies/index.html">Kiểm soát ghi đồng thời</a> (câu ghi có điều kiện).</p>
+<dl>
+<dt>Bối cảnh</dt><dd><p>Shop online tích hợp một cổng thanh toán. Luồng hiện tại:</p>
+<ul>
+<li>Khách bấm "Thanh toán". Server gọi <code>POST /v2/payments</code> của cổng, nhận <code>payment_url</code>, chuyển khách sang đó.</li>
+<li>Kết quả cuối báo về qua webhook <code>payment.succeeded</code> hoặc <code>payment.failed</code>. Webhook có chữ ký HMAC và <code>event_id</code>.</li>
+<li>Cổng gửi lại webhook tối đa 10 lần nếu không nhận được 200 trong 5 giây. Thứ tự các webhook không được bảo đảm.</li>
+<li>Cổng nhận header <code>Idempotency-Key</code>, giữ trong 24 giờ, và có <code>GET /v2/payments/{id}</code> để tra trạng thái.</li>
+</ul>
+<p>Ba sự cố trong tháng: khách bấm hai lần nên có hai giao dịch và bị trừ tiền hai lần; webhook <code>failed</code> của lần thử trước đến sau <code>succeeded</code> nên đơn đã trả tiền bị chuyển sang thất bại; 0,3% đơn kẹt ở "đang chờ thanh toán" vì webhook không bao giờ tới.</p></dd>
+<dt>Yêu cầu</dt><dd>Mỗi lần thanh toán một đơn chỉ tạo một giao dịch. Trạng thái đơn đúng dù webhook lặp hay sai thứ tự. Không đơn nào ở "đang chờ" quá 30 phút mà không ai biết. Khách được thanh toán lại sau khi thất bại.</dd>
+<dt>Ràng buộc</dt><dd>MySQL 8.4. Khoảng 2.000 đơn mỗi giờ lúc cao điểm. Không đổi cổng thanh toán.</dd>
+<dt>Nhiệm vụ</dt><dd>Thiết kế bảng, luồng tạo giao dịch, cách xử lý webhook, và cơ chế đối soát.</dd>
+</dl>
+<details class="hint"><summary>Gợi ý</summary><ul>
+<li>"Bấm hai lần" và "thanh toán lại sau khi thất bại" có nên dùng cùng một key không?</li>
+<li>Loại trùng theo <code>event_id</code> có giải quyết được thứ tự không?</li>
+<li>Khi không tin được webhook, nguồn sự thật nằm ở đâu?</li>
+</ul></details>
+<details class="answer"><summary>Xem lời giải</summary>
+<h4 class="ah">1. Làm rõ đề bài</h4>
+<p>Có ba vấn đề khác nhau, cần ba cơ chế khác nhau: tạo trùng (idempotency khi tạo), cập nhật sai thứ tự (máy trạng thái), và thiếu tin (đối soát chủ động).</p>
+<ul>
+<li>Trạng thái nào của cổng là cuối cùng? Giả định <code>succeeded</code> và <code>failed</code> đều là cuối của một giao dịch. Nhưng các sự kiện của <em>hai giao dịch khác nhau</em> cho cùng một đơn có thể đan xen.</li>
+<li>Thanh toán lại sau thất bại là một lần thử mới, cần key mới. Bấm hai lần trong cùng một lần thử phải dùng chung key.</li>
+<li>Nếu cả hai lần thử đều thành công (trước khi sửa, hoặc khách trả ở hai tab), phải hoàn một lần. Cần chính sách hoàn tiền tự động.</li>
+</ul>
+<h4 class="ah">2. Ước lượng</h4>
+<ul>
+<li>2.000 đơn mỗi giờ là khoảng 0,6 đơn mỗi giây: tải không phải vấn đề, tính đúng mới là vấn đề.</li>
+<li>Webhook có thể lặp tới 10 lần, nhưng bảng sự kiện loại trùng theo <code>event_id</code>, nên mỗi sự kiện chỉ thành một row. Khoảng 1–2 sự kiện cho mỗi lần thử là 2.000–4.000 row mỗi giờ cao điểm; giữ 30 ngày là tối đa khoảng 3 triệu row. Vẫn cần job dọn.</li>
+<li>0,3% đơn kẹt là khoảng 6 đơn mỗi giờ cao điểm: đủ ít để tra từng đơn bằng API của cổng.</li>
+</ul>
+<h4 class="ah">3. Các phương án</h4>
+<div class="tablewrap"><table>
+<thead><tr><th>Vấn đề</th><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td rowspan="3">Tạo trùng</td><td>Khoá nút trên giao diện</td><td>Dễ</td><td>Không chặn được retry của mạng, hai tab, app gửi lại</td></tr>
+<tr><td>Key do client sinh mỗi lần bấm</td><td>Theo đúng bản nháp IETF</td><td>Client lỗi thì sinh key mới; hai tab vẫn trùng</td></tr>
+<tr><td>Server tạo row "lần thử" duy nhất cho mỗi đơn đang mở, dùng id của nó làm key gửi cổng</td><td>Chặn ở database, đúng cả với hai tab</td><td>Thêm một bảng; cần trick cho UNIQUE có điều kiện</td></tr>
+<tr><td rowspan="3">Sai thứ tự</td><td>Ghi đè trạng thái theo sự kiện</td><td>Dễ</td><td>Chính là lỗi đang gặp</td></tr>
+<tr><td>Loại trùng theo <code>event_id</code></td><td>Bỏ được webhook lặp</td><td>Không giải quyết thứ tự</td></tr>
+<tr><td>Máy trạng thái với câu ghi có điều kiện; khi mâu thuẫn thì tra <code>GET</code></td><td>Đúng bất kể thứ tự</td><td>Phải định nghĩa rõ các bước chuyển</td></tr>
+<tr><td rowspan="2">Thiếu tin</td><td>Chờ webhook</td><td>Không làm gì</td><td>0,3% kẹt mãi</td></tr>
+<tr><td>Job đối soát tra <code>GET</code> các lần thử chờ quá 10 phút</td><td>Bắt được mọi trường hợp</td><td>Thêm job; tôn trọng giới hạn gọi API của cổng</td></tr>
+</tbody></table></div>
+<h4 class="ah">4. Đánh đổi và quyết định</h4>
+<ul>
+<li><strong>Tạo:</strong> server tạo row <code>payment_attempts</code>, mỗi đơn chỉ có một lần thử đang mở, và gửi <code>attempt.id</code> làm <code>Idempotency-Key</code>. Bấm hai lần hay hai tab đều trả về cùng một lần thử và cùng <code>payment_url</code>.</li>
+<li><strong>Webhook:</strong> kiểm chữ ký, lưu sự kiện thô (loại trùng theo <code>event_id</code>), trả 200 ngay, rồi áp dụng bằng máy trạng thái. <code>succeeded</code> thắng mọi trạng thái khác vì tiền đã thật sự chuyển; không có bước nào đi từ <code>succeeded</code> sang <code>failed</code>.</li>
+<li><strong>Đối soát:</strong> job mỗi 5 phút tra cổng cho lần thử ở <code>pending</code> quá 10 phút. Quá 30 phút vẫn không rõ thì cảnh báo cho người xử lý.</li>
+</ul>
+<p>Khi nào đổi ý: nếu cổng gửi được thứ tự đảm bảo theo giao dịch (sequence number), có thể so sequence thay vì tra <code>GET</code>. Nếu lượng đơn lên hàng trăm mỗi giây, xử lý webhook qua hàng đợi thay vì đồng bộ.</p>
+<h4 class="ah">5. Triển khai</h4>
+<pre><code>CREATE TABLE payment_attempts (
+  id            CHAR(36) PRIMARY KEY,            -- cũng là Idempotency-Key gửi cổng
+  order_id      BIGINT NOT NULL,
+  open_order_id BIGINT NULL,                      -- = order_id khi lần thử còn mở, NULL khi đã xong
+  status        ENUM('created','pending','succeeded','failed','expired') NOT NULL,
+  provider_id   VARCHAR(64) NULL,
+  payment_url   VARCHAR(512) NULL,
+  updated_at    DATETIME(3) NOT NULL,
+  UNIQUE KEY uq_open (open_order_id)              -- nhiều NULL được phép: mỗi đơn chỉ một lần thử mở
+);
+CREATE TABLE payment_events (event_id VARCHAR(64) PRIMARY KEY, attempt_id CHAR(36), type VARCHAR(32),
+                             payload JSON, received_at DATETIME(3));</code></pre>
+<ol class="list">
+<li><strong>Tạo lần thử:</strong> <code>INSERT</code> với <code>open_order_id = order_id</code>. Lỗi 1062 nghĩa là đã có lần thử mở: đọc nó và trả lại <code>payment_url</code> cũ. Sau commit, gọi <code>POST /v2/payments</code> với <code>Idempotency-Key: attempt.id</code>. Timeout thì gọi lại với đúng key đó.</li>
+<li><strong>Webhook:</strong> kiểm HMAC; <code>INSERT IGNORE</code> vào <code>payment_events</code>; trả 200. Một worker áp dụng sự kiện:
+<ul>
+<li><code>succeeded</code>: <code>UPDATE payment_attempts SET status = 'succeeded', open_order_id = NULL WHERE id = ? AND status &lt;&gt; 'succeeded'</code>; rồi <code>UPDATE orders SET status = 'paid' WHERE id = ? AND status IN ('awaiting_payment','payment_failed')</code>. Nếu câu thứ hai trả 0 row vì đơn đã <code>paid</code> bởi lần thử khác: tạo lệnh hoàn tiền tự động.</li>
+<li><code>failed</code>: <code>UPDATE payment_attempts SET status = 'failed', open_order_id = NULL WHERE id = ? AND status IN ('created','pending')</code>. 0 row nghĩa là lần thử đã <code>succeeded</code>: bỏ qua sự kiện, ghi log.</li>
+</ul></li>
+<li><strong>Đối soát:</strong> lần thử <code>pending</code> quá 10 phút thì gọi <code>GET</code> và áp dụng kết quả như một sự kiện. Lần thử <code>created</code> chưa có <code>provider_id</code> (lời gọi <code>POST</code> đã timeout) thì gọi lại <code>POST</code> với đúng key, trong vòng 24 giờ. Nếu lần đầu đã tới cổng, cổng trả lại giao dịch đã tạo. Quá 30 phút mà vẫn chưa thanh toán thì chuyển <code>expired</code>, mở lại cho khách thanh toán. Nếu sau đó vẫn có webhook <code>succeeded</code> cho lần thử này, luật "<code>succeeded</code> thắng" và hoàn tiền tự động ở bước 2 xử lý được.</li>
+</ol>
+<h4 class="ah">6. Rủi ro và cách kiểm chứng</h4>
+<ul>
+<li>Cổng chỉ giữ key 24 giờ. Không bao giờ gọi lại <code>POST</code> sau 24 giờ; khi đó chỉ dùng <code>GET</code>.</li>
+<li>Test hợp đồng: phát lại webhook lặp 10 lần, đảo thứ tự <code>failed</code> và <code>succeeded</code>, bỏ hẳn webhook. Trạng thái cuối phải đúng trong mọi trường hợp.</li>
+<li>Metric: tuổi lần thử <code>pending</code> lâu nhất; số sự kiện bị máy trạng thái bỏ qua theo loại; số lệnh hoàn tiền do thanh toán hai lần (phải tiến về 0).</li>
+<li>Đối soát cuối ngày với báo cáo của cổng: số giao dịch thành công và tổng tiền phải khớp với <code>payment_attempts</code>.</li>
+</ul>
+<h4 class="ah">7. Lỗi hay gặp với bài này</h4>
+<ul>
+<li>Sinh key mới mỗi lần gọi lại cổng.</li>
+<li>Gán thẳng trạng thái đơn theo sự kiện vừa đến.</li>
+<li>Loại trùng theo <code>event_id</code> rồi tưởng đã xử lý xong thứ tự.</li>
+<li>Xử lý nặng trước khi trả 200 cho webhook, khiến cổng gửi lại và tạo thêm trùng.</li>
+<li>Tin webhook mà không kiểm chữ ký.</li>
+</ul>
+</details>
+</div>
+
+<div class="case" id="c5">
+<h3>C5. SMS bị gửi trùng 3%, mà nhà cung cấp không có idempotency key</h3>
+<p class="src">Dựa trên: phần 02 của trang này (dấu "đã xử lý", thử lại).</p>
+<dl>
+<dt>Bối cảnh</dt><dd><p>Service thông báo nhận message từ hàng đợi (at-least-once, visibility timeout 30 giây), rồi gọi API của nhà cung cấp SMS. Mỗi tin 800 đồng. API không có idempotency key, và thỉnh thoảng timeout sau 10 giây dù tin vẫn được gửi. API nhận một trường <code>client_ref</code> tuỳ ý và có báo cáo trạng thái theo <code>client_ref</code> sau khoảng 1 phút.</p>
+<p>Có hai loại tin: OTP đăng nhập (hết hạn sau 2 phút) và tin khuyến mãi (2 triệu tin mỗi đợt). Đợt khuyến mãi tuần trước, 3% khách nhận 2–3 tin giống nhau. Team đề xuất ghi dấu "đã gửi" trước khi gọi API để hết trùng.</p></dd>
+<dt>Yêu cầu</dt><dd>Giảm trùng rõ rệt. OTP không được mất. Chi phí kiểm soát được.</dd>
+<dt>Ràng buộc</dt><dd>Không đổi nhà cung cấp. Nhà cung cấp giới hạn 300 tin mỗi giây.</dd>
+<dt>Nhiệm vụ</dt><dd>Giải thích vì sao trùng. Đánh giá đề xuất của team. Thiết kế cho từng loại tin, và nói rõ chấp nhận rủi ro nào.</dd>
+</dl>
+<details class="hint"><summary>Gợi ý</summary><ul>
+<li>Với mỗi loại tin, mất một tin và trùng một tin, cái nào đắt hơn?</li>
+<li>Gửi 2 triệu tin ở 300 tin mỗi giây mất bao lâu? Visibility timeout 30 giây có đủ không?</li>
+<li>"Không biết đã gửi chưa" có nên được ghi khác với "gửi thất bại" không?</li>
+</ul></details>
+<details class="answer"><summary>Xem lời giải</summary>
+<h4 class="ah">1. Làm rõ đề bài</h4>
+<p>Với một tác dụng phụ không idempotent ở bên ngoài, không có cách nào bảo đảm đúng một lần. Chỉ có thể chọn phía thất bại: hoặc thỉnh thoảng mất, hoặc thỉnh thoảng trùng. Quyết định đúng là chọn theo <em>từng loại tin</em>, vì giá của mất và giá của trùng khác nhau.</p>
+<p>Nguồn trùng có hai: worker chết sau khi gửi và trước khi ack; và message hiện lại khi đang được xử lý vì quá visibility timeout. Đợt khuyến mãi lớn rất dễ rơi vào loại thứ hai: worker chờ rate limit của nhà cung cấp lâu hơn 30 giây, message hiện lại, worker khác lấy và gửi tiếp.</p>
+<h4 class="ah">2. Ước lượng</h4>
+<ul>
+<li>2 triệu × 3% = 60.000 tin trùng × 800 đồng ≈ 48 triệu đồng mỗi đợt, chưa kể khách phàn nàn.</li>
+<li>2 triệu tin ở 300 tin mỗi giây là khoảng 6.700 giây, gần 2 giờ. Nếu worker kéo nhiều message hơn tốc độ gửi, message phải nằm chờ trong worker lâu hơn 30 giây, và hiện lại.</li>
+<li>OTP: trùng tốn 800 đồng và làm khách hơi khó chịu. Mất thì khách không đăng nhập được, gọi tổng đài, có thể bỏ đi. Mất đắt hơn trùng rất nhiều.</li>
+<li>Khuyến mãi: mất một tin gần như không tốn gì. Trùng thì tốn tiền và mất uy tín. Trùng đắt hơn mất.</li>
+</ul>
+<h4 class="ah">3. Các phương án</h4>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Cách làm</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>A. Ghi dấu trước khi gửi</td><td>Ghi "đã thử", rồi gọi API, không gửi lại</td><td>Không trùng do giao lại</td><td>Chết giữa hai bước, hoặc timeout, thì tin mất</td></tr>
+<tr><td>B. Ghi dấu sau khi gửi</td><td>Gọi API, thành công mới ghi, rồi ack</td><td>Không mất</td><td>Chết hoặc timeout thì gửi lại, trùng</td></tr>
+<tr><td>C. Trạng thái "đang gửi" và tra báo cáo</td><td>Ghi "đang gửi" kèm <code>client_ref</code>; lần giao lại thấy "đang gửi" cũ thì tra báo cáo rồi mới quyết định</td><td>Giảm cả trùng lẫn mất</td><td>Báo cáo trễ 1 phút; phức tạp; vẫn có trường hợp chưa rõ</td></tr>
+<tr><td>D. Sửa nguyên nhân giao lại</td><td>Visibility timeout dài hơn thời gian xử lý tệ nhất, hoặc gia hạn; worker chỉ kéo message vừa đủ tốc độ gửi</td><td>Loại phần lớn trùng mà không đổi ngữ nghĩa</td><td>Không loại được trường hợp worker chết</td></tr>
+<tr><td>E. Loại trùng khi đưa vào hàng đợi</td><td>Mỗi (đợt, khách) chỉ một message, UNIQUE trong database</td><td>Chặn trùng từ phía tạo tin</td><td>Không giúp với giao lại</td></tr>
+</tbody></table></div>
+<h4 class="ah">4. Đánh đổi và quyết định</h4>
+<ul>
+<li><strong>Khuyến mãi:</strong> A cộng D cộng E. Đề xuất của team đúng cho loại tin này: chấp nhận thỉnh thoảng mất một tin để không bao giờ gửi trùng. Timeout thì ghi "không rõ", không gửi lại.</li>
+<li><strong>OTP:</strong> B cộng D. Đề xuất của team sai cho loại tin này: mất OTP là lỗi nặng. Gửi lại khi lỗi, nhưng chỉ trong khoảng OTP còn hạn, tối đa 2 lần.</li>
+<li>C đáng làm sau nếu muốn biết chính xác chi phí và tỉ lệ mất của khuyến mãi, nhưng không cần để giải quyết sự cố hiện tại.</li>
+</ul>
+<p>Khi nào đổi ý: nếu nhà cung cấp thêm idempotency key, dùng B cho cả hai loại. Nếu tin khuyến mãi gắn với mã giảm giá có giá trị, mất trở nên đắt hơn, và C đáng làm ngay.</p>
+<h4 class="ah">5. Triển khai</h4>
+<pre><code>CREATE TABLE sms_sends (
+  id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+  kind        ENUM('otp','promo') NOT NULL,
+  campaign_id BIGINT NULL,
+  user_id     BIGINT NOT NULL,
+  client_ref  CHAR(36) NOT NULL,
+  status      ENUM('attempted','sent','unknown','failed') NOT NULL,
+  UNIQUE KEY uq_campaign_user (campaign_id, user_id)   -- NULL cho OTP nên không chặn OTP
+);</code></pre>
+<ul>
+<li><strong>Khuyến mãi:</strong> <code>INSERT</code> với <code>status = 'attempted'</code>; lỗi 1062 thì ack và bỏ qua. Gọi API với <code>client_ref</code>, timeout 10 giây. Thành công thì <code>'sent'</code>; timeout thì <code>'unknown'</code>; lỗi rõ ràng (400) thì <code>'failed'</code>. Luôn ack. Không thử lại.</li>
+<li><strong>OTP:</strong> gọi API; thành công thì ghi <code>'sent'</code> rồi ack. Timeout hoặc 5xx thì thử lại sau 5 giây và 15 giây, chỉ khi OTP còn trên 60 giây hiệu lực. Sau đó ack dù kết quả thế nào; khách có nút "gửi lại mã".</li>
+<li><strong>Hàng đợi:</strong> visibility timeout 5 phút (hoặc gia hạn khi đang xử lý). Số message worker kéo về mỗi lần khớp với 300 tin mỗi giây, ví dụ tách queue OTP riêng để OTP không phải xếp sau 2 triệu tin khuyến mãi.</li>
+<li><strong>Sau đợt:</strong> job đọc báo cáo của nhà cung cấp cho các tin <code>'unknown'</code>, để biết tỉ lệ thật sự đã gửi.</li>
+</ul>
+<h4 class="ah">6. Rủi ro và cách kiểm chứng</h4>
+<ul>
+<li>Đo tỉ lệ trùng thật từ báo cáo của nhà cung cấp: số khách có hơn một tin trong cùng một đợt. Kỳ vọng gần 0.</li>
+<li>Đo tỉ lệ <code>'unknown'</code> của khuyến mãi; nếu cao (trên 1%), nhà cung cấp đang chậm, và cần xem lại timeout.</li>
+<li>Đo thời gian từ lúc yêu cầu OTP tới lúc gửi; OTP nằm trong queue riêng nên không bị đợt khuyến mãi làm chậm.</li>
+<li>Test giết worker ở từng điểm như E28 cho cả hai luồng.</li>
+</ul>
+<h4 class="ah">7. Lỗi hay gặp với bài này</h4>
+<ul>
+<li>Dùng một chính sách cho mọi loại tin.</li>
+<li>Tin rằng ghi dấu trong database cho "đúng một lần" với một API bên ngoài.</li>
+<li>Visibility timeout ngắn hơn thời gian xử lý thật.</li>
+<li>Thử lại khi timeout với một thao tác không idempotent và đắt tiền.</li>
+<li>Gộp "không rõ" vào "thất bại", rồi gửi lại.</li>
+</ul>
+</details>
+</div>
+
+<div class="case" id="c6">
+<h3>C6. Database chỉ failover 90 giây, mà service sập 25 phút</h3>
+<p class="src">Dựa trên: phần 02–03 và 06 của trang này (backoff, jitter, retry budget).</p>
+<dl>
+<dt>Bối cảnh</dt><dd><p>Service checkout (40 pod) gọi service payment nội bộ qua API gateway. Cấu hình hiện tại:</p>
+<ul>
+<li>SDK HTTP trong checkout thử lại 5 lần ngay lập tức, timeout 2 giây.</li>
+<li>API gateway thử lại 3 lần khi gặp 502, 503, 504.</li>
+<li>Code checkout bọc thêm một vòng thử lại 2 lần.</li>
+</ul>
+<p>Lúc 20:00, database của service payment failover mất 90 giây. Database lên lại, nhưng service payment vẫn quá tải thêm 25 phút: CPU 100%, request đến gấp khoảng 30 lần bình thường (bình thường 300 request mỗi giây). Nhiều khách bị tạo hai lệnh thanh toán.</p></dd>
+<dt>Yêu cầu</dt><dd>Lần sau, sự cố database 90 giây phải hồi phục trong vòng 2 phút sau khi database lên. Không tạo lệnh trùng.</dd>
+<dt>Ràng buộc</dt><dd>Service payment phục vụ được khoảng 600 request mỗi giây. Không thể tăng ngay.</dd>
+<dt>Nhiệm vụ</dt><dd>Giải thích vì sao hệ thống không tự hồi phục. Tính hệ số nhân của retry. Đề xuất chính sách thử lại và các lớp bảo vệ, theo thứ tự ưu tiên.</dd>
+</dl>
+<details class="hint"><summary>Gợi ý</summary><ul>
+<li>Một lần bấm của khách tạo ra tối đa bao nhiêu request tới service payment?</li>
+<li>Server xử lý một request mà client đã bỏ đi sau 2 giây thì công đó có ích không?</li>
+<li>Lệnh trùng đến từ tầng nào?</li>
+</ul></details>
+<details class="answer"><summary>Xem lời giải</summary>
+<h4 class="ah">1. Làm rõ đề bài</h4>
+<p>Đây là một sự cố "tự duy trì" (metastable failure). Nguyên nhân ban đầu (database) đã hết, nhưng chính phản ứng của hệ thống (retry) giữ cho nó quá tải. Hệ thống chỉ hồi phục khi tải giảm, ở đây là khi khách bỏ cuộc.</p>
+<p>Câu hỏi cần hỏi: API tạo lệnh thanh toán có idempotency key không? Lệnh trùng cho thấy là không. Server có bỏ qua request đã quá hạn của client không? Nhiều khả năng là không.</p>
+<h4 class="ah">2. Ước lượng</h4>
+<ul>
+<li>Số lần thử tối đa mỗi tầng: SDK 1 + 5 = 6; gateway 1 + 3 = 4; code 1 + 2 = 3. Nhân lại: 6 × 4 × 3 = 72 request cho một lần bấm.</li>
+<li>Khi mọi thứ lỗi, tải đề xuất lên tới 300 × 72 ≈ 21.600 request mỗi giây. Thực tế bị giới hạn bởi timeout và pool, nên đo được khoảng 9.000, tức khoảng 30 lần.</li>
+<li>Sức chứa 600. Khi database lên lại, tải đến vẫn gấp khoảng 15 lần sức chứa. Hàng đợi trong server dài ra, mỗi request phải chờ quá 2 giây, client đã bỏ đi và thử lại. Server tốn gần hết công cho request không còn ai chờ: lượng việc hữu ích gần 0.</li>
+</ul>
+<h4 class="ah">3. Các phương án</h4>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>A. Chỉ thử lại ở một tầng</td><td>Hệ số nhân từ 72 xuống 3; rẻ nhất</td><td>Phải thống nhất giữa các team</td></tr>
+<tr><td>B. Backoff luỹ thừa có jitter, tối đa 3 lần</td><td>Trải tải theo thời gian</td><td>Một mình không đủ khi sự cố kéo dài</td></tr>
+<tr><td>C. Retry budget</td><td>Giới hạn tổng số lần thử lại, ví dụ 10% số request mới</td><td>Thêm trạng thái ở client</td></tr>
+<tr><td>D. Circuit breaker ở client</td><td>Ngừng gọi khi tỉ lệ lỗi cao, thử lại bằng vài request dò</td><td>Cần chỉnh ngưỡng; chi tiết là chủ đề Month 4</td></tr>
+<tr><td>E. Server từ chối sớm</td><td>Giới hạn số request đang xử lý, trả 503 kèm <code>Retry-After</code> ngay; bỏ request đã quá hạn</td><td>Cần truyền deadline từ client</td></tr>
+<tr><td>F. Idempotency key cho tạo lệnh</td><td>Thử lại không tạo lệnh trùng</td><td>Cần bảng khoá (như trang này)</td></tr>
+<tr><td>G. Tăng timeout, thêm pod</td><td>Trông có vẻ giúp</td><td>Pod mới mở thêm connection tới database vừa hồi phục; timeout dài giữ thêm tài nguyên</td></tr>
+</tbody></table></div>
+<h4 class="ah">4. Đánh đổi và quyết định</h4>
+<p>Làm theo thứ tự này, mỗi bước đứng được một mình:</p>
+<ol class="list">
+<li><strong>F và A trước:</strong> idempotency key cho tạo lệnh, và chỉ SDK trong checkout được thử lại (vì nó có key và biết ngữ cảnh). Gateway và vòng thử lại trong code bỏ hẳn. Hai việc này rẻ và loại phần lớn vấn đề.</li>
+<li><strong>B và C:</strong> 3 lần, full jitter, base 100 ms, cap 2 giây, retry budget 10%.</li>
+<li><strong>E:</strong> service payment giới hạn số request đang xử lý quanh mức nó phục vụ được, trả 503 ngay khi vượt, và bỏ request mà deadline của client đã qua.</li>
+<li><strong>D:</strong> circuit breaker ở checkout, khi Month 4 làm tới chủ đề này.</li>
+</ol>
+<p>G bị loại. Thêm pod chỉ đáng khi tải bình thường đã gần sức chứa, không phải để chống retry storm.</p>
+<h4 class="ah">5. Triển khai</h4>
+<div class="tablewrap"><table>
+<thead><tr><th>Tầng</th><th>Trước</th><th>Sau</th></tr></thead>
+<tbody>
+<tr><td>Code checkout</td><td>Thử lại 2 lần</td><td>Không thử lại; gửi <code>Idempotency-Key</code> và header deadline</td></tr>
+<tr><td>SDK HTTP</td><td>5 lần ngay, timeout 2 s</td><td>3 lần, full jitter, budget 10%, chỉ cho 503, 504, timeout</td></tr>
+<tr><td>API gateway</td><td>3 lần</td><td>0 lần</td></tr>
+<tr><td>Service payment</td><td>Nhận hết</td><td>Giới hạn đồng thời, 503 kèm <code>Retry-After</code>, bỏ request quá hạn</td></tr>
+</tbody></table></div>
+<pre><code>// retry budget: mỗi request thành công cộng 0,1 token, mỗi lần thử lại tốn 1 token
+class RetryBudget {
+  private tokens = 10;
+  onSuccess() { this.tokens = Math.min(100, this.tokens + 0.1); }
+  tryAcquire() { if (this.tokens &gt;= 1) { this.tokens -= 1; return true; } return false; }
+}</code></pre>
+<h4 class="ah">6. Rủi ro và cách kiểm chứng</h4>
+<ul>
+<li>Game day ở staging: tải 300 request mỗi giây, gây failover database 90 giây. Đo thời gian hồi phục sau khi database lên (mục tiêu dưới 2 phút), đỉnh tải đến, và số lệnh trùng (phải bằng 0).</li>
+<li>Metric theo tầng: số lần thử lại mỗi giây, budget còn lại, số request bị server từ chối sớm.</li>
+<li>Rủi ro: một team khác vẫn để retry ở gateway cho route mới. Đưa cấu hình retry vào review chung.</li>
+</ul>
+<h4 class="ah">7. Lỗi hay gặp với bài này</h4>
+<ul>
+<li>Tăng timeout và thêm pod.</li>
+<li>Mỗi tầng tự thêm retry "cho chắc".</li>
+<li>Thử lại thao tác tạo mới mà không có idempotency key.</li>
+<li>Chỉ thêm jitter mà không giới hạn tổng số lần thử lại.</li>
+<li>Server vẫn xử lý request mà client đã bỏ đi.</li>
+</ul>
+</details>
+</div>
+</section>
+
+<!-- 10 -->
+<section id="s10">
+<header><span class="num">10</span><h2>Câu hỏi còn mở</h2></header>
+<p class="prose">Số thứ tự trùng với Open questions trong <code>.claude/docs/LEARNING_LOG.md</code>. Log là bản gốc.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>#</th><th>Câu hỏi</th><th>Trạng thái</th></tr></thead>
+<tbody>
+<tr><td>23</td><td>Ba request cùng idempotency key, request đầu rollback do lỗi nghiệp vụ: hai request còn lại có rơi vào deadlock giống ví dụ duplicate key ba session trong manual không? Nếu có, hàm <code>transfer</code> cần xử lý 1213 thế nào để vẫn trả đúng một kết quả?</td><td>Mở. E27.</td></tr>
+<tr><td>24</td><td>Idempotency key nên giữ bao lâu khi client là app di động có hàng đợi offline gửi lại sau vài ngày? Có nên tách khoá đã xong (giữ lâu, chỉ cần fingerprint và response) và khoá đang chạy?</td><td>Mở. Cần đọc thêm cách các hệ thống thanh toán làm.</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- 11 -->
+<section id="s11">
+<header><span class="num">11</span><h2>Tài liệu tham khảo</h2></header>
+<div class="prose"><ul>
+<li>IETF, <a href="https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-idempotency-key-header">The Idempotency-Key HTTP Header Field</a> (draft-ietf-httpapi-idempotency-key-header-07): mục Error Handling, fingerprint, hạn dùng</li>
+<li>Stripe, <a href="https://docs.stripe.com/api/idempotent_requests">Idempotent requests</a>: lưu mã và body của lần đầu, so tham số, 24 giờ, 255 ký tự</li>
+<li>RFC 9110, mục 9.2.2 Idempotent Methods</li>
+<li>AWS Architecture Blog, <a href="https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/">Exponential Backoff And Jitter</a></li>
+<li>Amazon SQS, <a href="https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/FIFO-queues-exactly-once-processing.html">Exactly-once processing</a>: khoảng loại trùng 5 phút</li>
+<li>MySQL 8.4, <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-locks-set.html">Locks Set by Different SQL Statements</a>: <code>INSERT</code> trùng khoá đặt khoá S; <a href="https://dev.mysql.com/doc/refman/8.4/en/insert.html">INSERT</a>: tác dụng của <code>IGNORE</code></li>
+<li>BullMQ 6.3.17, mã nguồn: <code>backoffs.js</code> (công thức chờ) và <code>handleDuplicatedJob.lua</code> (trùng <code>jobId</code>)</li>
+</ul></div>
+<h3>Mức kiểm chứng</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>Khẳng định</th><th>Nguồn</th></tr></thead>
+<tbody>
+<tr><td>Mã 400, 422, 409 cho thiếu khoá, body khác, đang chạy</td><td>bản nháp IETF 07 (đã hết hạn, chưa thành RFC)</td></tr>
+<tr><td>Stripe lưu và trả lại response đầu, kể cả 500; xoá khoá sau ít nhất 24 giờ</td><td>tài liệu Stripe</td></tr>
+<tr><td>SQS FIFO loại trùng trong 5 phút</td><td>tài liệu AWS</td></tr>
+<tr><td>Không jitter tệ nhất; full jitter ít công nhất</td><td>bài AWS (mô phỏng của tác giả bài). Mô hình ở phần 02 đồng ý phần đầu nhưng cho equal jitter ít lần gọi hơn full jitter; E29 kiểm tra</td></tr>
+<tr><td>R2 chờ khoá S rồi nhận 1062 khi R1 commit</td><td>manual 8.4 (Locks Set); chưa quan sát (E27)</td></tr>
+<tr><td>Công thức backoff và jitter của BullMQ; trùng <code>jobId</code> không thêm job</td><td>mã nguồn BullMQ 6.3.17</td></tr>
+<tr><td>Kết quả của bảng dấu "đã xử lý" và mô phỏng bão thử lại</td><td>mô hình; chưa đo (E28, E29)</td></tr>
+</tbody></table></div>
+</section>
+</main>
+
+</div>
+
+<script>
+const DEFS=`<defs><marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>`;
+function B(x,y,w,h,cls,t,sub){
+  const tx=x+w/2;
+  return `<g class="n ${cls||''}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="5"/>`+
+  `<text class="tb" x="${tx}" y="${y+(sub?h/2-8:h/2)}" text-anchor="middle" dominant-baseline="central">${t}</text>`+
+  (sub?`<text class="ts" x="${tx}" y="${y+h/2+10}" text-anchor="middle" dominant-baseline="central">${sub}</text>`:'')+`</g>`;
+}
+const A=(d,cls)=>`<path d="${d}" class="edge ${cls||''}" marker-end="url(#arw)"/>`;
+const T=(x,y,t,anchor,cls)=>`<text class="${cls||'lbl'}" x="${x}" y="${y}" text-anchor="${anchor||'start'}">${t}</text>`;
+const X=(x,y)=>`<path class="xmark" d="M${x-7} ${y-7}L${x+7} ${y+7}M${x+7} ${y-7}L${x-7} ${y+7}"/>`;
+const $=id=>document.getElementById(id);
+
+/* generic stepper whose steps can be replaced */
+function stepper(id,{title,vb,draw,extra,legend}){
+  const el=$(id);
+  el.innerHTML=`<div class="ph"><strong>${title}</strong><span class="meta"></span></div><div class="bd">${extra||''}
+  <h4 class="st-t"></h4><svg viewBox="${vb}" role="img"></svg>
+  <div class="desc" aria-live="polite"><div class="st-d"></div><pre hidden></pre></div>
+  <div class="nav"><button data-d="-1">Trước</button><button data-d="1" class="primary">Tiếp</button></div>${legend||''}</div>`;
+  const svg=el.querySelector('svg'),t=el.querySelector('.st-t'),d=el.querySelector('.st-d'),pre=el.querySelector('pre'),meta=el.querySelector('.meta');
+  const [pv,nx]=el.querySelectorAll('.nav button');let i=0,steps=[];
+  function render(){const s=steps[i];svg.innerHTML=DEFS+draw(s,i);svg.setAttribute('aria-label',s.t);t.textContent=s.t;d.textContent=s.d;
+    pre.hidden=!s.c;pre.textContent=s.c||'';meta.textContent=`bước ${i+1} / ${steps.length}`;pv.disabled=i===0;nx.disabled=i===steps.length-1;}
+  const go=k=>{i=Math.max(0,Math.min(steps.length-1,i+k));render();};
+  pv.onclick=()=>go(-1);nx.onclick=()=>go(1);
+  el.tabIndex=0;el.addEventListener('keydown',e=>{if(e.target.closest('select,input'))return;if(e.key==='ArrowRight')go(1);if(e.key==='ArrowLeft')go(-1);});
+  return {el,set(s){steps=s;i=0;render();}};
+}
+
+/* ---------- 01: network failure stepper ---------- */
+const SCN={
+  ok:'Không có lỗi',
+  reqlost:'Request mất trên đường tới server',
+  crash:'Server lỗi trước khi commit',
+  resplost:'Server commit xong, response bị mất'
+};
+function netSteps(scn,retry,key){
+  const S=[];let moved=0;const k=key?'Idempotency-Key: 7f3c…':'';
+  const base={moved:0,keyRow:false};
+  const push=(o)=>S.push(Object.assign({},base,{moved},o));
+  push({t:'Client gửi lệnh chuyển tiền',d:`App gửi POST /transfers chuyển 500.000 đồng.`+(key?' App sinh một idempotency key cho thao tác này và gắn vào header.':' Không có idempotency key.'),req:'path',c:'POST /transfers\n'+(k?k+'\n':'')+'{"to": 9, "amount": 500000}'});
+  function attempt(n){
+    const tag=n===1?'':` (lần ${n})`;
+    if(n===1&&scn==='reqlost'){push({t:'Request mất'+tag,d:'Gói tin bị mất trên đường đi. Server không hề biết có request này. Không có gì thay đổi.',req:'miss',reqX:true});return 'timeout';}
+    if(key&&base.keyRow){
+      push({t:'Server gặp lại khoá'+tag,d:'Server thấy khoá này đã có trong bảng idempotency_keys, kèm response đã lưu. Nó không chuyển tiền lần nữa, chỉ trả lại đúng response cũ.',req:'path',srv:'row',srvT:'khoá đã có',keyRow:true,resp:'row',c:'HTTP 201 (response đã lưu từ lần đầu)'});return 'ok';
+    }
+    if(n===1&&scn==='crash'){push({t:'Server lỗi giữa chừng'+tag,d:'Server nhận request, bắt đầu transaction, rồi process bị khởi động lại trước khi commit. Transaction tự rollback. Không có gì thay đổi.',req:'path',srv:'miss',srvT:'chết trước commit'});return 'timeout';}
+    moved++;if(key)base.keyRow=true;
+    push({t:'Server chuyển tiền'+tag,d:'Server chuyển tiền và commit.'+(key?' Trong cùng transaction, nó ghi row idempotency key cùng response sẽ trả.':'')+(moved>1?' Đây là lần chuyển thứ hai cho cùng một ý định của người dùng.':''),req:'path',srv:moved>1?'miss':'row',srvT:moved>1?'chuyển lần 2':'đã commit',keyRow:key});
+    if(n===1&&scn==='resplost'){push({t:'Response mất'+tag,d:'Server đã trả 201, nhưng response mất trên đường về. Tiền đã chuyển, mà client không biết.',srv:'row',srvT:'đã commit',resp:'miss',respX:true,keyRow:key});return 'timeout';}
+    push({t:'Client nhận kết quả'+tag,d:'Client nhận 201 Created và hiển thị "Đã chuyển".',srv:'row',srvT:'đã commit',resp:'row',keyRow:key});return 'ok';
+  }
+  let r=attempt(1);
+  if(r==='timeout'){
+    push({t:'Client hết thời gian chờ',d:'Sau 3 giây không có response. Client không biết request mất, server lỗi, hay response mất. Ba trường hợp trông giống hệt nhau.'+(retry?' Client sẽ gửi lại'+(key?' với đúng khoá cũ.':'.'):' Client không gửi lại, chỉ báo lỗi cho người dùng.'),cli:'hot',keyRow:base.keyRow});
+    if(retry)r=attempt(2);
+  }
+  const last=S[S.length-1];
+  const verdict=moved===1?(r==='ok'?'Đúng một lần chuyển, client biết kết quả.':'Tiền đã chuyển một lần, nhưng người dùng thấy báo lỗi và có thể tự bấm lại.'):moved===0?'Không chuyển lần nào; người dùng thấy báo lỗi.':`Tiền bị chuyển ${moved} lần.`;
+  S.push(Object.assign({},last,{t:'Kết quả',d:verdict+(retry?(key?' Gửi lại cộng với idempotency key cho hiệu quả "đúng một lần" ở cả bốn kịch bản.':' Đây là at-least-once: không mất, nhưng có thể trùng.'):' Đây là at-most-once: không trùng, nhưng có thể mất hoặc để người dùng không biết.'),c:'',final:true,moved}));
+  return S;
+}
+const netW=stepper('net',{title:'Một lần chuyển tiền qua mạng không tin cậy',vb:'0 0 680 200',
+  extra:`<div class="calc"><label>Kịch bản<select id="ntS">${Object.entries(SCN).map(([k,v])=>`<option value="${k}"${k==='resplost'?' selected':''}>${v}</option>`).join('')}</select></label>
+  <label class="chk"><input type="checkbox" id="ntR" checked>Client gửi lại khi timeout</label>
+  <label class="chk"><input type="checkbox" id="ntK">Dùng idempotency key</label></div>`,
+  legend:`<div class="legend"><span><i class="lg-path"></i>request</span><span><i class="lg-row"></i>đã commit, response tới nơi</span><span><i class="lg-miss"></i>mất, lỗi, hoặc chuyển trùng</span><span><i class="lg-hot"></i>client không biết kết quả</span></div>`,
+  draw:(s)=>{
+    let g='';
+    g+=B(20,60,150,60,s.cli||(s.resp==='row'?'row':'path'),'Client','app di động');
+    g+=B(500,30,160,56,s.srv||'struct','Server',s.srvT||'POST /transfers');
+    g+=B(500,120,160,56,s.moved>1?'miss':(s.moved===1?'row':'dim'),'Database',`ledger: ${s.moved} lần chuyển`+(s.keyRow?' · có khoá':''));
+    if(s.req){g+=A('M172 80 L496 58',s.req);if(s.reqX)g+=X(334,69);}
+    if(s.resp){g+=A('M496 72 L174 100',s.resp);if(s.respX)g+=X(334,86);}
+    g+=`<line x1="580" y1="86" x2="580" y2="118" class="edge"/>`;
+    if(s.final)g+=T(340,188,`Số lần chuyển: ${s.moved}`,'middle','tb');
+    return g;
+  }});
+function netSet(){netW.set(netSteps($('ntS').value,$('ntR').checked,$('ntK').checked));}
+['ntS','ntR','ntK'].forEach(id=>$(id).addEventListener('change',netSet));netSet();
+
+/* ---------- 02: same key, two requests ---------- */
+const keyW=stepper('keyStep',{title:'Hai request cùng idempotency key đến cùng lúc',vb:'0 0 680 210',
+  legend:`<div class="legend"><span><i class="lg-key"></i>đang giữ khoá X trên entry khoá</span><span><i class="lg-hot"></i>đang chờ khoá S</span><span><i class="lg-row"></i>đã commit</span><span><i class="lg-path"></i>đọc kết quả đã lưu</span><span><i class="lg-miss"></i>rollback</span></div>`,
+  draw:(s)=>{
+    let g='';
+    g+=B(20,20,180,58,s.c1||'struct','R1',s.p1||'');
+    g+=B(480,20,180,58,s.c2||'struct','R2',s.p2||'');
+    g+=B(220,112,240,70,s.kc||'dim','idempotency_keys (42, "7f3c…")',s.kr||'chưa có');
+    if(s.e1)g+=A('M110 78 L270 110',s.e1);
+    if(s.e2)g+=A('M570 78 L410 110',s.e2);
+    return g;}});
+keyW.set([
+ {t:'Hai request, cùng khoá',d:'App gửi lệnh chuyển tiền, timeout sau 1 giây vì mạng chậm, rồi gửi lại với đúng khoá đó. Request đầu (R1) vẫn đang chạy. Giờ server có hai request cùng khoá chạy song song.',p1:'POST, khoá 7f3c…',p2:'POST, khoá 7f3c…'},
+ {t:'R1 ghi khoá trước',d:'R1 mở transaction và INSERT row khoá. Row mới chưa commit, và R1 giữ khoá X trên entry đó trong PRIMARY của bảng idempotency_keys.',c1:'key',p1:'INSERT khoá, giữ X',e1:'key',kc:'key',kr:'R1 vừa chèn, chưa commit',c:"INSERT INTO idempotency_keys (owner_id, idem_key, fingerprint)\nVALUES (42, '7f3c…', x'9a1e…');"},
+ {t:'R2 chèn trùng và phải chờ',d:'R2 chạy cùng câu INSERT. Entry trùng đã có nhưng chưa commit, nên InnoDB chưa thể nói là trùng hay không. R2 xin khoá S trên entry đó và đứng chờ. Không có lần chuyển tiền thứ hai nào bắt đầu.',c1:'key',p1:'đang chuyển tiền',e1:'key',c2:'hot',p2:'INSERT, chờ khoá S',e2:'hot',kc:'key',kr:'R1 giữ X, R2 chờ'},
+ {t:'R1 làm xong và commit',d:'R1 chuyển tiền, ghi response (201 và body) vào row khoá, rồi commit. Khoá X được nhả.',c1:'row',p1:'commit, trả 201',e1:'row',c2:'hot',p2:'sắp được khoá',e2:'hot',kc:'row',kr:'201, body đã lưu',c:"UPDATE idempotency_keys SET status_code = 201, response_body = '{…}'\nWHERE owner_id = 42 AND idem_key = '7f3c…';\nCOMMIT;"},
+ {t:'R2 nhận lỗi trùng khoá',d:'R2 được khoá và thấy entry đã commit: câu INSERT báo lỗi 1062. Với hàm transfer, đây không phải lỗi cho người dùng mà là tín hiệu "đã xử lý rồi". R2 rollback transaction của mình.',c1:'row',p1:'xong',c2:'path',p2:'1062, rollback',kc:'row',kr:'201, body đã lưu',c:"ERROR 1062 (23000): Duplicate entry '42-7f3c…' for key 'idempotency_keys.PRIMARY'"},
+ {t:'R2 trả lại kết quả của R1',d:'R2 đọc row khoá. Fingerprint khớp với body của nó, nên nó trả lại đúng 201 và body mà R1 đã lưu. App nhận cùng một kết quả dù gửi hai lần; tiền chỉ chuyển một lần.',c1:'row',p1:'xong',c2:'row',p2:'trả 201 đã lưu',e2:'path',kc:'row',kr:'201, body đã lưu'},
+ {t:'Nếu body khác, hoặc R1 thất bại',d:'Nếu fingerprint không khớp, R2 trả 422: cùng khoá mà khác thao tác là lỗi của client. Nếu R1 rollback (ví dụ lỗi kết nối), row khoá biến mất; INSERT của R2 thành công và R2 tự chuyển tiền. Kết quả vẫn đúng một lần.',c1:'miss',p1:'giả sử rollback',c2:'key',p2:'INSERT thành công',e2:'key',kc:'key',kr:'R2 vừa chèn'}
+]);
+
+/* ---------- 02: dedup placement matrix ---------- */
+const DESIGNS={
+  none:{name:'Không ghi dấu',ops:['effect']},
+  before:{name:'Ghi dấu trước, transaction riêng',ops:['mark','effect']},
+  after:{name:'Ghi dấu sau, transaction riêng',ops:['effect','mark']},
+  same:{name:'Dấu và kết quả cùng transaction',ops:['both']}
+};
+const CRASH=[{k:'pre',n:'Chết trước khi làm gì'},{k:'mid',n:'Chết giữa hai bước'},{k:'post',n:'Chết sau commit, trước ack'}];
+const OPNAME={effect:'cộng điểm, commit',mark:'ghi dấu message_id, commit',both:'BEGIN; ghi dấu; cộng điểm; COMMIT'};
+function runDD(dk,ck){
+  const D=DESIGNS[dk];let marked=false,effects=0;const lines=[];
+  // crash index: number of ops completed before crash
+  const at=ck==='pre'?0:ck==='mid'?1:D.ops.length;
+  if(ck==='mid'&&D.ops.length<2)return null;
+  function deliver(n,stopAt){
+    lines.push(`Lần giao ${n}:`);
+    if(dk!=='none'&&marked){lines.push('  thấy dấu message_id → bỏ qua, ack');return true;}
+    for(let i=0;i<D.ops.length;i++){
+      if(stopAt!==null&&i===stopAt){lines.push('  ✗ consumer chết');return false;}
+      const op=D.ops[i];
+      if(op==='effect'||op==='both')effects++;
+      if(op==='mark'||op==='both')marked=true;
+      lines.push(`  ${OPNAME[op]}`);
+    }
+    if(stopAt!==null&&stopAt>=D.ops.length){lines.push('  ✗ consumer chết trước khi ack');return false;}
+    lines.push('  ack');return true;
+  }
+  if(!deliver(1,at)){lines.push('Hàng đợi không nhận được ack → giao lại.');deliver(2,null);}
+  lines.push(`Kết quả: cộng điểm ${effects} lần.`);
+  return {effects,lines};
+}
+let ddSel={d:'before',c:'mid'};
+function ddBuild(){
+  let h='<thead><tr><th>Cách ghi dấu</th>'+CRASH.map(c=>`<th>${c.n}</th>`).join('')+'</tr></thead><tbody>';
+  let bad=0;
+  for(const [dk,D] of Object.entries(DESIGNS)){
+    h+=`<tr><td>${D.name}</td>`;
+    for(const c of CRASH){const r=runDD(dk,c.k);
+      if(!r){h+='<td class="na">không có điểm này</td>';continue;}
+      if(r.effects!==1)bad++;
+      const cls=r.effects===1?'r1':r.effects>1?'r2':'r0';
+      h+=`<td><button class="${cls}" data-d="${dk}" data-c="${c.k}" aria-pressed="false">${r.effects} lần</button></td>`;}
+    h+='</tr>';
+  }
+  $('ddTable').innerHTML=h+'</tbody>';
+  $('ddTable').querySelectorAll('button').forEach(b=>b.onclick=()=>{ddSel={d:b.dataset.d,c:b.dataset.c};ddShow();});
+  $('ddMeta').textContent=`${bad} / 10 ô sai`;
+}
+function ddShow(){
+  $('ddTable').querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.d===ddSel.d&&b.dataset.c===ddSel.c));
+  const r=runDD(ddSel.d,ddSel.c);
+  $('ddTrace').textContent=r.lines.join('\n');
+  $('ddDesc').textContent={
+    none:'Không có dấu, nên lần giao lại làm lại từ đầu. Chỉ an toàn khi consumer chết trước khi làm gì.',
+    before:'Dấu được commit trước kết quả. Chết giữa hai bước thì dấu có mà kết quả không có; lần giao lại thấy dấu và bỏ qua, nên kết quả mất hẳn.',
+    after:'Kết quả được commit trước dấu. Chết giữa hai bước thì kết quả có mà dấu không có; lần giao lại làm lại, nên kết quả bị nhân đôi.',
+    same:'Dấu và kết quả cùng commit hoặc cùng không. Chết ở đâu thì lần giao lại cũng thấy đúng trạng thái: hoặc chưa làm gì, hoặc đã làm xong.'
+  }[ddSel.d];
+}
+ddBuild();ddShow();
+
+/* ---------- 02: retry storm ---------- */
+function rng(seed){let s=(seed*2654435761)>>>0||1;return()=>{s=(Math.imul(s,1664525)+1013904223)>>>0;return s/4294967296;};}
+let smSeed=1;
+function storm(S,N,C,D,M,seed){
+  const r=rng(seed),base=1,cap=32,SL=600;
+  const cl=[...Array(N)].map(()=>({next:0,att:0,done:false,gave:false}));
+  const served=new Array(SL).fill(0),rejected=new Array(SL).fill(0);let calls=0,last=-1;
+  for(let t=0;t<SL;t++){
+    const arr=cl.filter(c=>!c.done&&!c.gave&&c.next===t);
+    // shuffle arrivals
+    for(let i=arr.length-1;i>0;i--){const j=Math.floor(r()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]];}
+    const cap_t=t<D?0:C;
+    arr.forEach((c,i)=>{calls++;c.att++;
+      if(i<cap_t){c.done=true;served[t]++;last=t;return;}
+      rejected[t]++;
+      if(c.att>=M){c.gave=true;return;}
+      const ceil=Math.min(cap,base*Math.pow(2,c.att-1));
+      let w;
+      if(S==='now')w=1;
+      else if(S==='exp')w=ceil;
+      else if(S==='full')w=Math.floor(r()*(ceil+1));
+      else w=Math.floor(ceil/2+r()*(ceil/2+1));
+      c.next=t+Math.max(1,w);
+    });
+  }
+  const left=cl.filter(c=>!c.done&&!c.gave).length;
+  return {served,rejected,calls,last,gave:cl.filter(c=>c.gave).length,ok:cl.filter(c=>c.done).length,left,peak:Math.max(...served.map((v,i)=>v+rejected[i])),SL};
+}
+function sm(){
+  const num=(id,a,b,d)=>{let v=parseInt($(id).value,10);return isNaN(v)?d:Math.max(a,Math.min(b,v));};
+  const S=$('smS').value,N=num('smN',10,1000,200),C=num('smC',1,500,25),D=num('smD',0,30,4),M=num('smM',1,20,8);
+  const R=storm(S,N,C,D,M,smSeed);
+  let end=R.SL;while(end>1&&R.served[end-1]+R.rejected[end-1]===0)end--;end=Math.max(end,D+2);
+  const L=46,W=620,H=150,top=20,bw=W/end,ymax=Math.max(R.peak,C)*1.08;
+  const y=v=>top+H-v/ymax*H;
+  let g=`<line class="axis" x1="${L}" y1="${top+H}" x2="${L+W}" y2="${top+H}"/><line class="axis" x1="${L}" y1="${top}" x2="${L}" y2="${top+H}"/>`;
+  g+=T(L-6,top+8,`${Math.round(ymax)}`,'end','ts')+T(L-6,top+H,'0','end','ts');
+  for(let t=0;t<end;t++){const s=R.served[t],j=R.rejected[t];const x=L+t*bw+0.5,w=Math.max(1,bw-1);
+    if(s)g+=`<rect class="bar" x="${x}" y="${y(s)}" width="${w}" height="${top+H-y(s)}"/>`;
+    if(j)g+=`<rect class="bar over" x="${x}" y="${y(s+j)}" width="${w}" height="${y(s)-y(s+j)}"/>`;}
+  g+=`<line class="capline" x1="${L+D*bw}" y1="${y(C)}" x2="${L+W}" y2="${y(C)}"/>`;
+  if(D>0)g+=`<rect x="${L}" y="${top}" width="${D*bw}" height="${H}" fill="var(--miss-bg)" opacity=".5"/>`+T(L+D*bw+4,top+12,'← server ngừng','start','ts');
+  g+=T(L,top+H+18,'khe 0','start','ts')+T(L+W,top+H+18,`khe ${end}`,'end','ts');
+  $('smSvg').innerHTML=g;
+  $('smStats').innerHTML=[['Tổng số lần gọi',R.calls],['Lần gọi trên mỗi client',(R.calls/N).toLocaleString('vi-VN',{maximumFractionDigits:1})],['Đỉnh request trong một khe',R.peak],['Client cuối xong ở khe',R.last<0?'–':R.last],['Bỏ cuộc sau '+M+' lần',R.gave]]
+    .map(([k,v])=>`<div class="stat"><span>${k}</span><b${k.startsWith('Bỏ')&&R.gave?' class="bad"':''}>${v}</b></div>`).join('');
+  const txt={now:'Thử lại ngay: mọi client dội vào server mỗi khe. Trong lúc server ngừng, toàn bộ số lần thử bị phí; khi server hồi phục, mỗi khe vẫn có hàng trăm request cho vài chục chỗ.',
+    exp:'Luỹ thừa không jitter: các client cùng chờ 1, 2, 4, 8… khe, nên chúng quay lại thành từng đợt dồn vào cùng một khe, xen giữa là các khe trống. Server lúc thì quá tải, lúc thì rảnh.',
+    full:'Full jitter: mỗi client chờ ngẫu nhiên từ 0 tới giá trị luỹ thừa. Các lần thử trải ra nhiều khe thay vì dồn vào một khe, nên ít lần bị từ chối hơn so với không jitter.',
+    equal:'Equal jitter: chờ ít nhất một nửa giá trị luỹ thừa, nửa còn lại ngẫu nhiên. Không ai quay lại quá sớm, nên ít lần gọi bị phí lúc server còn yếu; đổi lại các lần thử vẫn hơi dồn cụm.'}[S];
+  $('smDesc').textContent=txt+` Kết quả lần chạy này: ${R.calls} lần gọi cho ${N} client, ${R.ok} xong`+(R.gave?`, ${R.gave} bỏ cuộc`:'')+(R.left?`, ${R.left} còn chờ`:'')+'.';
+  $('smMeta').textContent=`seed ${smSeed}`;
+}
+['smS','smN','smC','smD','smM'].forEach(id=>$(id).addEventListener('change',sm));
+$('smSeed').onclick=()=>{smSeed++;sm();};sm();
+</script>
+</body>
+</html>

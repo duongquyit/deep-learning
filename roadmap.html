@@ -810,6 +810,13 @@ footer.page-foot a{color:var(--text-1)}
   "sessions": [
     {
       "date": "2026-10-20",
+      "title": "Idempotency and retries",
+      "artifact": "../topics/idempotency-retries/index.html",
+      "planned": false,
+      "feeds": "Month 3"
+    },
+    {
+      "date": "2026-10-20",
       "title": "Concurrency control strategies on a balance",
       "artifact": "../topics/concurrency-control-strategies/index.html",
       "planned": false,
@@ -883,6 +890,12 @@ footer.page-foot a{color:var(--text-1)}
       "date": "2026-10-20",
       "work": "Concurrency control strategies on a balance (conditional UPDATE, FOR UPDATE, version column, hot rows) — documentation only, written ahead of Month 3; no measurements",
       "artifact": "topics/concurrency-control-strategies",
+      "feeds": "Month 3"
+    },
+    {
+      "date": "2026-10-20",
+      "work": "Idempotency and retries (delivery semantics, idempotency keys, consumer dedup, backoff with jitter, DLQ) — documentation only, written ahead of Month 3; no measurements",
+      "artifact": "topics/idempotency-retries",
       "feeds": "Month 3"
     }
   ],
@@ -1175,10 +1188,38 @@ footer.page-foot a{color:var(--text-1)}
         "provisional": true,
         "evidence": "same, §02",
         "date": "2026-10-20"
+      },
+      {
+        "topic": "Delivery semantics: at-most-once, at-least-once, effectively-once; why a timeout means \"unknown\"",
+        "level": 2,
+        "provisional": true,
+        "evidence": "idempotency-retries §01, §03",
+        "date": "2026-10-20"
+      },
+      {
+        "topic": "Idempotency keys for a POST API: storage, fingerprint, same-transaction design vs processing state, 409/422, expiry",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §02, §04",
+        "date": "2026-10-20"
+      },
+      {
+        "topic": "Consumer-side dedup: where to write the processed marker, ack after commit",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §02",
+        "date": "2026-10-20"
+      },
+      {
+        "topic": "Retry policy: retryable errors, exponential backoff with full/equal jitter, attempt limits, retry budget, DLQ",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §02, §06",
+        "date": "2026-10-20"
       }
     ],
     "levels": {
-      "2": 37,
+      "2": 41,
       "1": 1
     }
   }
