@@ -245,6 +245,13 @@
   "sessions": [
     {
       "date": "2026-10-19",
+      "title": "Buffer pool, redo log and undo log (InnoDB)",
+      "artifact": "../topics/innodb-buffer-pool-redo-undo/index.html",
+      "planned": true,
+      "feeds": ""
+    },
+    {
+      "date": "2026-10-19",
       "title": "Index write cost (InnoDB)",
       "artifact": "../topics/index-write-cost/index.html",
       "planned": true,
@@ -471,10 +478,38 @@
         "provisional": true,
         "evidence": "same, §02",
         "date": "2026-10-19"
+      },
+      {
+        "topic": "InnoDB buffer pool: midpoint LRU, innodb_old_blocks_time, page cleaner, dirty pages",
+        "level": 2,
+        "provisional": true,
+        "evidence": "innodb-buffer-pool-redo-undo §02",
+        "date": "2026-10-19"
+      },
+      {
+        "topic": "Redo log, LSN, checkpoint age, innodb_flush_log_at_trx_commit and what each value loses",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §01–§02",
+        "date": "2026-10-19"
+      },
+      {
+        "topic": "Undo log, purge, history list length, long transactions",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §02",
+        "date": "2026-10-19"
+      },
+      {
+        "topic": "Doublewrite and crash recovery order (doublewrite, redo from checkpoint, rollback)",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §02",
+        "date": "2026-10-19"
       }
     ],
     "levels": {
-      "2": 22,
+      "2": 26,
       "1": 1
     }
   }

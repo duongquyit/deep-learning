@@ -51,6 +51,10 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 | Page fill under sequential vs random inserts, page merge and `MERGE_THRESHOLD` | 2 (prov.) | same, §02 | 2026-10-19 | Exercises E8 and E15: rows per leaf for each PK type; merge counters and file size after a large delete |
 | Change buffer (what it defers, which indexes, 8.4 default `none`) | 2 (prov.) | same, §02 | 2026-10-19 | Exercise E14: insert time and buffer-pool reads with change buffering `all` vs `none` |
 | PK choice and its effect on every index (BIGINT, UUIDv4 text/binary, UUIDv7) | 2 (prov.) | same, §02 | 2026-10-19 | Exercises E5 and E8, then justify a PK choice for a real table at work with numbers |
+| InnoDB buffer pool: midpoint LRU, `innodb_old_blocks_time`, page cleaner, dirty pages | 2 (prov.) | [innodb-buffer-pool-redo-undo](../topics/innodb-buffer-pool-redo-undo/index.html) §02 | 2026-10-19 | Exercise E16: scan resistance with `innodb_old_blocks_time` 1000 vs 0, measured in buffer-pool reads |
+| Redo log, LSN, checkpoint age, `innodb_flush_log_at_trx_commit` and what each value loses | 2 (prov.) | same, §01–§02 | 2026-10-19 | Exercise E17: commit throughput for 1, 2, 0 with 1 and 16 clients; read the three LSNs during a write burst |
+| Undo log, purge, history list length, long transactions | 2 (prov.) | same, §02 | 2026-10-19 | Exercise E18: hold a read view open and watch history length and undo size |
+| Doublewrite and crash recovery order (doublewrite, redo from checkpoint, rollback) | 2 (prov.) | same, §02 | 2026-10-19 | Kill the lab server mid-write and read the recovery messages in the error log |
 
 "(prov.)" = provisional. Every row above rests on one artifact I wrote myself, with no measurement behind it. Week 1 of Month 1 includes a baseline assessment (TECHNICAL_GROWTH.md Section 11) that should confirm or cut these.
 
@@ -70,6 +74,9 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 12. With UUIDv7 generated on several app servers whose clocks differ by a few milliseconds, do PRIMARY pages still end up as full as with AUTO_INCREMENT? A variant of E8 would show it.
 13. Does InnoDB's "split at the insertion point" heuristic still fire when several sessions insert interleaved AUTO_INCREMENT values into the same last page?
 14. On 8.4 with change buffering off, how much slower do inserts get once the secondary indexes outgrow the buffer pool? E14.
+15. With the binary log on, commit becomes two-phase (redo prepare, binlog, redo commit). How much does binlog group commit change the cost of `innodb_flush_log_at_trx_commit = 1` with `sync_binlog = 1`? The lab runs with the binlog off; needs a variant of E17.
+16. At what write rate does the lab (default 100MB redo) start to stall on checkpoint age, and from what age does adaptive flushing speed up?
+17. On storage with atomic 16KB writes, how much does turning off doublewrite gain? Low priority.
 
 ## Pending verification (from the session's own exercise list)
 
@@ -92,8 +99,42 @@ These are written in the page as exercises; none have been run yet.
 - **E14** — Change buffering `all` vs `none` with a 128MB buffer pool and indexes far larger than it: insert time, `Innodb_buffer_pool_reads`, `ibuf_merges`, and who pays for the merge.
 - **E15** — Delete 60% of a 5M-row table: merge counters, `n_leaf_pages` and `.ibd` size before, after purge, after `OPTIMIZE TABLE`.
 - **Q17–Q22** — The six recall questions in section 08 of the index-write-cost page.
+- **E16** — Scan resistance: buffer-pool reads for a warmed point-query set after a full scan, `innodb_old_blocks_time` 1000 vs 0.
+- **E17** — Commit throughput with `innodb_flush_log_at_trx_commit` 1, 2, 0 from 1 and 16 clients; `Innodb_os_log_fsyncs`.
+- **E18** — A long open read view: history list length, undo size, read slowdown, purge catch-up time.
+- **Q23–Q28** — The six recall questions in section 08 of the buffer-pool, redo and undo page.
 - **Q11–Q16** — The six recall questions in section 08 of the composite-index page (answers are on the page, hidden).
 - **Q1–Q5** — The five check questions at the end of the page (leftmost prefix, `COUNT(*)` and the visibility map, full scan polluting the cache, TOAST, a `sessions` table updated 5,000×/sec). Answer in writing before looking anything up, then verify.
+
+---
+
+## 2026-10-19 — Buffer pool, redo log and undo log (InnoDB)
+
+**Topic and objective.** Month 1 Weeks 3–4 groundwork, written ahead as documentation only: what InnoDB does between `UPDATE` and the page reaching disk, at the level needed to explain behaviour. Buffer pool and midpoint LRU, dirty pages and checkpoints, redo log and durability settings, doublewrite, undo log and purge, crash recovery order.
+
+**Output.** [topics/innodb-buffer-pool-redo-undo/index.html](../topics/innodb-buffer-pool-redo-undo/index.html) — 10 sections. Widgets: a 10-step trace of `UPDATE … ; COMMIT` with checkpoint, flushed and current LSN (values invented for consistency, labelled); an 8-frame midpoint-LRU simulator with `innodb_old_blocks_time` 1000 vs 0 against a table scan; a checkpoint-age calculator (linear model, labelled); a crash-loss matrix for `innodb_flush_log_at_trx_commit` 1/2/0 vs mysqld crash and power loss; a 6-step crash-recovery stepper. Prediction templates for E16–E18.
+
+**What it covers.**
+
+- Steal / no-force: commit only writes and fsyncs redo; page cleaner writes pages later, in first-modification LSN order; the WAL rule (page LSN ≤ flushed LSN before a page write).
+- Midpoint LRU from the 8.4 manual: old sublist 3/8 (`innodb_old_blocks_pct = 37`), new pages enter at its head, made young only when accessed again after `innodb_old_blocks_time` (1000 ms).
+- Redo on 8.4: `innodb_redo_log_capacity` (100MB default), 32 files in `#innodb_redo`, `Innodb_redo_log_checkpoint_lsn` / `current_lsn` / `flushed_to_disk_lsn`; checkpoint age and write stalls near the limit.
+- `innodb_flush_log_at_trx_commit`: 1 loses nothing; 2 loses up to about a second only on OS crash or power loss; 0 loses up to about a second even on a mysqld crash. Group commit. `sync_binlog` when the binlog is on.
+- Doublewrite against torn pages; undo records, `DB_TRX_ID`, `DB_ROLL_PTR`, purge, history list length, and why a long read-only transaction blocks purge for every table.
+- Recovery: doublewrite check, redo from checkpoint (regardless of commit state), then rollback of active transactions in the background.
+- Comparison with PostgreSQL (WAL, no undo, full-page writes, clock-sweep).
+
+**Initial understanding.** TODO — what did I believe about redo, undo and the buffer pool before this page? No prior belief was stated in the session. The competency matrix had WAL ordering at Level 1 from the PostgreSQL-shaped 2026-10-14 page.
+
+**Mistakes and misconceptions corrected.** TODO — only I know which. Traps the page writes down: commit writes the table file; a 99% hit rate means enough memory; a scan always wipes the cache; value 2 loses data on a mysqld crash; read-only transactions are harmless; redo alone can repair a torn page.
+
+**Experiments and results.** None. The LSN trace, the LRU simulator and the checkpoint calculator are models. E16–E18 are the measurements.
+
+**Competency level.** Level 2 provisional on four new matrix rows. The 2026-10-14 rows on buffer pool and WAL stay as they are; these rows are the InnoDB counterparts.
+
+**Remaining questions.** Open questions 15–17.
+
+**Next step.** MVCC and read views, which the undo section points to.
 
 ---
 
