@@ -55,6 +55,10 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 | Redo log, LSN, checkpoint age, `innodb_flush_log_at_trx_commit` and what each value loses | 2 (prov.) | same, §01–§02 | 2026-10-19 | Exercise E17: commit throughput for 1, 2, 0 with 1 and 16 clients; read the three LSNs during a write burst |
 | Undo log, purge, history list length, long transactions | 2 (prov.) | same, §02 | 2026-10-19 | Exercise E18: hold a read view open and watch history length and undo size |
 | Doublewrite and crash recovery order (doublewrite, redo from checkpoint, rollback) | 2 (prov.) | same, §02 | 2026-10-19 | Kill the lab server mid-write and read the recovery messages in the error log |
+| MVCC: version chain, read view and the visibility rule | 2 (prov.) | [mvcc-read-view](../topics/mvcc-read-view/index.html) §02 | 2026-10-19 | Predict which version a view sees for a chain I did not build; E19 variants |
+| Isolation levels in InnoDB (RR snapshot at first read, RC per statement) and which anomalies each allows | 2 (prov.) | same, §01–§02 | 2026-10-19 | Exercise E19 under RR and RC, including `WITH CONSISTENT SNAPSHOT` |
+| Consistent read vs locking read / DML (current read) and the lost-update trap | 2 (prov.) | same, §02, §04 | 2026-10-19 | Reproduce a lost update in the lab, then fix it two ways (Month 1 Week 4) |
+| MVCC on secondary indexes (no hidden columns, fallback to PRIMARY) | 2 (prov.) | same, §02 | 2026-10-19 | Exercise E20: covering read cost on a table under concurrent writes |
 
 "(prov.)" = provisional. Every row above rests on one artifact I wrote myself, with no measurement behind it. Week 1 of Month 1 includes a baseline assessment (TECHNICAL_GROWTH.md Section 11) that should confirm or cut these.
 
@@ -77,6 +81,8 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 15. With the binary log on, commit becomes two-phase (redo prepare, binlog, redo commit). How much does binlog group commit change the cost of `innodb_flush_log_at_trx_commit = 1` with `sync_binlog = 1`? The lab runs with the binlog off; needs a variant of E17.
 16. At what write rate does the lab (default 100MB redo) start to stall on checkpoint age, and from what age does adaptive flushing speed up?
 17. On storage with atomic 16KB writes, how much does turning off doublewrite gain? Low priority.
+18. Are the exact conditions that make a covering read on a secondary index fall back to PRIMARY (delete-marked entry, page modified by a transaction newer than the view) as described, and what does it cost on a table under writes? The manual names both conditions; the per-page transaction ID detail comes from the source code and is unchecked. E20.
+19. Under READ COMMITTED, an `UPDATE … WHERE` on an unindexed column uses a "semi-consistent read" to skip non-matching rows without waiting for their locks. How much does that change lock waits compared with REPEATABLE READ? Belongs to the locking page.
 
 ## Pending verification (from the session's own exercise list)
 
@@ -103,8 +109,40 @@ These are written in the page as exercises; none have been run yet.
 - **E17** — Commit throughput with `innodb_flush_log_at_trx_commit` 1, 2, 0 from 1 and 16 clients; `Innodb_os_log_fsyncs`.
 - **E18** — A long open read view: history list length, undo size, read slowdown, purge catch-up time.
 - **Q23–Q28** — The six recall questions in section 08 of the buffer-pool, redo and undo page.
+- **E19** — Two-session timeline under RR and RC, plus `WITH CONSISTENT SNAPSHOT` and the lost-update variant.
+- **E20** — Covering read on `idx_user_id` inside an old read view after concurrent updates: buffer-pool requests vs a fresh session.
+- **Q29–Q34** — The six recall questions in section 08 of the MVCC page.
 - **Q11–Q16** — The six recall questions in section 08 of the composite-index page (answers are on the page, hidden).
 - **Q1–Q5** — The five check questions at the end of the page (leftmost prefix, `COUNT(*)` and the visibility map, full scan polluting the cache, TOAST, a `sessions` table updated 5,000×/sec). Answer in writing before looking anything up, then verify.
+
+---
+
+## 2026-10-19 — MVCC and read views (InnoDB)
+
+**Topic and objective.** Month 1 Week 4 topic, written ahead as documentation only: how InnoDB decides which version of a row a plain `SELECT` sees, when the snapshot is taken under each isolation level, and why `SELECT`, locking reads and `UPDATE` in the same transaction can see different data.
+
+**Output.** [topics/mvcc-read-view/index.html](../topics/mvcc-read-view/index.html) — 10 sections. Widgets: a two-session timeline (10 steps) switchable between REPEATABLE READ and READ COMMITTED, showing what each statement returns; a visibility playground where `low_limit_id`, the active list and the creator are chosen and the version chain is walked with the rule applied to each version. Prediction templates for E19–E20.
+
+**What it covers.**
+
+- Hidden columns `DB_TRX_ID` (6 bytes) and `DB_ROLL_PTR` (7 bytes), the version chain through undo; insert undo dropped at commit, update undo kept for consistent reads. Transaction IDs are assigned on first write.
+- Read view: creator, `low_limit_id`, `m_ids`, `up_limit_id`, and the visibility rule (checked against `ReadView::changes_visible` in `storage/innobase/include/read0types.h` on the 8.4 branch).
+- RR takes the snapshot at the first consistent read (not at `START TRANSACTION`; `WITH CONSISTENT SNAPSHOT` takes it immediately); RC per statement; RU none; SERIALIZABLE turns plain `SELECT` into `FOR SHARE` when autocommit is off.
+- Locking reads and DML read the latest committed version; the manual's `COUNT = 0` then `UPDATE` affects 10 rows example; lost update with application-side read-modify-write, and three fixes.
+- Secondary-index entries have no hidden columns; delete-marked entries or pages modified by newer transactions force a PRIMARY lookup, disabling the covering-index shortcut.
+- Anomaly table per isolation level for InnoDB; comparison with PostgreSQL (RR raises a serialization error on concurrent update, SSI for SERIALIZABLE).
+
+**Initial understanding.** TODO — what did I believe about MVCC and isolation before this page? No prior belief was stated in the session.
+
+**Mistakes and misconceptions corrected.** TODO — only I know which. Traps the page writes down: snapshot at `START TRANSACTION`; every statement in an RR transaction sees the same data; RR prevents lost update; read views compare commit times; MySQL and PostgreSQL RR behave the same; covering indexes never touch PRIMARY.
+
+**Experiments and results.** None. The two-session results are derived from the manual. E19 and E20 are the measurements.
+
+**Competency level.** Level 2 provisional on four new matrix rows.
+
+**Remaining questions.** Open questions 18 and 19.
+
+**Next step.** Locking and deadlocks, which finishes the Week 4 topic list (record, gap, next-key locks; lost update and deadlock by hand).
 
 ---
 

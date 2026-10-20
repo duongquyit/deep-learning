@@ -1,0 +1,630 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MVCC và read view trong InnoDB</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F2F4F6; --surface:#FFFFFF; --ink:#18203A; --ink-2:#56607A; --ink-3:#8A93A8;
+  --rule:#CCD3DD; --rule-strong:#8C96AB;
+  --struct:#3446B8; --struct-bg:#E6E9FA;            /* cấu trúc index, chrome của trang */
+  --row:#16795F;    --row-bg:#DDF2EA;               /* dữ liệu row thật */
+  --hot:#9A5F00;    --hot-bg:#FCEFD2; --hot-line:#E3A21A;  /* bị ghi, bị chạm, bị lọc */
+  --miss:#B5302B;   --miss-bg:#FBE1DF;              /* đọc từ disk, việc thừa, lỗi */
+  --path:#0B7A8A;   --path-bg:#D8F1F3;              /* đường đi hoặc khoảng đang đọc */
+  --key:#A8327A;    --key-bg:#F8E0EE;               /* con trỏ: PK, TID */
+  --ram:#5B4BB0;    --ram-bg:#E7E3FA;               /* hit trong buffer pool */
+  --grid:rgba(52,70,184,.06);
+  --r-s:4px; --r-m:8px;
+  --sans:"Instrument Sans",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --paper:#0F1320; --surface:#171C2B; --ink:#E6E9F2; --ink-2:#A3ABC0; --ink-3:#6E7790;
+  --rule:#2C3448; --rule-strong:#55607A;
+  --struct:#97A3FF; --struct-bg:#232A55;
+  --row:#5FD0AE;    --row-bg:#123A31;
+  --hot:#F2BE5C;    --hot-bg:#3B2C0E; --hot-line:#E3A21A;
+  --miss:#FF8A84;   --miss-bg:#3E1A1A;
+  --path:#5ED3E0;   --path-bg:#113A40;
+  --key:#F28DC4;    --key-bg:#3E1A2E;
+  --ram:#B7A8FF;    --ram-bg:#2A2350;
+  --grid:rgba(151,163,255,.05);
+}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important;animation:none!important}}
+body{margin:0;color:var(--ink);font:400 17px/1.65 var(--sans);
+  background-color:var(--paper);
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:24px 24px}
+a{color:var(--struct)}
+:focus-visible{outline:2px solid var(--struct);outline-offset:2px}
+
+/* layout */
+.shell{display:grid;grid-template-columns:230px minmax(0,1fr);gap:56px;max-width:1180px;margin:0 auto;padding:0 32px}
+nav.toc{position:sticky;top:0;align-self:start;height:100vh;padding:48px 0;overflow:auto}
+nav.toc p{font-weight:600;margin:0 0 12px;font-size:15px}
+nav.toc ol,.mobile-toc ol{list-style:none;margin:0;padding:0;counter-reset:s}
+nav.toc li,.mobile-toc li{counter-increment:s;margin:0}
+nav.toc a,.mobile-toc a{display:grid;grid-template-columns:28px 1fr;padding:5px 0;color:var(--ink-2);text-decoration:none;font-size:14.5px;line-height:1.4}
+nav.toc a::before,.mobile-toc a::before{content:counter(s,decimal-leading-zero);font:500 12px/1.9 var(--mono);color:var(--ink-3)}
+nav.toc a:hover,nav.toc a.on{color:var(--struct)}
+main{min-width:0;padding:56px 0 120px}
+.prose{max-width:720px}
+section{padding-top:72px}
+section>header{display:grid;grid-template-columns:auto 1fr;gap:0 18px;align-items:baseline;max-width:720px;margin-bottom:12px}
+section>header .num{font:500 15px var(--mono);color:var(--struct);border:1.5px solid var(--struct);border-radius:var(--r-s);padding:2px 7px;transform:translateY(-4px)}
+h1,h2,h3,h4{line-height:1.2;letter-spacing:-.015em;margin:0}
+h1{font-size:clamp(2.3rem,5.4vw,3.9rem);font-weight:700;letter-spacing:-.03em;line-height:1.02;max-width:14ch;margin-bottom:20px}
+.lede{font-size:19px;color:var(--ink-2);max-width:56ch;margin-bottom:28px}
+h2{font-size:clamp(1.6rem,3vw,2.1rem);font-weight:650}
+h3{font-size:1.2rem;font-weight:600;margin:36px 0 8px}
+p{margin:0 0 14px}
+ul,ol.list{margin:0 0 16px;padding-left:22px}
+li{margin:4px 0}
+code{font:0.88em var(--mono);background:var(--struct-bg);color:var(--ink);padding:1px 5px;border-radius:3px}
+pre{font:13.5px/1.6 var(--mono);background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:var(--r-s);padding:14px 16px;overflow-x:auto;margin:0 0 18px;max-width:720px}
+pre code{background:none;padding:0}
+.tablewrap{overflow-x:auto;max-width:720px;margin:0 0 20px}
+table{border-collapse:collapse;width:100%;max-width:720px;margin:0 0 20px;font-size:15px;background:var(--surface)}
+.tablewrap table{margin:0;min-width:560px}
+th,td{text-align:left;padding:9px 12px;border:1px solid var(--rule);vertical-align:top}
+th{font-weight:600;background:var(--struct-bg)}
+
+/* widget frame: styled like a page, header strip = page header */
+.frame{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);margin:22px 0 28px;max-width:920px;overflow:hidden}
+.frame>.ph{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:9px 16px;border-bottom:1px solid var(--rule);background:var(--struct-bg);font-size:14px}
+.frame>.ph strong{font-weight:600}
+.frame>.ph .meta{margin-left:auto;font:500 12.5px var(--mono);color:var(--ink-2)}
+.frame .bd{padding:16px;min-width:0}
+.frame svg{display:block;width:100%;height:auto}
+.st-t{font:600 16px var(--sans);margin:0 0 8px}
+.desc{background:var(--paper);border-radius:var(--r-s);padding:12px 14px;margin-top:12px;min-height:84px;font-size:15.5px;color:var(--ink-2)}
+.desc pre{margin:10px 0 0;font-size:12.5px;border-left-color:var(--rule-strong)}
+.nav{display:flex;gap:8px;margin-top:12px;align-items:center}
+button{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 14px;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--struct);color:var(--struct)}
+button:disabled{opacity:.4;cursor:default}
+button.primary,button[aria-pressed="true"]{background:var(--struct);border-color:var(--struct);color:var(--surface)}
+button.primary:hover:not(:disabled),button[aria-pressed="true"]:hover{color:var(--surface);filter:brightness(1.1)}
+input,select{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 10px}
+input[type=number]{width:84px}
+input[type=range],input[type=checkbox]{accent-color:var(--struct)}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-top:12px}
+.stat{background:var(--paper);border-radius:var(--r-s);padding:8px 12px}
+.stat span{display:block;font-size:13px;color:var(--ink-2)}
+.stat b{font:600 20px var(--sans);font-variant-numeric:tabular-nums}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;color:var(--ink-2);margin-top:12px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:14px;height:14px;border-radius:3px;border:2px solid;display:inline-block}
+.fine{font-size:13.5px;color:var(--ink-2);margin:10px 0 0}  /* chú thích nhỏ dưới widget */
+
+/* svg text */
+.tb{font:600 14px var(--sans)} .t{font:400 13px var(--sans)} .ts{font:400 12px var(--sans)} .tm{font:500 12.5px var(--mono)}
+.lbl{fill:var(--ink-2);font:400 12.5px var(--sans)}
+
+/* callouts */
+.note{border-left:3px solid var(--hot-line);background:var(--hot-bg);padding:12px 16px;border-radius:0 var(--r-s) var(--r-s) 0;margin:18px 0;max-width:720px;font-size:16px}
+.note strong{color:var(--hot)}
+.senior{border:1.5px solid var(--struct);border-radius:var(--r-m);padding:14px 18px;margin:22px 0;max-width:720px;background:var(--surface)}
+.senior h4{font-size:16px;margin-bottom:6px;color:var(--struct)}
+.senior p:last-child,.senior ul:last-child{margin-bottom:0}
+details{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-s);padding:10px 14px;margin:10px 0;max-width:720px}
+details summary{cursor:pointer;font-weight:600}
+details[open] summary{margin-bottom:8px}
+details.answer{background:var(--paper);border-style:dashed;margin:10px 0 0}
+details.answer summary{font-weight:500;color:var(--struct)}
+.tag{display:inline-block;font:500 12px var(--sans);color:var(--ink-2);border:1px solid var(--rule-strong);border-radius:999px;padding:0 8px;margin-right:6px;vertical-align:1px}
+
+/* hero brief: mục tiêu, cần biết trước, trạng thái */
+.brief{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px 24px;background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);padding:14px 18px;max-width:920px;margin:0 0 8px;font-size:15px}
+.brief h4{font-size:14px;color:var(--struct);margin:0 0 4px}
+.brief ul{margin:0;padding-left:18px}
+.brief p{margin:0}
+
+.mobile-toc{display:none}
+@media (max-width:900px){
+  .shell{grid-template-columns:1fr;padding:0 16px;gap:0}
+  nav.toc{display:none}
+  .mobile-toc{display:block;margin-top:20px}
+  main{padding-top:32px}
+  .frame .bd{padding:12px}
+  body{font-size:16px}
+}
+
+/* ---- page widgets ---- */
+.n rect{fill:var(--surface);stroke:var(--rule-strong);stroke-width:1}
+.n text{fill:var(--ink)}
+.n.struct rect{fill:var(--struct-bg);stroke:var(--struct)} .n.struct text{fill:var(--struct)}
+.n.row rect{fill:var(--row-bg);stroke:var(--row);stroke-width:2.2} .n.row text{fill:var(--row)}
+.n.miss rect{fill:var(--miss-bg);stroke:var(--miss);stroke-width:1.6} .n.miss text{fill:var(--miss)}
+.n.hot rect{fill:var(--hot-bg);stroke:var(--hot);stroke-width:1.6} .n.hot text{fill:var(--hot)}
+.n.key rect{fill:var(--key-bg);stroke:var(--key);stroke-width:1.6} .n.key text{fill:var(--key)}
+.n.path rect{fill:var(--path-bg);stroke:var(--path);stroke-width:2} .n.path text{fill:var(--path)}
+.n.dim rect{fill:var(--paper);stroke:var(--rule)} .n.dim text{fill:var(--ink-3)}
+.edge{stroke:var(--rule-strong);stroke-width:1.2;fill:none}
+.edge.key{stroke:var(--key);stroke-width:1.8}
+.edge.path{stroke:var(--path);stroke-width:2.2}
+.lg-row{border-color:var(--row);background:var(--row-bg)}
+.lg-miss{border-color:var(--miss);background:var(--miss-bg)}
+.lg-hot{border-color:var(--hot);background:var(--hot-bg)}
+.lg-key{border-color:var(--key);background:var(--key-bg)}
+.lg-path{border-color:var(--path);background:var(--path-bg)}
+.lg-dim{border-color:var(--rule);background:var(--paper)}
+.calc{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px 14px;margin-bottom:12px}
+.calc label{display:flex;flex-direction:column;gap:4px;font-size:13.5px;color:var(--ink-2)}
+.chk{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:14px}
+.chk label{display:inline-flex;align-items:center;gap:6px;color:var(--ink)}
+.rv{font:13px/1.6 var(--mono);background:var(--paper);border-radius:var(--r-s);padding:10px 12px;margin:0 0 10px;overflow-x:auto;white-space:pre}
+.sessions .st-t{margin-top:12px}
+.sess{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+.sess .col{border:1px solid var(--rule);border-radius:var(--r-s);background:var(--paper);padding:8px 10px;min-height:150px;min-width:0}
+.sess .col h5{margin:0 0 6px;font:600 13px var(--sans);color:var(--ink-2)}
+.sess .ln{font:12.5px/1.5 var(--mono);color:var(--ink-3);padding:2px 4px;border-radius:3px;overflow-wrap:anywhere}
+.sess .ln.done{color:var(--ink-2)}
+.sess .ln.cur{background:var(--path-bg);color:var(--path);font-weight:500}
+.sess .ln .out{display:block;color:var(--row);font-weight:600}
+.sess .ln .out.diff{color:var(--hot)}
+@media (max-width:560px){.sess{grid-template-columns:1fr}}
+.verdict{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:10px}
+.verdict div{border:1.5px solid var(--rule);border-radius:var(--r-s);padding:8px 10px;background:var(--paper);font-size:14px}
+.verdict div b{display:block;font-size:12.5px;color:var(--ink-2);font-weight:500}
+</style>
+</head>
+<body>
+
+<div class="shell">
+<nav class="toc" aria-label="Mục lục">
+  <p>MVCC và read view</p>
+  <ol>
+    <li><a href="#s1">Bản chất vấn đề</a></li>
+    <li><a href="#s2">Cơ chế hoạt động</a></li>
+    <li><a href="#s3">Vì sao thiết kế như vậy</a></li>
+    <li><a href="#s4">Ví dụ</a></li>
+    <li><a href="#s5">Thí nghiệm</a></li>
+    <li><a href="#s6">Ảnh hưởng khi chạy production</a></li>
+    <li><a href="#s7">Hiểu lầm thường gặp</a></li>
+    <li><a href="#s8">Câu hỏi ôn tập</a></li>
+    <li><a href="#s9">Câu hỏi còn mở</a></li>
+    <li><a href="#s10">Tài liệu tham khảo</a></li>
+  </ol>
+</nav>
+
+<main>
+<div class="hero">
+<h1>MVCC và read view trong InnoDB</h1>
+<p class="lede">Một session đang sửa một row, session khác đọc đúng row đó, vậy mà không ai phải chờ ai. Lý do: câu <code>SELECT</code> thông thường không đọc row hiện tại. Nó đọc phiên bản khớp với một "ảnh chụp" dữ liệu, và InnoDB dựng lại phiên bản đó từ undo log. Bài này nói về ảnh chụp ấy: nó được chụp lúc nào, nó chọn phiên bản nào, và vì sao trong cùng một transaction, <code>SELECT</code> và <code>UPDATE</code> có thể thấy dữ liệu khác nhau.</p>
+<div class="brief">
+  <div><h4>Mục tiêu</h4><ul>
+    <li>Cho một chuỗi phiên bản của row, xác định được câu đọc sẽ thấy phiên bản nào.</li>
+    <li>Dự đoán được từng câu trong hai session chạy song song trả về gì, dưới <code>REPEATABLE READ</code> và dưới <code>READ COMMITTED</code>.</li>
+    <li>Giải thích được vì sao <code>SELECT</code> thường, <code>SELECT … FOR UPDATE</code> và <code>UPDATE</code> có thể thấy giá trị khác nhau trong cùng một transaction.</li>
+    <li>Nói được mỗi isolation level của InnoDB ngăn được lỗi nào và không ngăn được lỗi nào.</li>
+  </ul></div>
+  <div><h4>Cần biết trước</h4><ul>
+    <li><a href="../innodb-buffer-pool-redo-undo/index.html">Buffer pool, redo và undo</a>: undo log giữ bản cũ của row; hai cột ẩn <code>DB_TRX_ID</code>, <code>DB_ROLL_PTR</code>; purge.</li>
+    <li><a href="../index-write-cost/index.html">Cái giá khi ghi của index</a>: khi giá trị đổi, secondary index đánh dấu xoá entry cũ rồi chèn entry mới.</li>
+  </ul></div>
+  <div><h4>Trạng thái</h4><p>Level 2 (prov.). Nội dung lấy từ manual MySQL 8.4 và mã nguồn read view của nhánh 8.4. Kết quả trong ví dụ hai session là suy ra từ manual; bạn chưa chạy thử trên lab.</p></div>
+</div>
+<details class="mobile-toc"><summary>Mục lục</summary><ol><li><a href="#s1">Bản chất vấn đề</a></li><li><a href="#s2">Cơ chế hoạt động</a></li><li><a href="#s3">Vì sao thiết kế như vậy</a></li><li><a href="#s4">Ví dụ</a></li><li><a href="#s5">Thí nghiệm</a></li><li><a href="#s6">Ảnh hưởng khi chạy production</a></li><li><a href="#s7">Hiểu lầm thường gặp</a></li><li><a href="#s8">Câu hỏi ôn tập</a></li><li><a href="#s9">Câu hỏi còn mở</a></li><li><a href="#s10">Tài liệu tham khảo</a></li></ol></details>
+</div>
+
+<!-- 1 -->
+<section id="s1">
+<header><span class="num">01</span><h2>Bản chất vấn đề</h2></header>
+<div class="prose">
+<p>Bảng <code>accounts</code> có row <code>id = 7</code>, <code>balance = 1000</code> (lưu bằng số nguyên, đơn vị nhỏ nhất). Session A mở transaction và đọc được 1000. Session B trừ 100 rồi commit. A đọc lại: thấy 1000 hay 900? Câu trả lời tuỳ vào isolation level. Rồi nếu A chạy tiếp <code>UPDATE … SET balance = balance - 50</code>, kết quả cuối là 950 hay 850?</p>
+<p>Nếu câu đọc nào cũng phải khoá row, A và B sẽ phải chờ nhau liên tục. InnoDB làm khác: row trong page luôn là phiên bản mới nhất, còn các phiên bản cũ được cất trong undo log. Mỗi câu <code>SELECT</code> thông thường mang theo một <strong>read view</strong>, có thể hiểu là một ảnh chụp ghi lại transaction nào đã commit vào lúc chụp. Câu đọc đi ngược từ phiên bản mới nhất về các bản cũ, và dừng ở phiên bản đầu tiên mà ảnh chụp cho phép thấy.</p>
+<p>Hãy hình dung một tấm ảnh chụp cả văn phòng. Ai đang làm dở giấy tờ lúc bấm máy thì trong ảnh coi như chưa làm, dù năm phút sau họ đã xong. Muốn thấy giấy tờ mới thì phải chụp tấm khác. <code>REPEATABLE READ</code> dùng một tấm ảnh cho cả transaction; <code>READ COMMITTED</code> chụp lại trước mỗi câu.</p>
+<p>Bấm qua từng bước của hai session dưới đây, rồi đổi isolation level và bấm lại từ đầu để so.</p>
+</div>
+
+<div class="frame sessions" id="sessions"></div>
+<div class="legend">
+  <span><i class="lg-path"></i>câu đang chạy</span>
+  <span><i class="lg-row"></i>giá trị câu đó trả về</span>
+  <span><i class="lg-hot"></i>giá trị khác nhau giữa RR và RC</span>
+</div>
+<p class="fine">Kết quả suy ra từ manual 8.4, chưa chạy trên lab. Thí nghiệm E19 chạy đúng kịch bản này.</p>
+</section>
+
+<!-- 2 -->
+<section id="s2">
+<header><span class="num">02</span><h2>Cơ chế hoạt động</h2></header>
+<div class="prose">
+<h3>Chuỗi phiên bản của một row</h3>
+<p>Ý chính: từ row hiện tại, InnoDB lần ngược được về mọi phiên bản cũ còn giữ trong undo log.</p>
+<p>Mỗi row có hai cột ẩn. <code>DB_TRX_ID</code> (6 byte) ghi transaction nào sửa row lần cuối. <code>DB_ROLL_PTR</code> (7 byte) trỏ tới bản ngay trước đó trong undo log. Bản đó lại có hai giá trị tương tự, trỏ tới bản trước nữa. Đi theo các con trỏ này là đi ngược thời gian, từng phiên bản một.</p>
+<p>Mỗi transaction chỉ được cấp số ID khi nó ghi lần đầu, không phải lúc bắt đầu. Transaction chỉ đọc thì không có ID.</p>
+
+<h3>Read view chọn phiên bản như thế nào</h3>
+<p>Ý chính: một phiên bản được thấy nếu transaction tạo ra nó đã commit trước lúc chụp ảnh, hoặc chính là transaction đang đọc.</p>
+<p>Read view ghi lại bốn giá trị tại lúc chụp:</p>
+<ul>
+<li><code>creator</code>: ID của transaction đang đọc (nếu nó đã có ID).</li>
+<li><code>low_limit_id</code>: ID sẽ cấp cho transaction kế tiếp. Transaction nào có ID từ số này trở lên thì lúc chụp chưa tồn tại.</li>
+<li><code>m_ids</code>: danh sách transaction đang chạy dở (chưa commit) lúc chụp.</li>
+<li><code>up_limit_id</code>: ID nhỏ nhất trong <code>m_ids</code> (nếu danh sách rỗng thì bằng <code>low_limit_id</code>). Mọi transaction có ID nhỏ hơn số này đều đã commit trước lúc chụp.</li>
+</ul>
+<p>Với một phiên bản do transaction <code>t</code> tạo ra, InnoDB hỏi lần lượt:</p>
+<ol class="list">
+<li><code>t</code> là chính transaction đang đọc? Thấy.</li>
+<li><code>t</code> nhỏ hơn <code>up_limit_id</code>? Đã commit trước lúc chụp: thấy.</li>
+<li><code>t</code> từ <code>low_limit_id</code> trở lên? Lúc chụp chưa tồn tại: không thấy.</li>
+<li><code>t</code> nằm trong <code>m_ids</code>? Lúc chụp đang chạy dở: không thấy. Còn lại: thấy.</li>
+</ol>
+<p>Không thấy thì đi tiếp về bản cũ hơn. Nếu hết bản để xét (row được chèn sau lúc chụp), câu đọc coi như row đó không tồn tại.</p>
+</div>
+
+<div class="frame" id="vis">
+  <div class="ph"><strong>Read view chọn phiên bản nào</strong><span class="meta" id="visMeta"></span></div>
+  <div class="bd">
+    <div class="calc">
+      <label>low_limit_id (ID sẽ cấp tiếp, lúc chụp)<select id="vLow"><option value="306">306</option><option value="310" selected>310</option><option value="313">313</option></select></label>
+      <label>Transaction đang đọc<select id="vCreator"><option value="0" selected>chỉ đọc, chưa có ID</option><option value="309">309 (chính nó đã sửa row)</option></select></label>
+    </div>
+    <div class="chk" id="vActive"></div>
+    <div class="rv" id="vRv"></div>
+    <svg id="vSvg" viewBox="0 0 680 152" role="img" aria-label="Chuỗi phiên bản của row id 7 và phiên bản được chọn"></svg>
+    <div class="desc" aria-live="polite" id="vDesc"></div>
+    <div class="legend">
+      <span><i class="lg-row"></i>phiên bản được thấy</span>
+      <span><i class="lg-miss"></i>không được thấy, đi tiếp</span>
+      <span><i class="lg-dim"></i>không cần xét</span>
+      <span><i class="lg-key"></i>con trỏ về bản cũ hơn</span>
+    </div>
+    <p class="fine">Chuỗi phiên bản cố định: transaction 290 đặt 1000 (commit từ lâu), 305 đặt 900, 309 đặt 800, 312 đặt 700 (312 chưa commit). Bạn chọn tình trạng lúc chụp. Transaction có ID từ <code>low_limit_id</code> trở lên lúc đó chưa tồn tại, nên không chọn được là "đang chạy".</p>
+  </div>
+</div>
+<div class="note"><strong>Lỗi hay gặp:</strong> nghĩ rằng read view so thời điểm commit. Nó chỉ so ID với danh sách đã ghi lúc chụp. Nếu 305 đang chạy dở lúc chụp, thì dù 305 commit ngay sau đó, ảnh chụp vẫn coi 305 là chưa commit. Chính điều này giữ cho ảnh chụp đứng yên.</div>
+
+<div class="prose">
+<h3>Ảnh chụp được tạo lúc nào</h3>
+<p>Ý chính: dưới <code>REPEATABLE READ</code>, ảnh được chụp ở câu <code>SELECT</code> đầu tiên và dùng tới cuối transaction; dưới <code>READ COMMITTED</code>, mỗi câu chụp ảnh mới.</p>
+<ul>
+<li><strong>REPEATABLE READ</strong> (mặc định): chụp ở câu <code>SELECT</code> thường <em>đầu tiên</em> của transaction, không phải ở <code>START TRANSACTION</code>. Muốn chụp ngay khi bắt đầu thì dùng <code>START TRANSACTION WITH CONSISTENT SNAPSHOT</code>. Ảnh dùng tới khi commit.</li>
+<li><strong>READ COMMITTED</strong>: mỗi câu <code>SELECT</code> chụp một ảnh mới.</li>
+<li><strong>READ UNCOMMITTED</strong>: không chụp ảnh; đọc thẳng row hiện tại, kể cả thay đổi chưa commit (dirty read).</li>
+<li><strong>SERIALIZABLE</strong>: khi autocommit tắt, mọi <code>SELECT</code> thường được đổi thành <code>SELECT … FOR SHARE</code>, tức là đọc có khoá.</li>
+</ul>
+
+<h3>Câu nào dùng ảnh chụp, câu nào không</h3>
+<p>Ý chính: chỉ <code>SELECT</code> thường dùng ảnh chụp. Câu ghi và câu đọc có khoá luôn làm việc trên bản mới nhất.</p>
+<p>Các câu sau bỏ qua ảnh chụp, đọc <strong>bản mới nhất đã commit</strong> và khoá nó:</p>
+<ul>
+<li><code>SELECT … FOR UPDATE</code> và <code>SELECT … FOR SHARE</code> (đọc có khoá).</li>
+<li><code>UPDATE</code> và <code>DELETE</code>: luôn tìm và sửa bản mới nhất. Nếu transaction khác đang giữ khoá row đó thì chờ.</li>
+<li>Phần <code>SELECT</code> nằm trong <code>INSERT … SELECT</code>, <code>UPDATE … (SELECT)</code>, <code>CREATE TABLE … SELECT</code>: theo manual, mặc định đọc bản mới nhất và có khoá.</li>
+</ul>
+<p>Manual 8.4 đưa ra một ví dụ cho thấy hệ quả. Dưới <code>REPEATABLE READ</code>, <code>SELECT COUNT(*) … WHERE c2 = 'abc'</code> trả 0. Ngay sau đó, <code>UPDATE … WHERE c2 = 'abc'</code> lại sửa được 10 row, do một transaction khác vừa commit. Rồi <code>SELECT</code> thấy đủ 10 row, vì giờ chúng do chính transaction này sửa. Nghĩa là transaction có thể thấy bảng ở một trạng thái chưa từng tồn tại thật.</p>
+</div>
+<div class="note"><strong>Lỗi hay gặp:</strong> đọc bằng <code>SELECT</code> thường, tự tính giá trị mới trong code, rồi ghi <code>UPDATE … SET balance = 950</code>. Dưới <code>REPEATABLE READ</code>, câu <code>SELECT</code> có thể trả về bản cũ trong khi row thật đã đổi, và câu <code>UPDATE</code> sẽ ghi đè mất thay đổi của người khác (lost update). Quy tắc: đọc để ghi thì dùng <code>FOR UPDATE</code>, hoặc để database tự tính (<code>balance = balance - 50</code>), hoặc kiểm tra cột version. Trang <a href="../innodb-locking-deadlock/index.html">locking và deadlock</a> so sánh các cách này.</div>
+
+<div class="prose">
+<h3>Secondary index và ảnh chụp</h3>
+<p>Ý chính: khi bảng đang bị ghi nhiều, một câu đọc chỉ cần index (covering) vẫn có thể phải tra thêm PRIMARY.</p>
+<p>Entry của secondary index không có cột ẩn <code>DB_TRX_ID</code>, nên tự nó không cho biết ai đã tạo ra nó. InnoDB dựa vào hai dấu hiệu khác: entry đã bị đánh dấu xoá, hoặc page chứa entry vừa bị một transaction mới hơn ảnh chụp sửa (mỗi page index ghi lại ID lớn nhất từng sửa nó). Gặp một trong hai, InnoDB không tin entry nữa. Nó tra row trong PRIMARY rồi đi chuỗi phiên bản để tìm bản đúng.</p>
+<p>Hệ quả: một câu có <code>Using index</code> trong <code>EXPLAIN</code> (lẽ ra chỉ đọc index) có thể phải đọc PRIMARY cho từng entry khi bảng đang bị ghi liên tục. Manual 8.4 xác nhận điều này.</p>
+</div>
+
+<div class="prose">
+<h3>Isolation level ngăn được lỗi gì</h3>
+<p>Ý chính: mức mặc định <code>REPEATABLE READ</code> của InnoDB ngăn được phần lớn lỗi đọc, nhưng không ngăn được lost update và write skew.</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Hiện tượng</th><th>READ UNCOMMITTED</th><th>READ COMMITTED</th><th>REPEATABLE READ (InnoDB)</th><th>SERIALIZABLE</th></tr></thead>
+<tbody>
+<tr><td>Dirty read: thấy thay đổi người khác chưa commit</td><td>Có</td><td>Không</td><td>Không</td><td>Không</td></tr>
+<tr><td>Non-repeatable read: đọc lại một row, thấy giá trị khác</td><td>Có</td><td>Có</td><td>Không, với <code>SELECT</code> thường</td><td>Không</td></tr>
+<tr><td>Phantom: đọc lại một khoảng, thấy thêm row mới</td><td>Có</td><td>Có</td><td>Không với <code>SELECT</code> thường; với đọc có khoá thì InnoDB khoá cả khoảng trống để chặn chèn</td><td>Không</td></tr>
+<tr><td>Lost update: hai bên cùng đọc, tự tính, rồi ghi đè nhau</td><td>Có</td><td>Có</td><td>Có, nếu đọc bằng <code>SELECT</code> thường</td><td>Không: hai bên cùng giữ khoá đọc rồi cùng xin ghi, sinh deadlock, một bên bị huỷ</td></tr>
+<tr><td>Write skew: hai bên cùng đọc một dữ liệu, mỗi bên sửa một row khác, và cùng nhau phá vỡ một quy tắc nghiệp vụ</td><td>Có</td><td>Có</td><td>Có</td><td>Không</td></tr>
+</tbody></table></div>
+<p class="prose">Cột <code>REPEATABLE READ</code> mô tả riêng InnoDB. Chuẩn SQL cho phép phantom ở mức này, nhưng InnoDB chặn được: câu <code>SELECT</code> thường nhờ ảnh chụp, câu đọc có khoá nhờ khoá luôn khoảng trống (gap lock).</p>
+</section>
+
+<!-- 3 -->
+<section id="s3">
+<header><span class="num">03</span><h2>Vì sao thiết kế như vậy</h2></header>
+<div class="prose">
+<p><strong>Vì sao dùng nhiều phiên bản?</strong> Để đọc không chặn ghi, và ghi không chặn đọc. Hệ thống giao dịch có rất nhiều câu đọc ngắn. Nếu câu đọc phải khoá, câu ghi sẽ phải chờ câu đọc và ngược lại. Giữ nhiều phiên bản tốn thêm dung lượng (cho bản cũ) và CPU (để lần ngược chuỗi), nhưng không ai phải chờ.</p>
+<p><strong>Vì sao so ID thay vì so thời gian?</strong> Chỉ cần chép lại danh sách transaction đang chạy lúc chụp là đủ. Cách này rẻ, chính xác, và không cần một đồng hồ chung.</p>
+<p><strong>Vì sao câu ghi không dùng ảnh chụp?</strong> Vì không thể sửa một bản cũ. Nếu <code>UPDATE</code> dựa trên ảnh chụp, hai transaction có thể cùng sửa từ một bản cũ, và thay đổi của một bên biến mất. InnoDB bắt câu ghi chờ khoá rồi sửa trên bản mới nhất. Cái giá: <code>SELECT</code> và <code>UPDATE</code> trong cùng transaction có thể thấy hai trạng thái khác nhau.</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th></th><th>InnoDB</th><th>PostgreSQL</th></tr></thead>
+<tbody>
+<tr><td>Phiên bản cũ nằm ở</td><td>Undo log; row trong page là bản mới nhất</td><td>Ngay trong heap; mỗi phiên bản là một tuple với <code>xmin</code>, <code>xmax</code></td></tr>
+<tr><td>Mặc định</td><td>REPEATABLE READ</td><td>READ COMMITTED</td></tr>
+<tr><td>UPDATE trong REPEATABLE READ gặp row đã bị transaction khác đổi và commit</td><td>Sửa bản mới nhất, tiếp tục</td><td>Lỗi <code>could not serialize access due to concurrent update</code>, phải chạy lại transaction</td></tr>
+<tr><td>SERIALIZABLE</td><td>Đổi <code>SELECT</code> thành <code>FOR SHARE</code> (khoá)</td><td>Serializable Snapshot Isolation: không khoá thêm, phát hiện xung đột và huỷ</td></tr>
+<tr><td>Dọn phiên bản cũ</td><td>Purge</td><td>VACUUM</td></tr>
+</tbody></table></div>
+<p class="prose">Cùng tên <code>REPEATABLE READ</code>, nhưng khi hai bên cùng sửa một row thì hai hệ thống xử lý khác hẳn nhau. Code viết cho PostgreSQL có thể dựa vào lỗi serialization để biết có xung đột; trên InnoDB, lỗi đó không bao giờ xuất hiện.</p>
+</section>
+
+<!-- 4 -->
+<section id="s4">
+<header><span class="num">04</span><h2>Ví dụ</h2></header>
+<div class="prose"><h3>Dựng lại timeline của phần 01</h3><p>Hai cửa sổ <code>mysql</code>. Mỗi khối là một session.</p></div>
+<pre><code>CREATE TABLE accounts (id INT PRIMARY KEY, balance BIGINT NOT NULL) ENGINE=InnoDB;
+INSERT INTO accounts VALUES (7, 1000);
+
+-- Session A
+SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ;  -- rồi thử READ COMMITTED
+START TRANSACTION;
+SELECT balance FROM accounts WHERE id = 7;
+
+-- Session B
+START TRANSACTION;
+UPDATE accounts SET balance = balance - 100 WHERE id = 7;
+COMMIT;
+
+-- Session A
+SELECT balance FROM accounts WHERE id = 7;
+SELECT balance FROM accounts WHERE id = 7 FOR UPDATE;
+UPDATE accounts SET balance = balance - 50 WHERE id = 7;
+SELECT balance FROM accounts WHERE id = 7;
+COMMIT;</code></pre>
+
+<div class="prose"><h3>Xem isolation level và read view đang mở</h3></div>
+<pre><code>SELECT @@transaction_isolation;
+SELECT trx_id, trx_state, trx_isolation_level, trx_started, trx_rows_modified
+FROM information_schema.INNODB_TRX;</code></pre>
+<p class="prose">Transaction chỉ đọc vẫn hiện trong <code>INNODB_TRX</code> nếu đã có ảnh chụp, kèm một <code>trx_id</code> rất lớn. Số đó chỉ để hiển thị, không phải ID thật.</p>
+
+<div class="prose"><h3>Lost update và hai cách sửa</h3></div>
+<pre><code>-- Sai: đọc ảnh chụp, tính ở ứng dụng, ghi giá trị tuyệt đối
+SELECT balance FROM accounts WHERE id = 7;          -- 1000 (có thể đã cũ)
+UPDATE accounts SET balance = 950 WHERE id = 7;     -- ghi đè thay đổi của B
+
+-- Đúng: để database tính trên bản mới nhất
+UPDATE accounts SET balance = balance - 50 WHERE id = 7;
+
+-- Đúng: khoá khi đọc để ghi
+SELECT balance FROM accounts WHERE id = 7 FOR UPDATE;
+UPDATE accounts SET balance = ? WHERE id = 7;</code></pre>
+</section>
+
+<!-- 5 -->
+<section id="s5">
+<header><span class="num">05</span><h2>Thí nghiệm</h2></header>
+<div class="prose"><p>Chạy trên lab MySQL 8.4 với hai session song song. Viết dự đoán trước.</p></div>
+<details><summary>E19. Timeline hai session dưới RR và RC</summary>
+<p><strong>Câu hỏi.</strong> Với kịch bản ở phần 04, mỗi câu của A trả về gì dưới <code>REPEATABLE READ</code> và <code>READ COMMITTED</code>? Thêm biến thể: A dùng <code>START TRANSACTION WITH CONSISTENT SNAPSHOT</code> rồi B cập nhật trước câu <code>SELECT</code> đầu tiên của A. Thêm biến thể lost update: A ghi <code>SET balance = 950</code>.</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e19/prediction.md</code></p>
+<p><strong>Chạy.</strong> Hai <code>./lab.sh shell</code>, chạy tay theo thứ tự.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+<details><summary>E20. Covering index mất tác dụng khi bảng đang bị ghi</summary>
+<p><strong>Câu hỏi.</strong> <code>SELECT COUNT(*) FROM orders WHERE user_id BETWEEN 1 AND 2000</code> dùng <code>idx_user_id</code> (covering). Session A mở read view. Session B sửa <code>user_id</code> của vài nghìn row rải trong khoảng đó, commit. Chạy lại câu đếm trong A: <code>Innodb_buffer_pool_read_requests</code> tăng bao nhiêu so với một session mới?</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e20/prediction.md</code></p>
+<p><strong>Chạy.</strong> <code>./lab.sh reads</code> trong session A và trong session mới, sau khi B commit.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+</section>
+
+<!-- 6 -->
+<section id="s6">
+<header><span class="num">06</span><h2>Ảnh hưởng khi chạy production</h2></header>
+<div class="prose">
+<h3>Chọn isolation level</h3>
+<ul>
+<li><strong>REPEATABLE READ</strong> (mặc định): một ảnh chụp cho cả transaction. Hợp với báo cáo gồm nhiều câu cần khớp nhau. Đổi lại, câu đọc có khoá khoá cả khoảng trống, nên khoá nhiều hơn và dễ deadlock hơn.</li>
+<li><strong>READ COMMITTED</strong>: nhiều hệ thống giao dịch chọn mức này. Gần như không khoá khoảng trống, nên ít deadlock hơn. Mỗi câu chụp ảnh mới, nên undo log được dọn sớm hơn. Đổi lại, hai câu trong cùng transaction có thể thấy dữ liệu khác nhau.</li>
+<li>Dù chọn mức nào, câu đọc để rồi ghi vẫn phải dùng <code>FOR UPDATE</code>, để database tự tính, hoặc kiểm tra version. Isolation level không thay được việc đó.</li>
+</ul>
+<h3>Cái giá</h3>
+<ul>
+<li>Transaction mở lâu giữ ảnh chụp cũ, nên purge không dọn được bản cũ (xem trang <a href="../innodb-buffer-pool-redo-undo/index.html">buffer pool, redo và undo</a>).</li>
+<li>Câu đọc trong một transaction cũ phải lần qua chuỗi phiên bản dài với những row bị sửa nhiều lần.</li>
+<li>Câu đọc chỉ cần index có thể phải tra thêm PRIMARY khi page index vừa bị sửa.</li>
+</ul>
+<h3>Nhận ra trên production bằng gì</h3>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Triệu chứng</th><th>Xem ở đâu</th></tr></thead>
+<tbody>
+<tr><td>Số dư hoặc tồn kho sai sau tải cao, không có lỗi</td><td>Tìm read-modify-write ở ứng dụng; log câu <code>UPDATE … SET col = &lt;hằng số&gt;</code> sau một <code>SELECT</code> không khoá</td></tr>
+<tr><td>Một báo cáo chạy càng lâu càng chậm</td><td>Tuổi transaction trong <code>INNODB_TRX</code>; history list length</td></tr>
+<tr><td>Ứng dụng đọc được dữ liệu cũ trong một request dài</td><td>Isolation level của connection; transaction có bị giữ mở xuyên request không (connection pool, ORM)</td></tr>
+</tbody></table></div>
+<div class="senior"><h4>Góc nhìn senior: biết ảnh chụp bắt đầu và kết thúc ở đâu</h4><p>Nhiều lỗi dữ liệu đến từ chỗ không ai biết transaction bắt đầu và kết thúc ở đâu. ORM tự mở transaction mà không ai để ý. Connection pool trả lại một connection còn transaction chạy dở. Một request gọi API bên ngoài trong lúc đang giữ transaction. Khi review code, câu hỏi đầu tiên nên là: "ảnh chụp này được tạo ở đâu, và sống bao lâu?"</p></div>
+<div class="prose">
+<h3>Checklist khi review code có transaction</h3>
+<ul>
+<li>Transaction bắt đầu và kết thúc ở đâu? Có gọi mạng hoặc chờ người dùng bên trong không?</li>
+<li>Có đọc rồi ghi giá trị tính ở ứng dụng không? Nếu có, đọc bằng <code>FOR UPDATE</code> hay có cột version?</li>
+<li>Code có dựa vào lỗi serialization kiểu PostgreSQL mà InnoDB không phát ra không?</li>
+<li>Isolation level của connection là gì, có đặt khác mặc định ở đâu không?</li>
+<li>Báo cáo dài có chạy trên replica hoặc chia nhỏ thay vì giữ một read view hàng giờ không?</li>
+</ul>
+</div>
+</section>
+
+<!-- 7 -->
+<section id="s7">
+<header><span class="num">07</span><h2>Hiểu lầm thường gặp</h2></header>
+<div class="prose"><ul>
+<li><strong>Hiểu lầm:</strong> ảnh được chụp ở <code>START TRANSACTION</code>. <strong>Vì sao sai:</strong> dưới RR, ảnh được chụp ở câu <code>SELECT</code> thường đầu tiên. <strong>Quy tắc:</strong> dùng <code>WITH CONSISTENT SNAPSHOT</code> nếu cần chụp ngay.</li>
+<li><strong>Hiểu lầm:</strong> dưới RR, mọi câu trong transaction thấy cùng một dữ liệu. <strong>Vì sao sai:</strong> chỉ <code>SELECT</code> thường dùng ảnh chụp; câu đọc có khoá và câu ghi đọc bản mới nhất. <strong>Quy tắc:</strong> xem câu nào dùng ảnh chụp, câu nào không (<a href="#s2">phần 02</a>).</li>
+<li><strong>Hiểu lầm:</strong> RR chặn được lost update. <strong>Vì sao sai:</strong> đọc bằng <code>SELECT</code> thường rồi tự tính và ghi vẫn có thể ghi đè người khác. <strong>Quy tắc:</strong> dùng <code>FOR UPDATE</code>, để database tự tính, hoặc kiểm tra version.</li>
+<li><strong>Hiểu lầm:</strong> ảnh chụp so thời điểm commit. <strong>Vì sao sai:</strong> nó so ID với danh sách transaction đang chạy lúc chụp. <strong>Quy tắc:</strong> transaction đang chạy dở lúc chụp thì vô hình với ảnh đó, kể cả khi commit ngay sau.</li>
+<li><strong>Hiểu lầm:</strong> REPEATABLE READ của MySQL và PostgreSQL giống nhau. <strong>Vì sao sai:</strong> PostgreSQL báo lỗi khi sửa row đã bị người khác đổi; InnoDB thì sửa luôn trên bản mới nhất. <strong>Quy tắc:</strong> kiểm tra hành vi thật của từng database, đừng dựa vào tên.</li>
+<li><strong>Hiểu lầm:</strong> câu có <code>Using index</code> thì không bao giờ đọc PRIMARY. <strong>Vì sao sai:</strong> entry bị đánh dấu xoá, hoặc page vừa bị sửa, buộc InnoDB tra PRIMARY. <strong>Quy tắc:</strong> đo trên bảng đang bị ghi, không chỉ trên bảng đứng yên.</li>
+</ul></div>
+</section>
+
+<!-- 8 -->
+<section id="s8">
+<header><span class="num">08</span><h2>Câu hỏi ôn tập</h2></header>
+<p class="prose">Viết ngày 2026-10-19.</p>
+<details><summary><span class="tag">Dự đoán</span>Phiên bản nào được thấy</summary>
+<p>Chuỗi của row: 312 (đặt 700, chưa commit) → 309 (800) → 305 (900) → 290 (1000). Read view tạo khi ID kế tiếp là 310 và transaction active là {305, 309}. View thấy giá trị nào? Nếu active chỉ là {309}?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Với {305, 309}: up_limit = 305. Bản 312: từ 310 trở lên, lúc chụp chưa tồn tại, bỏ. Bản 309 và 305: đang chạy lúc chụp, bỏ. Bản 290: nhỏ hơn 305, đã commit trước, thấy. Kết quả 1000.</p><p>Với {309}: up_limit = 309. Bỏ 312 và 309; bản 305 nhỏ hơn 309 nên thấy. Kết quả 900.</p></details></details>
+<details><summary><span class="tag">Dự đoán</span>Hai session dưới REPEATABLE READ</summary>
+<p>A: <code>START TRANSACTION; SELECT balance</code> → 1000. B trừ 100 và commit. A: <code>SELECT balance</code>; <code>SELECT balance … FOR UPDATE</code>; <code>UPDATE … SET balance = balance - 50</code>; <code>SELECT balance</code>. Bốn giá trị A thấy là gì?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Lần lượt: 1000 (vẫn dùng ảnh chụp cũ); 900 (<code>FOR UPDATE</code> đọc bản mới nhất); UPDATE tính từ 900 ra 850; rồi 850 (thấy thay đổi của chính mình). Dưới READ COMMITTED, câu <code>SELECT</code> đầu tiên sau khi B commit đã thấy 900.</p></details></details>
+<details><summary><span class="tag">Giải thích</span>Vì sao UPDATE không dùng ảnh chụp</summary>
+<p>Vì sao InnoDB cho <code>UPDATE</code> đọc bản mới nhất thay vì bản trong read view?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Vì sửa một bản cũ sẽ làm mất bản mới hơn. Nếu UPDATE dựa vào ảnh chụp, hai transaction có thể cùng sửa từ một bản cũ, và thay đổi của một bên biến mất. InnoDB khoá rồi sửa trên bản mới nhất. Cái giá: SELECT và UPDATE trong cùng transaction có thể thấy hai trạng thái khác nhau.</p></details></details>
+<details><summary><span class="tag">Chẩn đoán</span>Tồn kho âm</summary>
+<p>Code: <code>SELECT stock FROM products WHERE id = ?</code>; nếu <code>stock &gt;= qty</code> thì <code>UPDATE products SET stock = stock - qty</code>. Chạy dưới RR, thỉnh thoảng tồn kho âm. Vì sao, sửa thế nào?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Hai transaction cùng đọc được stock = 1 từ ảnh chụp, cùng thấy còn đủ, rồi cùng trừ trên bản mới nhất: còn -1. Cách sửa: kiểm tra bằng <code>SELECT … FOR UPDATE</code> để đọc bản mới nhất và khoá nó. Hoặc gộp luôn điều kiện vào câu ghi: <code>UPDATE … SET stock = stock - ? WHERE id = ? AND stock &gt;= ?</code>, rồi xem có bao nhiêu row bị ảnh hưởng.</p></details></details>
+<details><summary><span class="tag">Giải thích</span>Covering index và MVCC</summary>
+<p>Vì sao một query có <code>Using index</code> lại đọc PRIMARY khi bảng đang bị cập nhật nhiều?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Entry của secondary index không ghi ai đã tạo ra nó. Khi entry bị đánh dấu xoá, hoặc page của nó vừa bị một transaction mới hơn ảnh chụp sửa, InnoDB không biết câu đọc có được thấy entry đó không. Nó phải tra row trong PRIMARY rồi lần chuỗi phiên bản. Manual xác nhận trường hợp này.</p></details></details>
+<details><summary><span class="tag">Giải thích</span>Chuyển từ PostgreSQL</summary>
+<p>Một service chuyển từ PostgreSQL sang MySQL. Code bắt lỗi serialization để retry khi hai request cùng sửa một row dưới REPEATABLE READ. Trên MySQL điều gì thay đổi?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>InnoDB không báo lỗi đó: câu UPDATE thứ hai chờ khoá rồi sửa trên bản mới nhất. Nhánh retry không bao giờ chạy. Nếu code dựa vào lỗi để biết có xung đột, giờ nó sẽ lặng lẽ cho cả hai thay đổi đi qua. Cần chuyển sang <code>FOR UPDATE</code> hoặc kiểm tra cột version một cách rõ ràng.</p></details></details>
+</section>
+
+<!-- 9 -->
+<section id="s9">
+<header><span class="num">09</span><h2>Câu hỏi còn mở</h2></header>
+<p class="prose">Số thứ tự trùng với Open questions trong <code>.claude/docs/LEARNING_LOG.md</code>. Log là bản gốc.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>#</th><th>Câu hỏi</th><th>Trạng thái</th></tr></thead>
+<tbody>
+<tr><td>18</td><td>Điều kiện chính xác khiến covering read trên secondary index phải tra PRIMARY (delete-mark, transaction ID lớn nhất của page) có đúng như mô tả không, và tốn thêm bao nhiêu trên bảng đang bị ghi?</td><td>Mở. Manual nêu delete-mark và "page được sửa bởi transaction mới hơn"; chi tiết theo page lấy từ mã nguồn, chưa kiểm. E20.</td></tr>
+<tr><td>19</td><td>Ở READ COMMITTED, <code>UPDATE … WHERE</code> trên cột không có index dùng "semi-consistent read" để bỏ qua row không khớp mà không đợi khoá. Hành vi đó thay đổi số lần đợi khoá bao nhiêu so với RR?</td><td>Mở. Thuộc trang locking.</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- 10 -->
+<section id="s10">
+<header><span class="num">10</span><h2>Tài liệu tham khảo</h2></header>
+<div class="prose"><ul>
+<li>MySQL 8.4 Reference Manual, <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-multi-versioning.html">InnoDB Multi-Versioning</a>: cột ẩn, insert và update undo, secondary index và MVCC</li>
+<li><a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-consistent-read.html">Consistent Nonlocking Reads</a>: thời điểm tạo snapshot, dị thường với DML</li>
+<li><a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-locking-reads.html">Locking Reads</a></li>
+<li><a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-transaction-isolation-levels.html">Transaction Isolation Levels</a></li>
+<li>Mã nguồn MySQL, <code>storage/innobase/include/read0types.h</code> (<code>ReadView::changes_visible</code>): luật visibility</li>
+<li>PostgreSQL, <a href="https://www.postgresql.org/docs/current/transaction-iso.html">Transaction Isolation</a></li>
+<li>Berenson và cộng sự, A Critique of ANSI SQL Isolation Levels (1995): định nghĩa lost update, write skew</li>
+</ul></div>
+<h3>Mức kiểm chứng</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>Khẳng định</th><th>Nguồn</th></tr></thead>
+<tbody>
+<tr><td><code>DB_TRX_ID</code> 6 byte, <code>DB_ROLL_PTR</code> 7 byte; insert undo bỏ sau commit, update undo giữ cho consistent read</td><td>manual 8.4</td></tr>
+<tr><td>RR tạo snapshot ở consistent read đầu tiên; RC mỗi câu</td><td>manual 8.4</td></tr>
+<tr><td>DML và locking read đọc bản mới nhất; ví dụ COUNT 0 rồi UPDATE 10 row</td><td>manual 8.4</td></tr>
+<tr><td>Luật visibility bốn giá trị</td><td>mã nguồn MySQL nhánh 8.4, <code>read0types.h</code> (<code>changes_visible</code>), đã đối chiếu 2026-10-19</td></tr>
+<tr><td>Secondary index buộc tra PRIMARY khi delete-mark hoặc page mới hơn</td><td>manual 8.4; chi tiết transaction ID theo page từ mã nguồn</td></tr>
+<tr><td>Timeline hai session ở phần 01</td><td>suy ra từ manual; chưa chạy (E19)</td></tr>
+<tr><td>Hành vi PostgreSQL REPEATABLE READ khi update đồng thời</td><td>tài liệu PostgreSQL; chưa chạy</td></tr>
+</tbody></table></div>
+</section>
+</main>
+
+</div>
+
+<script>
+const DEFS=`<defs><marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>`;
+function B(x,y,w,h,cls,t,sub){
+  const tx=x+w/2;
+  return `<g class="n ${cls||''}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="5"/>`+
+  `<text class="tb" x="${tx}" y="${y+(sub?h/2-8:h/2)}" text-anchor="middle" dominant-baseline="central">${t}</text>`+
+  (sub?`<text class="ts" x="${tx}" y="${y+h/2+10}" text-anchor="middle" dominant-baseline="central">${sub}</text>`:'')+`</g>`;
+}
+const A=(d,cls)=>`<path d="${d}" class="edge ${cls||''}" marker-end="url(#arw)"/>`;
+const T=(x,y,t,anchor,cls)=>`<text class="${cls||'lbl'}" x="${x}" y="${y}" text-anchor="${anchor||'start'}">${t}</text>`;
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+/* ---------- 01: two sessions, RR vs RC ---------- */
+// each step: who runs, sql, result under RR / RC
+const SQ=[
+ {w:'A',q:'START TRANSACTION;',rr:'',rc:'',d:{rr:'A mở transaction. Dưới REPEATABLE READ, ảnh chụp chưa được tạo; nó sẽ được chụp ở câu đọc đầu tiên. A cũng chưa có ID vì chưa ghi gì.',rc:'A mở transaction. Dưới READ COMMITTED, mỗi câu đọc sẽ tự chụp ảnh riêng; lúc này chưa có câu nào.'}},
+ {w:'A',q:'SELECT balance FROM accounts WHERE id = 7;',rr:'1000',rc:'1000',d:{rr:'Câu đọc đầu tiên chụp ảnh cho A. Giá trị 1000 đã commit từ lâu nên A thấy. A sẽ dùng tấm ảnh này tới khi commit.',rc:'Câu này chụp một ảnh mới và thấy 1000. Ảnh bị bỏ ngay khi câu xong.'}},
+ {w:'B',q:'START TRANSACTION;\nUPDATE accounts SET balance = balance - 100 WHERE id = 7;',rr:'1 row',rc:'1 row',d:{rr:'B được cấp ID 320 khi ghi. Row trong page đổi thành 900, ghi DB_TRX_ID = 320; bản 1000 được cất vào undo log. B giữ khoá ghi trên row. Không ai phải chờ, vì A không khoá gì cả.',rc:'Giống bên RR: row đổi thành 900, ghi DB_TRX_ID = 320, bản cũ được cất vào undo log, B giữ khoá ghi.'}},
+ {w:'A',q:'SELECT balance FROM accounts WHERE id = 7;',rr:'1000',rc:'1000',d:{rr:'A vẫn dùng ảnh cũ. Lúc chụp, 320 chưa tồn tại, nên A bỏ qua bản 900 và lần về bản 1000 trong undo log. A không phải chờ khoá của B.',rc:'Ảnh chụp mới, nhưng 320 vẫn đang chạy dở nên vô hình. A lần về bản 1000. Không thấy dữ liệu chưa commit.'}},
+ {w:'B',q:'COMMIT;',rr:'',rc:'',d:{rr:'B commit. Bản 900 trở thành bản chính thức. B nhả khoá.',rc:'B commit. Bản 900 trở thành bản chính thức.'}},
+ {w:'A',q:'SELECT balance FROM accounts WHERE id = 7;',rr:'1000',rc:'900',diff:true,d:{rr:'Vẫn 1000. Ảnh của A được chụp trước khi 320 tồn tại; việc 320 vừa commit không làm thay đổi tấm ảnh đó. Đây chính là "repeatable read": đọc lại vẫn ra kết quả cũ.',rc:'900. Câu này chụp ảnh mới, lúc mà 320 đã commit. Hai câu đọc y hệt nhau trong cùng transaction cho hai kết quả khác nhau: non-repeatable read.'}},
+ {w:'A',q:'SELECT balance FROM accounts WHERE id = 7 FOR UPDATE;',rr:'900',rc:'900',diff:true,d:{rr:'900. Câu FOR UPDATE không dùng ảnh chụp: nó đọc bản mới nhất đã commit và khoá row lại. Cùng transaction, cùng row, câu trước thấy 1000, câu này thấy 900.',rc:'900, và A khoá row. Dưới RC, câu thường và câu FOR UPDATE thấy cùng một giá trị.'}},
+ {w:'A',q:'UPDATE accounts SET balance = balance - 50 WHERE id = 7;',rr:'1 row',rc:'1 row',d:{rr:'UPDATE luôn sửa trên bản mới nhất: 900 - 50 = 850. A được cấp ID 321. Thay đổi của B được giữ nguyên.',rc:'Sửa trên bản mới nhất: 900 - 50 = 850. Giống bên RR.'}},
+ {w:'A',q:'SELECT balance FROM accounts WHERE id = 7;',rr:'850',rc:'850',d:{rr:'850. Bản mới nhất do chính A (ID 321) tạo ra, nên A thấy nó. Với các câu đọc thường, A thấy số dư nhảy thẳng từ 1000 sang 850, chưa bao giờ thấy 900. Manual gọi đây là thấy một trạng thái có thể chưa từng tồn tại.',rc:'850, do chính A vừa sửa.'}},
+ {w:'A',q:'COMMIT;',rr:'',rc:'',d:{rr:'Kết quả cuối: 850 = 1000 - 100 - 50. Không mất thay đổi nào, vì câu ghi để database tự tính (balance - 50). Nếu A tự tính 1000 - 50 trong code rồi ghi SET balance = 950, phần trừ 100 của B sẽ biến mất.',rc:'Kết quả cuối: 850. Bẫy mất thay đổi vẫn y nguyên nếu code tự tính từ một câu đọc thường rồi ghi đè giá trị.'}}
+];
+let iso='rr',si=0;
+function renderSess(){
+  const el=$('sessions'),s=SQ[si];
+  const col=w=>SQ.map((x,i)=>x.w!==w?'':`<div class="ln ${i===si?'cur':(i<si?'done':'')}">${esc(x.q).replace(/\n/g,'<br>')}${i<=si&&x[iso]?`<span class="out ${x.diff?'diff':''}">→ ${x[iso]}</span>`:''}</div>`).join('');
+  el.querySelector('.meta').textContent=`bước ${si+1} / ${SQ.length}`;
+  el.querySelector('.st-t').textContent=`${s.w}: ${s.q.split('\n').pop()}`;
+  el.querySelector('#colA').innerHTML='<h5>Session A</h5>'+col('A');
+  el.querySelector('#colB').innerHTML='<h5>Session B</h5>'+col('B');
+  el.querySelector('.st-d').textContent=s.d[iso];
+  const [pv,nx]=el.querySelectorAll('.nav button');pv.disabled=si===0;nx.disabled=si===SQ.length-1;
+  el.querySelectorAll('[data-iso]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.iso===iso));
+}
+(function(){
+  const el=$('sessions');
+  el.innerHTML=`<div class="ph"><strong>Hai session, một row</strong><span class="meta"></span></div><div class="bd">
+  <div class="controls"><button data-iso="rr">REPEATABLE READ</button><button data-iso="rc">READ COMMITTED</button></div>
+  <h4 class="st-t"></h4>
+  <div class="sess"><div class="col" id="colA"></div><div class="col" id="colB"></div></div>
+  <div class="desc" aria-live="polite"><div class="st-d"></div><pre hidden></pre></div>
+  <div class="nav"><button data-d="-1">Trước</button><button data-d="1" class="primary">Tiếp</button></div></div>`;
+  el.querySelectorAll('[data-iso]').forEach(b=>b.onclick=()=>{iso=b.dataset.iso;renderSess();});
+  const [pv,nx]=el.querySelectorAll('.nav button');
+  const go=k=>{si=Math.max(0,Math.min(SQ.length-1,si+k));renderSess();};
+  pv.onclick=()=>go(-1);nx.onclick=()=>go(1);
+  el.tabIndex=0;el.addEventListener('keydown',e=>{if(e.key==='ArrowRight')go(1);if(e.key==='ArrowLeft')go(-1);});
+  renderSess();
+})();
+
+/* ---------- 02: visibility playground ---------- */
+const CHAIN=[{t:312,v:700,c:false},{t:309,v:800,c:true},{t:305,v:900,c:true},{t:290,v:1000,c:true}];
+const CAND=[305,309,312];
+let active=new Set([309]);
+function drawActive(){
+  const low=+$('vLow').value;
+  $('vActive').innerHTML='<span style="color:var(--ink-2)">Đang chạy dở lúc chụp:</span>'+CAND.map(t=>{
+    const ok=t<low;
+    return `<label><input type="checkbox" data-t="${t}" ${ok&&active.has(t)?'checked':''} ${ok?'':'disabled'}> ${t}${ok?'':' (lúc chụp chưa tồn tại)'}</label>`;}).join('');
+  $('vActive').querySelectorAll('input').forEach(i=>i.onchange=()=>{const t=+i.dataset.t;i.checked?active.add(t):active.delete(t);vis();});
+}
+function vis(){
+  const low=+$('vLow').value,cr=+$('vCreator').value;
+  const ids=[...active].filter(t=>t<low&&t!==cr).sort((a,b)=>a-b);
+  const up=ids.length?ids[0]:low;
+  $('vRv').textContent=`creator     = ${cr||'(không có)'}\nlow_limit_id = ${low}\nm_ids        = [${ids.join(', ')}]\nup_limit_id  = ${up}`;
+  let found=-1;const why=[];
+  CHAIN.forEach((v,i)=>{
+    if(found>=0){why.push(null);return;}
+    let ok,r;
+    if(cr&&v.t===cr){ok=true;r=`${v.t} là chính transaction đang đọc`;}
+    else if(v.t<up){ok=true;r=`${v.t} < up_limit ${up}: đã commit trước lúc chụp`;}
+    else if(v.t>=low){ok=false;r=`${v.t} ≥ low_limit ${low}: lúc chụp chưa tồn tại`;}
+    else if(ids.includes(v.t)){ok=false;r=`${v.t} nằm trong m_ids: lúc chụp đang chạy dở`;}
+    else {ok=true;r=`${v.t} < low_limit và không nằm trong m_ids: đã commit trước lúc chụp`;}
+    why.push({ok,r});if(ok)found=i;
+  });
+  let g='';const W=150,gap=20,y=30;
+  CHAIN.forEach((v,i)=>{
+    const x=10+i*(W+gap);const w=why[i];
+    const cls=w===null?'dim':(w.ok?'row':'miss');
+    g+=B(x,y,W,62,cls,`balance = ${v.v}`,`DB_TRX_ID ${v.t}`);
+    g+=T(x,y-10,i===0?'row trong page':'trong undo log','start','ts');
+    if(i===0)g+=T(x+W/2,y+80,'312 chưa commit','middle','ts');
+    if(i<CHAIN.length-1)g+=A(`M${x+W} ${y+31} L${x+W+gap-2} ${y+31}`,'key');
+  });
+  g+=T(10,138,found>=0?`Thấy bản ${CHAIN[found].v}, sau khi xét ${found+1} bản`:'Không bản nào được thấy: với ảnh chụp này, row không tồn tại','start','tb');
+  $('vSvg').innerHTML=DEFS+g;
+  $('vDesc').textContent=why.filter(Boolean).map(w=>(w.ok?'Thấy: ':'Bỏ: ')+w.r).join('. ')+'.';
+  $('visMeta').textContent=found>=0?`kết quả: ${CHAIN[found].v}`:'kết quả: không có row';
+}
+$('vLow').onchange=()=>{if(+$('vLow').value<=309)$('vCreator').value='0';$('vCreator').querySelector('[value="309"]').disabled=+$('vLow').value<=309;drawActive();vis();};$('vCreator').onchange=vis;
+drawActive();vis();
+</script>
+</body>
+</html>
