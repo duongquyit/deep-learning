@@ -163,6 +163,7 @@ These are written in the page as exercises; none have been run yet.
 - **E34** — 200k-row import with 5 random `SIGKILL`s, three checkpoint variants with and without the natural key: rows, duplicates, totals, time. *(Month 3 exit criterion: correct when a worker is killed mid-run.)*
 - **E35** — `SIGTERM` mid-batch with and without `worker.close()`: exit time, job state, resume row.
 - **Q59–Q64** — The six recall questions in section 08 of the BullMQ page.
+- **C10–C12** — The three real-world cases in section 09 of the BullMQ page (a 2M-line nightly reconciliation split into staged, set-based child jobs; a 500k-recipient email campaign under a provider rate limit; a synchronous PDF step causing stalls, duplicate side effects and a CPU shortfall). Solve in writing before opening the answers.
 - **Q11–Q16** — The six recall questions in section 08 of the composite-index page (answers are on the page, hidden).
 - **Q1–Q5** — The five check questions at the end of the page (leftmost prefix, `COUNT(*)` and the visibility map, full scan polluting the cache, TOAST, a `sessions` table updated 5,000×/sec). Answer in writing before looking anything up, then verify.
 
@@ -173,6 +174,8 @@ These are written in the page as exercises; none have been run yet.
 **Topic and objective.** Month 3 topic, written ahead as documentation only (Phase 3 of the documentation plan, last of four): how a BullMQ job moves between states, how locks and the stalled check decide a worker is gone, why that can run one job on two workers at once, and how to make a large import resume from where it stopped.
 
 **Output.** [topics/bullmq-workers-resumable/index.html](../topics/bullmq-workers-resumable/index.html) — 10 sections. Widgets: a job lifecycle simulator (wait, active, delayed, completed, failed; attempts 3, `maxStalledCount` 1; buttons for success, error, `UnrecoverableError`, worker death, backoff expiry); a lock and stalled-check timeline (job length, event-loop block, worker crash → lock lane, checks, second worker, rejected completions, final state); a checkpoint calculator for an import with crashes (none / Redis after commit / MySQL same transaction, crash after commit, natural key) showing redone rows, duplicates and wasted work per run. Prediction templates for E33–E35.
+
+**Cases added (same day).** Section 09 "Bài toán thực tế" with cases C10–C12, each a shown problem and a hidden senior-style answer. The answers are reasoning from reading, not measurements; Redis memory per job in C11 is an estimate.
 
 **What it covers.**
 

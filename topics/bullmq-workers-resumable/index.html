@@ -169,6 +169,20 @@ details.answer summary{font-weight:500;color:var(--struct)}
 .log{font:12.5px/1.6 var(--mono);background:var(--paper);border-radius:var(--r-s);padding:8px 12px;margin:10px 0 0;min-height:60px;list-style:none}
 .log li{margin:0}
 .btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+/* bài toán thực tế */
+.case{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:0 var(--r-m) var(--r-m) 0;padding:16px 20px;margin:22px 0;max-width:720px}
+.case>h3{margin:0 0 6px;font-size:1.15rem}
+.case .src{font-size:13.5px;color:var(--ink-2);margin:0 0 12px}
+.case dl{margin:0;display:grid;grid-template-columns:104px minmax(0,1fr);gap:8px 16px}
+.case dt{font-weight:600;color:var(--struct);font-size:15px}
+.case dd{margin:0}
+.case dd p:last-child,.case dd ul:last-child{margin-bottom:0}
+.case details{max-width:none;margin:12px 0 0}
+.case details.hint{background:var(--paper)}
+.case details.answer[open]{background:var(--surface)}
+.ah{font-size:15.5px;color:var(--struct);margin:20px 0 6px}
+.answer .tablewrap{max-width:none}
+@media (max-width:900px){.case{padding:14px}.case dl{grid-template-columns:minmax(0,1fr);gap:2px}.case dd{margin-bottom:8px}}
 </style>
 </head>
 <body>
@@ -185,8 +199,9 @@ details.answer summary{font-weight:500;color:var(--struct)}
     <li><a href="#s6">Ảnh hưởng khi chạy production</a></li>
     <li><a href="#s7">Hiểu lầm thường gặp</a></li>
     <li><a href="#s8">Câu hỏi ôn tập</a></li>
-    <li><a href="#s9">Câu hỏi còn mở</a></li>
-    <li><a href="#s10">Tài liệu tham khảo</a></li>
+    <li><a href="#s9">Bài toán thực tế</a></li>
+    <li><a href="#s10">Câu hỏi còn mở</a></li>
+    <li><a href="#s11">Tài liệu tham khảo</a></li>
   </ol>
 </nav>
 
@@ -207,7 +222,7 @@ details.answer summary{font-weight:500;color:var(--struct)}
   </ul></div>
   <div><h4>Trạng thái</h4><p>Level 2 (prov.). Các giá trị mặc định và luật chuyển trạng thái đọc từ mã nguồn BullMQ 6.3.17. Widget là mô hình theo các luật đó, chưa đo (E33–E35).</p></div>
 </div>
-<details class="mobile-toc"><summary>Mục lục</summary><ol><li><a href="#s1">Bản chất vấn đề</a></li><li><a href="#s2">Cơ chế hoạt động</a></li><li><a href="#s3">Vì sao thiết kế như vậy</a></li><li><a href="#s4">Ví dụ</a></li><li><a href="#s5">Thí nghiệm</a></li><li><a href="#s6">Ảnh hưởng khi chạy production</a></li><li><a href="#s7">Hiểu lầm thường gặp</a></li><li><a href="#s8">Câu hỏi ôn tập</a></li><li><a href="#s9">Câu hỏi còn mở</a></li><li><a href="#s10">Tài liệu tham khảo</a></li></ol></details>
+<details class="mobile-toc"><summary>Mục lục</summary><ol><li><a href="#s1">Bản chất vấn đề</a></li><li><a href="#s2">Cơ chế hoạt động</a></li><li><a href="#s3">Vì sao thiết kế như vậy</a></li><li><a href="#s4">Ví dụ</a></li><li><a href="#s5">Thí nghiệm</a></li><li><a href="#s6">Ảnh hưởng khi chạy production</a></li><li><a href="#s7">Hiểu lầm thường gặp</a></li><li><a href="#s8">Câu hỏi ôn tập</a></li><li><a href="#s9">Bài toán thực tế</a></li><li><a href="#s10">Câu hỏi còn mở</a></li><li><a href="#s11">Tài liệu tham khảo</a></li></ol></details>
 </div>
 
 <!-- 1 -->
@@ -499,7 +514,254 @@ await queue.add('import', { importId }, {
 
 <!-- 9 -->
 <section id="s9">
-<header><span class="num">09</span><h2>Câu hỏi còn mở</h2></header>
+<header><span class="num">09</span><h2>Bài toán thực tế</h2></header>
+<div class="prose"><p>Ba tình huống giống việc thật. Đọc đề, tự viết lời giải ra giấy (phương án, con số, đánh đổi), rồi mới mở lời giải. Gợi ý chỉ mở khi bí. Lời giải là lập luận từ tài liệu, không phải số đo; con số trong đó là ước lượng. Viết ngày 2026-10-20.</p></div>
+
+<div class="case" id="c10">
+<h3>C10. Đối soát 2 triệu dòng mỗi đêm không kịp trước giờ kế toán</h3>
+<p class="src">Dựa trên: phần 02 của trang này (stalled, checkpoint); <a href="../concurrency-control-strategies/index.html">Kiểm soát ghi đồng thời</a>.</p>
+<dl>
+<dt>Bối cảnh</dt><dd><p>Một công ty fintech nhận file sao kê từ 3 ngân hàng lúc 01:00, tổng khoảng 2 triệu dòng (CSV 600 MB). Một job BullMQ duy nhất đọc file. Với mỗi dòng, nó:</p>
+<ol class="list">
+<li>Tìm giao dịch nội bộ theo mã tham chiếu (<code>SELECT</code>).</li>
+<li>Ghi một row vào <code>reconciliation_results</code>.</li>
+<li>Cập nhật <code>transactions.recon_status</code>.</li>
+</ol>
+<p>Mỗi câu chạy riêng, autocommit. Job mất 3 giờ 10 phút; kế toán cần kết quả trước 06:00. Hai lần gần đây có sự cố. Lần đầu, deploy lúc 02:30 giết worker, job chạy lại từ đầu và xong lúc 07:40. Lần sau, job bị báo stalled và chạy song song ở hai pod; 40.000 giao dịch bị ghi kết quả hai lần, báo cáo sai.</p></dd>
+<dt>Yêu cầu</dt><dd>Xong trước 05:00, kể cả khi có một lần worker chết. Mỗi dòng sao kê có hiệu lực đúng một lần. Thấy được tiến độ.</dd>
+<dt>Ràng buộc</dt><dd>MySQL 8.4 primary vẫn phục vụ app ban đêm, tải thấp; chịu thêm được khoảng 2.000 câu ghi mỗi giây. 4 pod worker. Có index trên <code>transactions.ref</code>.</dd>
+<dt>Nhiệm vụ</dt><dd>Chỉ ra nguyên nhân chậm và nguyên nhân chạy trùng. Thiết kế lại job. Ước lượng thời gian chạy.</dd>
+</dl>
+<details class="hint"><summary>Gợi ý</summary><ul>
+<li>3 giờ 10 phút cho 2 triệu dòng là bao nhiêu ms một dòng? Thời gian đó đi vào đâu?</li>
+<li>Database giỏi việc gì hơn Node khi phải so khớp hai tập dữ liệu?</li>
+<li>Một job lớn hay nhiều job nhỏ thì một lần chết mất ít việc hơn?</li>
+</ul></details>
+<details class="answer"><summary>Xem lời giải</summary>
+<h4 class="ah">1. Làm rõ đề bài</h4>
+<ul>
+<li><strong>Chậm:</strong> 11.400 giây cho 2 triệu dòng là khoảng 5,7 ms mỗi dòng. Mỗi dòng có 3 vòng gọi tới database và 2 lần commit riêng. Thời gian gần như toàn là chờ mạng và chờ commit, chạy tuần tự trong một job.</li>
+<li><strong>Chạy trùng:</strong> nhiều khả năng job đọc và parse file theo cách chặn event loop (đọc cả file 600 MB rồi tách dòng). Lock không được gia hạn, job bị coi là stalled và giao cho pod khác. Câu cập nhật không có điều kiện, nên chạy hai lần là ghi hai lần.</li>
+<li>Câu hỏi cần hỏi: một dòng sao kê khớp đúng một giao dịch nội bộ? Giả định có, theo mã tham chiếu. Dòng không khớp thì ghi "chưa khớp" cho kế toán xử lý tay.</li>
+</ul>
+<h4 class="ah">2. Ước lượng</h4>
+<ul>
+<li>Cửa sổ 01:00–05:00 là 4 giờ. Muốn chịu được một lần chết và chạy lại phần dang dở, thời gian chạy mục tiêu nên dưới 1 giờ.</li>
+<li>Mỗi dòng cần khoảng 2 câu ghi (một kết quả, một cập nhật giao dịch). Giới hạn 2.000 câu ghi mỗi giây cho tối đa khoảng 1.000 dòng mỗi giây, tức khoảng 33 phút cho 2 triệu dòng.</li>
+<li>Gom lô: một lô 1.000 dòng gồm một câu đọc với <code>IN (...)</code>, một <code>INSERT</code> nhiều row, một <code>UPDATE … JOIN</code>, một commit. Giả sử 300–600 ms mỗi lô, tức 1.500–3.000 dòng mỗi giây cho một worker. Như vậy database, không phải worker, là giới hạn; hai worker là đủ.</li>
+</ul>
+<h4 class="ah">3. Các phương án</h4>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>A. Giữ một job, thêm checkpoint</td><td>Hết chạy lại từ đầu</td><td>Vẫn tuần tự, vẫn 3 giờ</td></tr>
+<tr><td>B. Một job, gom lô 1.000 dòng</td><td>Nhanh hơn nhiều lần</td><td>Vẫn là một job dài; chết thì phụ thuộc checkpoint</td></tr>
+<tr><td>C. Nạp file vào bảng tạm, so khớp bằng SQL theo khoảng dòng</td><td>Database so khớp theo tập, rất ít vòng gọi; mỗi khoảng là một job nhỏ</td><td>Thêm bảng tạm và dọn dẹp; câu SQL lớn phải chia nhỏ để không khoá lâu</td></tr>
+<tr><td>D. <code>LOAD DATA</code> cả file một lần</td><td>Nạp nhanh nhất</td><td>Một transaction khổng lồ; cần bật <code>local_infile</code>; chết là làm lại cả file</td></tr>
+<tr><td>E. Tăng <code>lockDuration</code> cho hết stalled</td><td>Dễ</td><td>Che nguyên nhân; worker chết thật thì chờ lâu mới chạy lại</td></tr>
+</tbody></table></div>
+<h4 class="ah">4. Đánh đổi và quyết định</h4>
+<p>Chọn C, chia làm hai giai đoạn, dùng flow của BullMQ: một job cha và nhiều job con.</p>
+<ul>
+<li><strong>Nạp:</strong> một job cho mỗi file, đọc file dạng stream, ghi vào bảng tạm theo lô 1.000 dòng. Khoá chính <code>(file_id, line_no)</code> làm cho việc nạp lại idempotent.</li>
+<li><strong>So khớp:</strong> các job con, mỗi job xử lý 20.000 dòng (khoảng 100 job), chạy 2–4 job cùng lúc tuỳ tải database. Mỗi job con chạy vài giây; chết thì chỉ mất vài giây việc.</li>
+<li><strong>Tổng hợp:</strong> job cha chạy khi mọi job con xong: kiểm tra số liệu và tạo báo cáo.</li>
+</ul>
+<p>Vì sao không chỉ A hoặc B: chúng sửa được việc chạy lại, nhưng vẫn là một job dài và tuần tự. C cho song song, tiến độ rõ ràng (số job con đã xong), và cái giá của một lần chết rất nhỏ. Khi nào đổi ý: nếu file nhỏ hơn nhiều (vài chục nghìn dòng), B là đủ.</p>
+<h4 class="ah">5. Triển khai</h4>
+<pre><code>CREATE TABLE bank_lines (
+  file_id BIGINT, line_no INT, ref VARCHAR(64), amount BIGINT, booked_at DATE,
+  PRIMARY KEY (file_id, line_no), KEY idx_ref (ref)
+);
+CREATE TABLE reconciliation_results (
+  file_id BIGINT, line_no INT, transaction_id BIGINT NULL, status ENUM('matched','unmatched','amount_mismatch'),
+  PRIMARY KEY (file_id, line_no),
+  UNIQUE KEY uq_txn (transaction_id)        -- một giao dịch chỉ khớp một dòng
+);
+
+-- job con: một khoảng dòng, một transaction
+INSERT INTO reconciliation_results (file_id, line_no, transaction_id, status)
+SELECT b.file_id, b.line_no, t.id,
+       CASE WHEN t.id IS NULL THEN 'unmatched' WHEN t.amount &lt;&gt; b.amount THEN 'amount_mismatch' ELSE 'matched' END
+  FROM bank_lines b LEFT JOIN transactions t ON t.ref = b.ref
+ WHERE b.file_id = ? AND b.line_no BETWEEN ? AND ?
+ON DUPLICATE KEY UPDATE status = status;          -- chạy lại: giữ nguyên row đã có
+
+UPDATE transactions t JOIN reconciliation_results r ON r.transaction_id = t.id
+   SET t.recon_status = 'matched'
+ WHERE r.file_id = ? AND r.line_no BETWEEN ? AND ? AND r.status = 'matched'
+   AND t.recon_status = 'pending';                 -- có điều kiện: chạy lại không đổi gì</code></pre>
+<ul>
+<li><strong>Worker:</strong> đọc file bằng stream parser và <code>await</code> giữa các lô, để event loop không bị chặn. Việc so khớp nằm trong SQL, nên Node gần như không tốn CPU.</li>
+<li><strong>Deploy:</strong> job con ngắn, nên <code>worker.close()</code> đợi xong trong vài giây.</li>
+<li><strong>Tiến độ:</strong> bảng <code>recon_runs</code> ghi số khoảng đã xong; trang nội bộ đọc bảng này.</li>
+</ul>
+<h4 class="ah">6. Rủi ro và cách kiểm chứng</h4>
+<ul>
+<li><strong>Bất biến:</strong> mỗi file, số dòng bằng tổng <code>matched</code>, <code>unmatched</code>, <code>amount_mismatch</code>. Khoá <code>uq_txn</code> chặn một giao dịch khớp hai lần ngay ở database.</li>
+<li><strong>Tranh khoá với app:</strong> <code>UPDATE … JOIN</code> theo khoảng 20.000 dòng chỉ chạm các giao dịch khớp, ban đêm ít ai sửa chúng. Vẫn theo dõi <code>Innodb_row_lock_waits</code>.</li>
+<li><strong>Replica trễ</strong> vì ghi dồn: giới hạn số job con chạy cùng lúc, và tạm dừng khi <code>Seconds_Behind_Source</code> vượt ngưỡng.</li>
+<li><strong>Diễn tập:</strong> chạy trên bản sao dữ liệu thật; giết worker ngẫu nhiên 3 lần; kết quả phải giống hệt lần chạy không có sự cố.</li>
+<li><strong>Dọn:</strong> xoá <code>bank_lines</code> sau 30 ngày theo lô, hoặc thiết kế bảng partition theo ngày ngay từ đầu.</li>
+</ul>
+<h4 class="ah">7. Lỗi hay gặp với bài này</h4>
+<ul>
+<li>Giữ một job khổng lồ, chỉ thêm checkpoint.</li>
+<li>Xử lý từng dòng với autocommit.</li>
+<li>Đọc cả file 600 MB vào bộ nhớ và parse đồng bộ.</li>
+<li>Câu cập nhật trạng thái không có điều kiện, nên chạy lại là ghi trùng.</li>
+<li>Chạy quá nhiều job con cùng lúc, làm database của app chậm theo.</li>
+</ul>
+</details>
+</div>
+
+<div class="case" id="c11">
+<h3>C11. Gửi email cho 500.000 người qua nhà cung cấp giới hạn 100 email mỗi giây</h3>
+<p class="src">Dựa trên: phần 02 và 06 của trang này; <a href="../idempotency-retries/index.html">Idempotency và retry</a> (C5).</p>
+<dl>
+<dt>Bối cảnh</dt><dd><p>Marketing gửi newsletter cho 500.000 người qua một nhà cung cấp email giới hạn 100 email mỗi giây; vượt thì nhận <code>429</code>. Cách làm hiện tại: một script gọi <code>queue.add</code> cho từng người, tạo 500.000 job BullMQ. Việc thêm job mất 20 phút; bộ nhớ Redis tăng khoảng 1,2 GB. Worker chạy <code>concurrency: 50</code> trên 4 pod và nhận <code>429</code> liên tục. Vài người nhận 2 email. Một người huỷ đăng ký lúc 10:05 vẫn nhận email lúc 10:30.</p></dd>
+<dt>Yêu cầu</dt><dd>Tôn trọng giới hạn 100 email mỗi giây. Hạn chế tối đa gửi trùng. Tạm dừng và tiếp tục được trong vài giây. Kiểm tra huỷ đăng ký tại lúc gửi. Khoảng 85 phút cho cả chiến dịch là chấp nhận được.</dd>
+<dt>Ràng buộc</dt><dd>Redis 2 GB, dùng chung với cache. Nhà cung cấp cho gửi tối đa 100 người nhận trong một lệnh, không có idempotency key.</dd>
+<dt>Nhiệm vụ</dt><dd>Thiết kế lại. Ước lượng bộ nhớ Redis. Giải thích cách chống trùng, tạm dừng và tiếp tục.</dd>
+</dl>
+<details class="hint"><summary>Gợi ý</summary><ul>
+<li>500.000 job, mỗi job vài KB trong Redis dùng chung với cache: điều gì xảy ra khi Redis đầy?</li>
+<li>Giới hạn tốc độ khác giới hạn số việc chạy song song như thế nào?</li>
+<li>Trạng thái của 500.000 người nhận nên nằm ở Redis hay MySQL?</li>
+</ul></details>
+<details class="answer"><summary>Xem lời giải</summary>
+<h4 class="ah">1. Làm rõ đề bài</h4>
+<ul>
+<li>Email marketing: mất một email gần như không tốn gì, gửi trùng thì phiền và hại uy tín. Giống tin khuyến mãi ở C5, chọn hướng "thà mất còn hơn trùng".</li>
+<li>Tạm dừng nghĩa là trong vài giây không gửi thêm email nào; tiếp tục nghĩa là đi tiếp đúng chỗ, không gửi lại người đã nhận.</li>
+<li>Huỷ đăng ký phải được kiểm tra ngay trước khi gửi, không phải lúc tạo danh sách.</li>
+</ul>
+<h4 class="ah">2. Ước lượng</h4>
+<ul>
+<li>500.000 job; mỗi job trong Redis gồm một hash với dữ liệu và tuỳ chọn, cộng mục trong các danh sách trạng thái. Nếu mỗi job khoảng 2 KB thì tổng khoảng 1 GB, khớp với 1,2 GB quan sát được. Đây là ước lượng; con số thật phụ thuộc kích thước <code>data</code>.</li>
+<li>Redis 2 GB dùng chung với cache: nếu policy là xoá key khi đầy, job có thể bị xoá; nếu là <code>noeviction</code>, cache bắt đầu lỗi ghi. Đằng nào cũng hỏng.</li>
+<li>Tốc độ: 100 email mỗi giây là một lệnh 100 người nhận mỗi giây. 500.000 / 100 = 5.000 giây, khoảng 83 phút.</li>
+<li>Song song hiện tại: 4 × 50 = 200 lệnh cùng lúc, mỗi lệnh một người, vượt giới hạn ngay giây đầu. Concurrency giới hạn số việc chạy cùng lúc, không giới hạn số việc mỗi giây.</li>
+</ul>
+<h4 class="ah">3. Các phương án</h4>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>A. Một job mỗi người, thêm limiter của BullMQ (<code>limiter: { max: 100, duration: 1000 }</code>)</td><td>Sửa đúng giới hạn tốc độ</td><td>Vẫn 1 GB trong Redis; tạm dừng thì phải pause cả queue; không biết dễ ai đã nhận</td></tr>
+<tr><td>B. Job theo lô 500 người, limiter theo job</td><td>Redis còn khoảng 1.000 job</td><td>Một lô lỗi giữa chừng: ai đã nhận, ai chưa? Phải lưu trạng thái từng người ở đâu đó</td></tr>
+<tr><td>C. Trạng thái người nhận trong MySQL, một job "runner" duy nhất gửi theo nhịp</td><td>Redis gần như không tốn gì; tạm dừng, tiếp tục, báo cáo, chống trùng đều là câu SQL</td><td>Runner là một điểm duy nhất (khởi động lại được); phải tự giữ nhịp</td></tr>
+<tr><td>D. Dùng tính năng chiến dịch của nhà cung cấp</td><td>Không phải tự làm</td><td>Đồng bộ danh sách huỷ đăng ký; phụ thuộc nhà cung cấp</td></tr>
+</tbody></table></div>
+<h4 class="ah">4. Đánh đổi và quyết định</h4>
+<p>Chọn C. Trạng thái của 500.000 người nhận là dữ liệu nghiệp vụ: marketing cần biết ai đã nhận, cần tạm dừng, cần báo cáo. Nó thuộc về MySQL. BullMQ chỉ dùng để đánh thức và giữ đúng một runner cho mỗi chiến dịch.</p>
+<p>Khi nào đổi ý: nếu team muốn tận dụng limiter và retry của BullMQ, B cộng bảng trạng thái trong MySQL cũng đúng. Nếu khối lượng tăng lên hàng chục triệu email mỗi tuần, D thường rẻ hơn tự làm.</p>
+<h4 class="ah">5. Triển khai</h4>
+<pre><code>CREATE TABLE campaign_recipients (
+  campaign_id BIGINT, user_id BIGINT,
+  status ENUM('pending','sending','sent','skipped','unknown','failed') NOT NULL DEFAULT 'pending',
+  claimed_at DATETIME(3) NULL,
+  PRIMARY KEY (campaign_id, user_id), KEY idx_status (campaign_id, status)
+);</code></pre>
+<ol class="list">
+<li><strong>Bắt đầu:</strong> <code>queue.add('campaign-runner', { campaignId }, { jobId: `campaign:${id}` })</code>. <code>jobId</code> cố định nên không có hai runner cho một chiến dịch.</li>
+<li><strong>Mỗi vòng</strong> (mỗi giây): nếu <code>campaigns.status = 'paused'</code> thì kết thúc job. Nếu không, lấy 100 người <code>pending</code>, loại những ai có trong bảng huỷ đăng ký (đánh dấu <code>skipped</code>), đánh dấu số còn lại là <code>sending</code>, commit.</li>
+<li>Gửi một lệnh tới nhà cung cấp. Thành công: <code>sent</code>. Timeout: <code>unknown</code>, không gửi lại. <code>429</code>: chờ theo <code>Retry-After</code>, đưa nhóm này về <code>pending</code> (chắc chắn chưa gửi), giảm nhịp.</li>
+<li><strong>Tiếp tục:</strong> đặt <code>status = 'running'</code> và thêm lại job runner. Runner đi tiếp từ các row <code>pending</code>.</li>
+<li><strong>Runner chết:</strong> row ở <code>sending</code> quá 2 phút được chuyển thành <code>unknown</code>, không gửi lại.</li>
+</ol>
+<p>Runner chủ yếu chờ mạng và chờ nhịp, nên không chặn event loop. Mỗi vòng ngắn hơn nhiều so với 30 giây lock.</p>
+<h4 class="ah">6. Rủi ro và cách kiểm chứng</h4>
+<ul>
+<li>Metric: email mỗi giây, số <code>429</code>, tỉ lệ <code>unknown</code>, số người nhận email sau khi đã huỷ đăng ký (phải bằng 0).</li>
+<li>Test: chiến dịch 10.000 người ở môi trường thử với nhà cung cấp giả lập; tạm dừng và tiếp tục giữa chừng; giết runner; đếm trùng (phải bằng 0) và mất (chỉ được là <code>unknown</code>).</li>
+<li>Redis: bộ nhớ không đổi đáng kể khi chạy chiến dịch.</li>
+</ul>
+<h4 class="ah">7. Lỗi hay gặp với bài này</h4>
+<ul>
+<li>Đổ 500.000 job vào một Redis dùng chung với cache.</li>
+<li>Dùng <code>concurrency</code> như giới hạn tốc độ.</li>
+<li>Kiểm tra huỷ đăng ký lúc tạo danh sách thay vì lúc gửi.</li>
+<li>Gửi lại khi timeout với một API không idempotent.</li>
+<li>Không có cách tạm dừng nào ngoài tắt worker.</li>
+</ul>
+</details>
+</div>
+
+<div class="case" id="c12">
+<h3>C12. Thêm bước tạo PDF hoá đơn, khách nhận hai email và điểm bị cộng hai lần</h3>
+<p class="src">Dựa trên: phần 02 và 06 của trang này (event loop, stalled, concurrency).</p>
+<dl>
+<dt>Bối cảnh</dt><dd><p>Queue <code>orders-post-process</code> chạy sau khi đơn được thanh toán: cộng điểm thưởng, rồi gửi email hoá đơn. Worker chạy <code>concurrency: 10</code> trên 3 pod, mỗi pod 2 vCPU. Tuần này team thêm bước tạo PDF hoá đơn bằng một thư viện đồng bộ, tốn 3–8 giây CPU mỗi PDF, đặt trong cùng processor, trước bước gửi email.</p>
+<p>Từ đó: nhiều sự kiện <code>stalled</code>; khoảng 4% khách nhận 2 email hoá đơn; điểm thưởng bị cộng hai lần; giờ cao điểm job chờ tới 20 phút; CPU của Redis tăng.</p></dd>
+<dt>Yêu cầu</dt><dd>Không gửi trùng email, không cộng điểm trùng. Hoá đơn tới khách trong 2 phút. Chi phí không tăng quá nhiều.</dd>
+<dt>Ràng buộc</dt><dd>Đỉnh 6 đơn mỗi giây trong khoảng 30 phút. Thư viện PDF không chạy bất đồng bộ được.</dd>
+<dt>Nhiệm vụ</dt><dd>Chẩn đoán. Sửa ngắn hạn và dài hạn. Kiểm tra lại yêu cầu bằng một phép tính.</dd>
+</dl>
+<details class="hint"><summary>Gợi ý</summary><ul>
+<li>10 job cùng tạo PDF trên một event loop thì loop bị chặn bao lâu?</li>
+<li>6 đơn mỗi giây × trung bình 5,5 giây CPU là bao nhiêu vCPU? Cụm hiện có bao nhiêu?</li>
+<li>Hoá đơn có nhất thiết phải là file đính kèm không?</li>
+</ul></details>
+<details class="answer"><summary>Xem lời giải</summary>
+<h4 class="ah">1. Làm rõ đề bài</h4>
+<ul>
+<li><strong>Stalled:</strong> thư viện đồng bộ chặn event loop 3–8 giây mỗi PDF. Với <code>concurrency: 10</code>, các PDF chạy nối nhau trên cùng một loop, có thể chặn 30–80 giây liền. Timer gia hạn lock không chạy, lock hết hạn, job bị giao cho pod khác.</li>
+<li><strong>Trùng:</strong> job bị chạy lại từ đầu, mà các bước cộng điểm và gửi email không idempotent. Gốc của trùng không phải PDF; PDF chỉ làm lộ ra một lỗi đã có sẵn.</li>
+<li><strong>Redis tăng CPU:</strong> có thể do nhiều job bị chuyển qua lại giữa các trạng thái, nhiều lần thử lại và gia hạn lock dồn cục sau mỗi lần loop được nhả. Đây là phỏng đoán, cần xác nhận bằng <code>INFO commandstats</code>.</li>
+<li>Câu hỏi quan trọng nhất cho phía sản phẩm: hoá đơn có phải là file đính kèm, hay một đường link tải là đủ?</li>
+</ul>
+<h4 class="ah">2. Ước lượng</h4>
+<ul>
+<li>CPU cần ở đỉnh: 6 đơn mỗi giây × 5,5 giây CPU ≈ 33 vCPU.</li>
+<li>Cụm hiện có: 3 pod × 2 vCPU = 6 vCPU, mà còn làm việc khác.</li>
+<li>Trong 30 phút đỉnh, hàng chờ tăng khoảng (33 − 6) × 1.800 ≈ 48.600 giây CPU việc tồn, tức hàng nghìn PDF. Không cách sắp xếp nào trong worker cứu được: đây là bài toán dung lượng, không chỉ là bài toán stalled.</li>
+</ul>
+<h4 class="ah">3. Các phương án</h4>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>A. Tăng <code>lockDuration</code></td><td>Hết stalled</td><td>Không sửa trùng, không sửa thiếu CPU; worker chết thật thì chậm phát hiện</td></tr>
+<tr><td>B. Sandboxed processor</td><td>Event loop chính rảnh, hết stalled</td><td>Không thêm CPU; hàng chờ vẫn 20 phút</td></tr>
+<tr><td>C. Tách queue <code>invoice-pdf</code>, worker riêng, concurrency bằng số vCPU, tự co giãn theo độ dài hàng chờ</td><td>Việc nặng không làm chậm việc nhẹ; mở rộng độc lập</td><td>Ở đỉnh cần khoảng 33 vCPU: tốn tiền</td></tr>
+<tr><td>D. Làm các bước idempotent</td><td>Sửa gốc của trùng, kể cả cho mọi lần chạy lại sau này</td><td>Thêm bảng ghi nhận</td></tr>
+<tr><td>E. Tạo PDF khi khách bấm tải, email chỉ chứa link</td><td>Chỉ tốn CPU cho người thật sự tải; giảm mạnh tải đỉnh</td><td>Cần đồng ý của sản phẩm và kế toán; lần tải đầu chậm vài giây</td></tr>
+<tr><td>F. Đổi thư viện hoặc template PDF nhẹ hơn</td><td>Giảm CPU mỗi PDF</td><td>Tốn công thử; không chắc giảm đủ</td></tr>
+</tbody></table></div>
+<h4 class="ah">4. Đánh đổi và quyết định</h4>
+<ul>
+<li><strong>Ngay hôm nay:</strong> D và C (có sandboxed processor). Hai việc này dừng trùng và dừng stalled. Hàng chờ PDF có thể vẫn dài ở đỉnh, nhưng không còn làm hỏng bước cộng điểm.</li>
+<li><strong>Dài hạn:</strong> đề xuất E với phía sản phẩm, kèm con số 33 vCPU. Nếu E được chấp nhận, CPU chỉ còn cho người tải. Nếu bắt buộc đính kèm, giữ C, co giãn theo hàng chờ, thử F, và nới yêu cầu "2 phút" thành "2 phút ngoài giờ đỉnh".</li>
+<li>A bị loại: nó che triệu chứng và làm tệ hơn khi worker chết thật.</li>
+</ul>
+<h4 class="ah">5. Triển khai</h4>
+<ol class="list">
+<li><code>orders-post-process</code> chỉ còn việc nhẹ: cộng điểm, rồi thêm job <code>invoice-pdf</code> với <code>jobId: invoice:${orderId}</code>.</li>
+<li>Cộng điểm idempotent: <code>INSERT INTO loyalty_ledger (order_id, kind, points) VALUES (?, 'purchase', ?)</code> với <code>UNIQUE (order_id, kind)</code>, cùng transaction với <code>UPDATE users SET points = points + ?</code>. Lỗi 1062 nghĩa là đã cộng rồi.</li>
+<li><code>invoice-pdf</code>: sandboxed processor, mỗi pod concurrency bằng số vCPU; tạo PDF, lưu vào object storage, rồi thêm job <code>invoice-email</code> với <code>jobId: invoice-email:${orderId}</code>.</li>
+<li>Gửi email idempotent: bảng <code>sent_emails (order_id, kind)</code> với <code>UNIQUE</code>, ghi trước khi gọi nhà cung cấp, vì với hoá đơn, mất một email ít hại hơn gửi trùng (khách tải lại được trong trang đơn hàng).</li>
+<li>Đo độ trễ event loop bằng <code>monitorEventLoopDelay</code> ở cả hai loại worker, cảnh báo khi p99 vượt 1 giây.</li>
+</ol>
+<h4 class="ah">6. Rủi ro và cách kiểm chứng</h4>
+<ul>
+<li>Test tải 6 đơn mỗi giây trong 30 phút: số <code>stalled</code> phải về 0; số email trùng và điểm cộng trùng bằng 0; đo thời gian chờ p95 của <code>invoice-pdf</code> để biết cần bao nhiêu vCPU thật.</li>
+<li>Đối soát hằng ngày: mỗi đơn đã thanh toán có đúng một row <code>loyalty_ledger</code> loại <code>purchase</code>.</li>
+<li>Rủi ro: hàng chờ PDF dài làm khách hỏi tổng đài. Hiển thị "hoá đơn đang được tạo" trong trang đơn hàng.</li>
+</ul>
+<h4 class="ah">7. Lỗi hay gặp với bài này</h4>
+<ul>
+<li>Tăng <code>lockDuration</code> và coi là xong.</li>
+<li>Tăng <code>concurrency</code> cho job nặng CPU.</li>
+<li>Chỉ chuyển sang sandboxed processor mà không tính dung lượng CPU.</li>
+<li>Để bước có tác dụng phụ (cộng điểm, gửi email) không idempotent.</li>
+<li>Trộn việc nặng CPU và việc nhẹ trong một queue.</li>
+</ul>
+</details>
+</div>
+</section>
+
+<!-- 10 -->
+<section id="s10">
+<header><span class="num">10</span><h2>Câu hỏi còn mở</h2></header>
 <p class="prose">Số thứ tự trùng với Open questions trong <code>.claude/docs/LEARNING_LOG.md</code>. Log là bản gốc.</p>
 <div class="tablewrap"><table>
 <thead><tr><th>#</th><th>Câu hỏi</th><th>Trạng thái</th></tr></thead>
@@ -509,9 +771,9 @@ await queue.add('import', { importId }, {
 </tbody></table></div>
 </section>
 
-<!-- 10 -->
-<section id="s10">
-<header><span class="num">10</span><h2>Tài liệu tham khảo</h2></header>
+<!-- 11 -->
+<section id="s11">
+<header><span class="num">11</span><h2>Tài liệu tham khảo</h2></header>
 <div class="prose"><ul>
 <li>BullMQ 6.3.17, mã nguồn: <code>classes/worker.js</code> (mặc định <code>lockDuration</code>, <code>stalledInterval</code>, <code>maxStalledCount</code>, <code>concurrency</code>; <code>close()</code> đợi job đang chạy), <code>moveStalledJobsToWait-9.lua</code>, <code>extendLock-2.lua</code>, <code>backoffs.js</code>, <code>redis-connection.js</code> (cảnh báo <code>noeviction</code>)</li>
 <li><a href="https://docs.bullmq.io/">Tài liệu BullMQ</a>: Workers, Stalled Jobs, Sandboxed processors, Graceful shutdown, Retrying failing jobs</li>
