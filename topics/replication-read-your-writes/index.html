@@ -139,20 +139,20 @@ details.answer summary{font-weight:500;color:var(--struct)}
 }
 
 
-/* bài toán thực tế */
+/* bài toán thực tế: dạng phỏng vấn */
 .case{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:0 var(--r-m) var(--r-m) 0;padding:16px 20px;margin:22px 0;max-width:720px}
 .case>h3{margin:0 0 6px;font-size:1.15rem}
 .case .src{font-size:13.5px;color:var(--ink-2);margin:0 0 12px}
-.case dl{margin:0;display:grid;grid-template-columns:104px minmax(0,1fr);gap:8px 16px}
-.case dt{font-weight:600;color:var(--struct);font-size:15px}
-.case dd{margin:0}
-.case dd p:last-child,.case dd ul:last-child{margin-bottom:0}
+.case .q{margin:10px 0 4px;padding:8px 0 8px 14px;border-left:3px solid var(--key);font-size:1.06rem;font-weight:500;color:var(--ink);max-width:none}
 .case details{max-width:none;margin:12px 0 0}
-.case details.hint{background:var(--paper)}
 .case details.answer[open]{background:var(--surface)}
+.case details.clar>summary,.case details.rubric>summary{color:var(--key)}
+.case .fu{margin:18px 0 0;padding-top:14px;border-top:1px solid var(--rule)}
+.case .fq{margin:0;font-weight:500}
+.case .fq b{color:var(--struct);margin-right:4px}
 .ah{font-size:15.5px;color:var(--struct);margin:20px 0 6px}
 .answer .tablewrap{max-width:none}
-@media (max-width:900px){.case{padding:14px}.case dl{grid-template-columns:minmax(0,1fr);gap:2px}.case dd{margin-bottom:8px}}
+@media (max-width:900px){.case{padding:14px}}
 
 /* ---- page widgets ---- */
 .n rect{fill:var(--surface);stroke:var(--rule-strong);stroke-width:1}
@@ -508,210 +508,317 @@ DELETE FROM events WHERE created_at &lt; '2026-01-01' ORDER BY id LIMIT 5000;</c
 <!-- 9 -->
 <section id="s9">
 <header><span class="num">09</span><h2>Bài toán thực tế</h2></header>
-<div class="prose"><p>Ba tình huống giống việc thật. Đọc đề, tự viết lời giải ra giấy (phương án, con số, đánh đổi), rồi mới mở lời giải. Gợi ý chỉ mở khi bí. Lời giải là lập luận từ tài liệu, không phải số đo; con số trong đó là ước lượng. Viết ngày 2026-10-20.</p></div>
+<div class="prose">
+<p>Mỗi bài là một vòng phỏng vấn system design cấp senior, khoảng 30–45 phút. Cách dùng:</p>
+<ol class="list">
+<li>Đọc câu hỏi của interviewer. Viết ra những gì bạn sẽ hỏi lại trước khi thiết kế, rồi mới mở "Hỏi lại interviewer" để xem câu hỏi nên hỏi và câu trả lời của interviewer. Các con số ở đó dùng cho những câu sau.</li>
+<li>Với mỗi follow-up, tự trả lời (nói to hoặc viết ra) trong vài phút, rồi mới mở đáp án. Follow-up cuối luôn là triển khai và kiểm chứng: thiết kế đã chọn được làm ra sao, test gì, theo dõi gì, lùi lại thế nào.</li>
+<li>Cuối bài, dùng rubric để tự chấm: câu trả lời của bạn giống cột "mid" hay cột "senior", và có rơi vào red flag nào không.</li>
+</ol>
+<p>Đáp án là lập luận từ tài liệu, không phải số đo; con số trong đó là ước lượng. Viết ngày 2026-10-21.</p>
+</div>
 
+<!-- C19 -->
 <div class="case" id="c19">
 <h3>C19. "Tôi vừa đặt đơn mà không thấy đâu"</h3>
 <p class="src">Dựa trên: phần 01–02 của trang này; <a href="../capacity-estimation/index.html">Ước lượng capacity</a>.</p>
-<dl>
-<dt>Bối cảnh</dt><dd><p>App giao đồ ăn: một primary và 3 replica MySQL 8.4, async, cùng region. Một proxy chia mọi <code>SELECT</code> đều cho 3 replica. Đỉnh: 1.500 ghi và 12.000 đọc mỗi giây. Primary đang ở 55% CPU. Độ trễ replica thường 20–80 ms, nhưng lúc 2:00 sáng có job dọn dữ liệu đẩy lên 3 phút.</p>
-<p>Khiếu nại: đặt đơn xong, màn "Đơn của tôi" không có đơn; vài giây sau thì có; đôi khi có rồi lại mất khi kéo để tải lại. Màn chi tiết đơn đôi khi trả 404 ngay sau khi đặt. Team đề xuất chuyển hết đọc về primary.</p></dd>
-<dt>Yêu cầu</dt><dd>Người dùng luôn thấy đơn mình vừa đặt và mọi thay đổi trạng thái đơn của mình. Không thấy dữ liệu lùi thời gian. Primary không vượt 70% CPU ở đỉnh.</dd>
-<dt>Ràng buộc</dt><dd>Không thay database. Có Redis. Hai tuần để làm.</dd>
-<dt>Nhiệm vụ</dt><dd>Đánh giá đề xuất của team bằng con số. Thiết kế định tuyến đọc, và nói xử lý thế nào lúc 2:00 sáng.</dd>
-</dl>
-<details class="hint"><summary>Gợi ý</summary><ul>
-<li>Chuyển 12.000 đọc mỗi giây về primary thì CPU primary thành bao nhiêu?</li>
-<li>Bao nhiêu phần trăm lượt đọc thật sự cần read-your-writes?</li>
-<li>404 ngay sau khi tạo là dấu hiệu của bảo đảm nào bị thiếu?</li>
-</ul></details>
-<details class="answer"><summary>Xem lời giải</summary>
-<h4 class="ah">1. Làm rõ đề bài</h4>
+<blockquote class="q">"Khách app giao đồ ăn của chúng tôi phàn nàn: đặt đơn xong, vào 'Đơn của tôi' không thấy đơn. Team đề xuất chuyển hết lượt đọc về primary. Bạn nghĩ sao?"</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>Kiến trúc database?</td><td>Một primary và 3 replica MySQL 8.4, async, cùng region. Một proxy chia mọi <code>SELECT</code> đều cho 3 replica.</td><td>Đọc xoay vòng giữa các replica trễ khác nhau.</td></tr>
+<tr><td>Tải và tình trạng primary?</td><td>Đỉnh 1.500 ghi và 12.000 đọc mỗi giây. Primary 55% CPU. Không được vượt 70% ở đỉnh.</td><td>Để tính đề xuất "mọi đọc về primary".</td></tr>
+<tr><td>Replica trễ bao nhiêu?</td><td>Thường 20–80 ms; lúc 2:00 sáng job dọn dữ liệu đẩy lên 3 phút.</td><td>Cần thiết kế cho lúc trễ, không chỉ lúc bình thường.</td></tr>
+<tr><td>Triệu chứng chính xác?</td><td>Đơn không có rồi vài giây sau có; đôi khi có rồi lại mất khi kéo để tải lại; chi tiết đơn đôi khi 404 ngay sau khi đặt.</td><td>Hai bảo đảm khác nhau bị vi phạm.</td></tr>
+<tr><td>Màn nào cần dữ liệu mới?</td><td>"Đơn của tôi" và chi tiết đơn. Danh sách nhà hàng, thực đơn cũ vài giây được.</td><td>Chỉ một phần lượt đọc cần primary hoặc chờ.</td></tr>
+<tr><td>Hạ tầng và thời gian?</td><td>Có Redis. Không thay database. Hai tuần.</td><td>Giới hạn lựa chọn.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> tách triệu chứng. "Không thấy" là read-your-writes; "có rồi lại mất" là monotonic reads. Hai bảo đảm, hai cơ chế.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Đánh giá đề xuất "mọi đọc về primary" bằng con số.</p>
+<details class="answer"><summary>Đáp án</summary>
 <ul>
-<li>"Không thấy đơn" và 404: vi phạm read-your-writes. "Có rồi lại mất": vi phạm monotonic reads, do xoay vòng giữa các replica trễ khác nhau.</li>
-<li>Màn nào cần gì? "Đơn của tôi" và chi tiết đơn của tôi: read-your-writes và monotonic. Danh sách nhà hàng, thực đơn: cũ vài giây được.</li>
-<li>Primary 55% CPU đang làm gì? Giả định phần lớn là ghi, cộng các câu đọc trong transaction ghi.</li>
+<li>Giả sử một lượt đọc tốn CPU bằng khoảng 1/4 một lượt ghi. 1.500 ghi mỗi giây chiếm 55%.</li>
+<li>Thêm 12.000 đọc ≈ 3.000 "đơn vị ghi", gấp đôi tải hiện tại: CPU khoảng 165%. Không làm được.</li>
+<li>Đây là ước lượng thô; đo bằng tỉ lệ thời gian theo digest câu lệnh trong <code>performance_schema</code>.</li>
 </ul>
-<h4 class="ah">2. Ước lượng</h4>
+<p>Và nó giải quá rộng: danh sách nhà hàng không cần dữ liệu mới. Chỉ phần "của tôi, ngay sau khi tôi ghi" cần.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> Vậy chỉ đọc primary trong 5 giây sau khi người dùng ghi thì sao?</p>
+<details class="answer"><summary>Đáp án</summary>
 <ul>
-<li>Giả sử một lượt đọc tốn CPU bằng khoảng 1/4 một lượt ghi. Ghi 1.500 mỗi giây chiếm 55%. Thêm 12.000 lượt đọc ≈ 3.000 "đơn vị ghi", gấp đôi tải hiện tại: CPU lên khoảng 165%. Đề xuất của team không làm được. Đây là ước lượng thô; phải đo bằng tỉ lệ thời gian theo digest câu lệnh.</li>
-<li>Màn "Đơn của tôi" và chi tiết đơn: giả sử 15% lượt đọc, tức 1.800 mỗi giây. Nhưng chỉ người vừa ghi trong vài giây mới cần đọc primary: khoảng 1.500 lần đặt hay đổi trạng thái mỗi giây, mỗi lần kéo theo 2–3 lần đọc trong 5 giây sau, tức khoảng 3.000–4.500 lượt đọc mỗi giây có thể cần primary. Vẫn nhiều.</li>
-<li>Với chờ GTID: phần lớn lần đọc đến sau 100 ms, khi replica đã có bản mới, nên chờ 0 ms. Chỉ một phần nhỏ phải chờ vài chục ms, và chỉ khi quá hạn mới về primary.</li>
+<li>Khoảng 1.500 lần đặt hay đổi trạng thái mỗi giây, mỗi lần kéo theo 2–3 lần đọc trong 5 giây sau: khoảng 3.000–4.500 đọc mỗi giây thêm lên primary. Với tỉ lệ 1/4 ở trên, CPU tăng khoảng 10–15 điểm: sát ngưỡng 70%.</li>
+<li>Sai lúc 2:00: độ trễ 3 phút vượt cửa sổ 5 giây, lỗi quay lại đúng lúc job chạy.</li>
+<li>Chọn 5 giây là đoán.</li>
 </ul>
-<h4 class="ah">3. Các phương án</h4>
 <div class="tablewrap"><table>
 <thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
 <tbody>
-<tr><td>A. Mọi đọc về primary</td><td>Đúng tuyệt đối</td><td>CPU primary khoảng 165%: không làm được</td></tr>
-<tr><td>B. Đọc primary trong 5 giây sau khi người dùng ghi</td><td>Đơn giản; dựa trên cookie hay Redis</td><td>Khoảng 3.000–4.500 đọc mỗi giây thêm lên primary; sai lúc 2:00 khi độ trễ hơn 5 giây</td></tr>
-<tr><td>C. GTID: ghi trả GTID, đọc chờ trên replica tối đa 200 ms rồi về primary</td><td>Đúng cả lúc 2:00; primary chỉ nhận phần quá hạn</td><td>Phức tạp hơn; lần chờ giữ connection replica</td></tr>
-<tr><td>D. Gắn người dùng với một replica (hash theo user id)</td><td>Giải "có rồi lại mất"</td><td>Không giải read-your-writes</td></tr>
-<tr><td>E. Bỏ replica trễ quá ngưỡng khỏi pool</td><td>Giới hạn độ trễ tệ nhất cho mọi người</td><td>Lúc 2:00 cả 3 cùng trễ; phải có đường về primary</td></tr>
+<tr><td>A. Mọi đọc về primary</td><td>Đúng tuyệt đối</td><td>Khoảng 165% CPU</td></tr>
+<tr><td>B. Cửa sổ primary 5 giây</td><td>Đơn giản</td><td>Thêm tải lớn; sai khi trễ vượt cửa sổ</td></tr>
+<tr><td>C. GTID: ghi trả GTID, đọc chờ trên replica tối đa 200 ms rồi về primary</td><td>Đúng bất kể độ trễ; primary chỉ nhận phần quá hạn</td><td>Phức tạp hơn; lần chờ giữ connection replica</td></tr>
+<tr><td>D. Gắn người dùng với một replica</td><td>Giải "có rồi lại mất"</td><td>Không giải read-your-writes</td></tr>
+<tr><td>E. Bỏ replica trễ quá ngưỡng khỏi pool</td><td>Giới hạn độ trễ tệ nhất</td><td>Lúc 2:00 cả 3 cùng trễ; cần đường về primary</td></tr>
 </tbody></table></div>
-<h4 class="ah">4. Đánh đổi và quyết định</h4>
-<p>Chọn C + D + E, và sửa job lúc 2:00.</p>
+<p><strong>Chọn C + D + E.</strong> Với chờ GTID, phần lớn lần đọc đến sau 100 ms, khi replica đã có bản mới, nên chờ 0 ms. D làm lần chờ hiệu quả hơn vì lần đọc luôn rơi vào cùng replica. <strong>Khi nào đổi ý:</strong> không lấy được GTID (ORM hay proxy che gói OK) thì B cộng E.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> Lúc 2:00 sáng cả 3 replica trễ 3 phút. Thiết kế của bạn cư xử thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
 <ul>
-<li><strong>C</strong> cho các màn "của tôi": GTID của lần ghi cuối lưu trong Redis theo user id. D làm lần chờ hiệu quả hơn, vì lần đọc luôn rơi vào cùng replica.</li>
-<li><strong>D</strong> cho mọi đọc của người dùng đăng nhập: hết "lùi thời gian".</li>
-<li><strong>E:</strong> proxy hoặc lớp định tuyến bỏ replica trễ quá 5 giây; nếu không còn replica nào, các màn "của tôi" đọc primary, các màn chung trả bản cache.</li>
-<li><strong>Job lúc 2:00:</strong> chia lô, đợi khi độ trễ quá 2 giây. Đây là sửa gốc; C, D, E chỉ là lưới an toàn.</li>
-</ul>
-<p>Khi nào đổi ý: nếu team không thể lấy GTID (ORM hay proxy che mất gói OK), dùng B với cửa sổ 5 giây, cộng E. Đo CPU primary sau khi làm.</p>
-<h4 class="ah">5. Triển khai</h4>
-<ol class="list">
-<li>Tuần 1: sửa job 2:00 (chia lô, giảm tốc theo heartbeat); thêm heartbeat; đo độ trễ ba replica.</li>
-<li>Tuần 1: định tuyến theo hash user id (D); loại replica trễ (E).</li>
-<li>Tuần 2: bật <code>session_track_gtids = OWN_GTID</code> trên connection ghi; lưu GTID vào <code>ryw:{userId}</code> TTL 30 giây; các màn "của tôi" chạy <code>WAIT_FOR_EXECUTED_GTID_SET(?, 0.2)</code> trước khi đọc. Hàm nhận thời gian chờ theo giây, nên có thể dùng số thập phân; cần thử trên lab.</li>
-</ol>
-<h4 class="ah">6. Rủi ro và cách kiểm chứng</h4>
-<ul>
-<li>Metric: tỉ lệ lần chờ GTID quá hạn và phải về primary; p99 thời gian chờ; CPU primary.</li>
-<li>Test tự động: đặt đơn rồi đọc ngay 1.000 lần, với một replica bị làm chậm bằng <code>SOURCE_DELAY</code> (manual 8.4 gợi ý dùng nó để giả lập trễ). Không lần nào thiếu đơn.</li>
-<li>Rủi ro: connection pool replica cạn vì lần chờ. Giới hạn thời gian chờ nhỏ, đo thời gian chờ pool.</li>
-</ul>
-<h4 class="ah">7. Lỗi hay gặp với bài này</h4>
-<ul>
-<li>Chuyển hết đọc về primary mà không tính tải.</li>
-<li>Gắn người dùng với một replica và nghĩ là đã xong.</li>
-<li>Dùng cửa sổ thời gian cố định mà không xử lý lúc độ trễ vượt cửa sổ.</li>
-<li>Chỉ sửa định tuyến, để nguyên job gây trễ 3 phút.</li>
+<li>Lần chờ GTID quá hạn 200 ms, đọc về primary: đúng, nhưng mọi người vừa ghi đều về primary. Ban đêm tải thấp, chấp nhận được; vẫn đo.</li>
+<li>E bỏ replica trễ quá 5 giây; nếu không còn replica nào, màn "của tôi" đọc primary, màn chung trả bản cache.</li>
+<li>Quan trọng nhất: <strong>sửa gốc</strong>. Job 2:00 chia lô, ngủ khi độ trễ quá 2 giây (C20). C, D, E chỉ là lưới an toàn; một job làm replica trễ 3 phút là lỗi riêng cần sửa.</li>
 </ul>
 </details>
 </div>
 
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> Lần chờ GTID có rủi ro gì cho replica?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Mỗi lần chờ giữ một connection replica tới 200 ms. Nếu replica trễ và hàng nghìn session cùng chờ, pool replica cạn, và cả các màn không cần chờ cũng chậm.</li>
+<li>Giảm rủi ro: thời gian chờ nhỏ; giới hạn số lần chờ đồng thời (vượt thì về primary ngay); E bỏ replica trễ trước khi các lần chờ dồn lại.</li>
+<li>Chi phí của hàng nghìn lần chờ đồng thời trên một replica chưa được đo (câu hỏi 34); cần thử trên lab trước khi bật rộng.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai và kiểm chứng thế nào trong hai tuần?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li><strong>Tuần 1:</strong> sửa job 2:00 (chia lô, giảm tốc theo heartbeat); thêm heartbeat; định tuyến theo hash user id (D); loại replica trễ (E).</li>
+<li><strong>Tuần 2:</strong> bật <code>session_track_gtids = OWN_GTID</code> trên connection ghi; lưu GTID vào <code>ryw:{userId}</code> TTL 30 giây; màn "của tôi" chạy <code>WAIT_FOR_EXECUTED_GTID_SET(?, 0.2)</code> trước khi đọc. Hàm nhận thời gian chờ theo giây; thời gian chờ thập phân cần thử trên lab.</li>
+<li>Test tự động: đặt đơn rồi đọc ngay 1.000 lần, với một replica bị làm chậm bằng <code>SOURCE_DELAY</code> (manual 8.4 gợi ý dùng để giả lập trễ). Không lần nào thiếu đơn, không lần nào "lùi".</li>
+<li>Metric: tỉ lệ lần chờ quá hạn và về primary; p99 thời gian chờ; CPU primary; thời gian chờ pool replica.</li>
+</ul>
+</details>
+</div>
+
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Chẩn đoán</td><td>"Replica trễ"</td><td>Hai bảo đảm: read-your-writes và monotonic reads</td></tr>
+<tr><td>Đề xuất của team</td><td>Đồng ý, hoặc từ chối không có số</td><td>Tính ra khoảng 165% CPU</td></tr>
+<tr><td>Thiết kế</td><td>Cửa sổ primary vài giây</td><td>Chờ GTID có quá hạn; gắn replica cho monotonic; loại replica trễ</td></tr>
+<tr><td>Lúc trễ lớn</td><td>Không nhắc</td><td>Hành vi lúc 2:00, và sửa gốc job gây trễ</td></tr>
+<tr><td>Kiểm chứng</td><td>Không có</td><td>Test với replica bị làm chậm; metric tải dội về primary</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> chuyển hết đọc về primary không tính tải; gắn người dùng với một replica rồi nghĩ là xong; cửa sổ thời gian cố định không xử lý lúc trễ vượt cửa sổ.</p>
+</details>
+</div>
+
+<!-- C20 -->
 <div class="case" id="c20">
 <h3>C20. Replica trễ 40 phút mỗi đêm</h3>
 <p class="src">Dựa trên: phần 02 và 04 của trang này; <a href="../capacity-estimation/index.html">Ước lượng capacity</a> (C13).</p>
-<dl>
-<dt>Bối cảnh</dt><dd><p>Một job chạy lúc 01:00: <code>UPDATE orders SET archived = 1 WHERE created_at &lt; NOW() - INTERVAL 90 DAY AND archived = 0</code>. Câu này chạm khoảng 6 triệu row và chạy 12 phút trên primary. Sau đó, replica báo cáo trễ tới 40 phút. Báo cáo kinh doanh lúc 7:00 có lúc thiếu số của đêm trước. Một lần, primary chết lúc 01:20, và failover sang replica mất 35 phút vì phải chờ replica áp dụng xong.</p>
-<p>Ngoài ra, giữa ngày, nhóm dữ liệu chạy <code>ALTER TABLE orders ADD COLUMN …</code> mất 25 phút; replica trễ thêm khoảng 25 phút trong lúc đó.</p></dd>
-<dt>Yêu cầu</dt><dd>Độ trễ replica dưới 5 giây suốt ngày đêm. Failover dưới 2 phút.</dd>
-<dt>Ràng buộc</dt><dd>MySQL 8.4, async, 2 replica. Job archive phải xong trước 5:00.</dd>
-<dt>Nhiệm vụ</dt><dd>Giải thích vì sao 12 phút trên primary thành 40 phút trễ. Thiết kế lại job, và quy trình cho thay đổi schema.</dd>
-</dl>
-<details class="hint"><summary>Gợi ý</summary><ul>
-<li>Binlog được gửi khi nào: lúc câu lệnh bắt đầu hay lúc commit?</li>
-<li>Replica áp dụng 6 triệu sự kiện thay đổi row, theo thứ tự commit.</li>
-<li>Failover phải chờ gì?</li>
-</ul></details>
-<details class="answer"><summary>Xem lời giải</summary>
-<h4 class="ah">1. Làm rõ đề bài</h4>
+<blockquote class="q">"Mỗi đêm, sau job archive lúc 01:00, replica của chúng tôi trễ tới 40 phút. Một lần primary chết đúng lúc đó, và failover mất 35 phút. Vì sao, và bạn sửa thế nào?"</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>Job archive làm gì?</td><td><code>UPDATE orders SET archived = 1 WHERE created_at &lt; NOW() - INTERVAL 90 DAY AND archived = 0</code>. Khoảng 6 triệu row, chạy 12 phút trên primary.</td><td>Một transaction khổng lồ.</td></tr>
+<tr><td>Replication cấu hình thế nào?</td><td>MySQL 8.4, async, 2 replica, binlog theo row.</td><td>Row-based: 6 triệu sự kiện thay đổi row.</td></tr>
+<tr><td>Ảnh hưởng?</td><td>Báo cáo kinh doanh lúc 7:00 có lúc thiếu số đêm trước. Failover lúc 01:20 mất 35 phút vì chờ replica áp dụng xong.</td><td>Độ trễ replica cũng là thời gian failover.</td></tr>
+<tr><td>Có nguồn trễ nào khác?</td><td>Giữa ngày, nhóm dữ liệu chạy <code>ALTER TABLE orders ADD COLUMN …</code> mất 25 phút; replica trễ thêm khoảng 25 phút.</td><td>Thay đổi schema cũng là transaction lớn với replica.</td></tr>
+<tr><td>Yêu cầu?</td><td>Độ trễ dưới 5 giây suốt ngày đêm. Failover dưới 2 phút. Job phải xong trước 5:00.</td><td>Có 4 giờ cho job.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> nối ngay hai triệu chứng: trễ 40 phút và failover 35 phút là cùng một con số, vì replica phải áp dụng hết trước khi nhận ghi.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Vì sao 12 phút trên primary thành 40 phút trễ?</p>
+<details class="answer"><summary>Đáp án</summary>
 <ul>
-<li>Trên primary, câu <code>UPDATE</code> chạy 12 phút rồi commit; chỉ lúc commit, binlog của nó mới được gửi đi. Replica bắt đầu áp dụng ở phút 12.</li>
-<li>Với binlog theo row, replica nhận 6 triệu ảnh trước và sau của row. Áp dụng có thể chậm hơn chạy trên primary (thêm tra cứu theo khoá, ghi redo của replica, một luồng cho một transaction). Giả sử mất khoảng 15–25 phút. Trong lúc đó, các transaction sau phải chờ để giữ thứ tự commit.</li>
-<li>Độ trễ 40 phút là tổng: 12 phút chưa gửi, cộng thời gian áp dụng, cộng thời gian rút hàng đợi sau đó. Đây là suy luận; E42 đo hình dạng thật.</li>
-<li>Failover phải chờ replica áp dụng hết relay log rồi mới nhận ghi, nếu không sẽ mất transaction. Đó là 35 phút.</li>
+<li>Binlog của transaction chỉ được gửi lúc commit. Replica bắt đầu áp dụng ở phút 12.</li>
+<li>Với binlog theo row, replica nhận 6 triệu ảnh trước và sau. Áp dụng có thể chậm hơn chạy trên primary (tra cứu theo khoá, ghi redo của replica, một transaction chỉ do một worker áp dụng). Giả sử 15–25 phút. Trong lúc đó, transaction sau phải chờ để giữ thứ tự commit.</li>
+<li>Tổng: 12 phút chưa gửi + thời gian áp dụng + thời gian rút hàng đợi. Đây là suy luận; E42 đo hình dạng thật.</li>
+<li>Trong 12 phút đầu, <code>Seconds_Behind_Source</code> có thể gần 0 vì replica chưa nhận gì: chỉ số này đánh lừa ở đúng lúc quan trọng nhất.</li>
 </ul>
-<h4 class="ah">2. Ước lượng</h4>
-<ul>
-<li>Lô 5.000 row: nếu mỗi lô chạy khoảng 0,5 giây trên primary, thì 6 triệu row là 1.200 lô, khoảng 10 phút chạy thuần, cộng thời gian nghỉ giữa lô.</li>
-<li>Mỗi lô làm replica trễ cỡ thời gian áp dụng một lô, khoảng 1 giây. Có giảm tốc theo độ trễ thì giữ được dưới 5 giây.</li>
-<li>Nghỉ 0,5 giây giữa các lô: tổng khoảng 20 phút. Xong trước 5:00 dư dả.</li>
-</ul>
-<h4 class="ah">3. Các phương án</h4>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> DBA đề xuất tăng <code>replica_parallel_workers</code>. Có giúp không?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p><strong>Không.</strong> Applier song song chia việc theo transaction; một transaction 6 triệu row chỉ do một worker áp dụng. Thêm worker giúp khi có nhiều transaction nhỏ, không giúp với một transaction lớn.</p>
 <div class="tablewrap"><table>
 <thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
 <tbody>
-<tr><td>A. Thêm worker cho applier</td><td>Một dòng cấu hình</td><td>Một transaction chỉ do một worker áp dụng; không giúp</td></tr>
-<tr><td>B. Chia lô theo khoá chính, giảm tốc theo độ trễ</td><td>Độ trễ có trần; failover không phải chờ lâu</td><td>Job dài hơn; phải chịu được dừng giữa chừng (checkpoint)</td></tr>
-<tr><td>C. Không cập nhật cờ, mà partition theo tháng và chuyển cả partition</td><td>Hầu như không sinh binlog</td><td>Đổi schema lớn (C13)</td></tr>
-<tr><td>D. Tạm thời bỏ qua replica báo cáo</td><td>Không</td><td>Không giải được failover</td></tr>
-<tr><td>E. Thay đổi schema bằng thuật toán online (<code>ALGORITHM=INSTANT</code> khi được) hoặc công cụ như gh-ost</td><td>Không chặn applier hàng chục phút</td><td>Không phải thay đổi nào cũng INSTANT; công cụ thêm vận hành</td></tr>
+<tr><td>A. Thêm worker cho applier</td><td>Một dòng cấu hình</td><td>Không giúp với một transaction lớn</td></tr>
+<tr><td>B. Chia lô theo khoá chính, giảm tốc theo độ trễ</td><td>Độ trễ có trần; failover không phải chờ lâu</td><td>Job dài hơn; cần checkpoint</td></tr>
+<tr><td>C. Partition theo tháng, chuyển cả partition</td><td>Hầu như không sinh binlog</td><td>Đổi schema lớn (C13)</td></tr>
+<tr><td>D. Bỏ qua replica báo cáo</td><td>Không</td><td>Không giải failover</td></tr>
 </tbody></table></div>
-<h4 class="ah">4. Đánh đổi và quyết định</h4>
+<p><strong>Chọn B ngay</strong>, C là hướng dài hạn nếu bảng tiếp tục lớn.</p>
 <ul>
-<li><strong>B ngay</strong> cho job archive: lô 5.000 theo khoảng khoá chính, kiểm tra heartbeat sau mỗi lô, ngủ khi trễ quá 2 giây. Lưu khoá chính cuối cùng đã xử lý để chạy tiếp được nếu job bị dừng (như trang BullMQ).</li>
-<li><strong>Quy trình schema:</strong> mọi <code>ALTER</code> trên bảng lớn phải ghi rõ thuật toán. <code>ADD COLUMN</code> ở cuối bảng thường làm được bằng <code>INSTANT</code> trên 8.x, nên không cần chạy 25 phút; còn lại dùng công cụ online. Chi tiết ở chủ đề migration online (Month 4).</li>
-<li><strong>C</strong> là hướng dài hạn nếu bảng tiếp tục lớn.</li>
-<li>A không giúp, vì vấn đề là một transaction lớn, không phải nhiều transaction nhỏ.</li>
+<li>Lô 5.000 row: giả sử 0,5 giây mỗi lô trên primary; 1.200 lô, khoảng 10 phút chạy thuần.</li>
+<li>Mỗi lô làm replica trễ cỡ thời gian áp dụng một lô, khoảng 1 giây. Có giảm tốc thì giữ dưới 5 giây.</li>
+<li>Nghỉ 0,5 giây giữa lô: tổng khoảng 20 phút. Xong trước 5:00 dư dả.</li>
 </ul>
-<h4 class="ah">5. Triển khai</h4>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> Viết vòng lặp chia lô. Có cạm bẫy gì?</p>
+<details class="answer"><summary>Đáp án</summary>
 <pre><code>-- mỗi lô: khoảng khoá chính cố định, nên mỗi lô chạm một vùng nhỏ của index
 UPDATE orders SET archived = 1
  WHERE id &gt; ? AND id &lt;= ? + 5000
    AND created_at &lt; ? AND archived = 0;
 -- sau mỗi lô: đọc heartbeat trên replica; nếu trễ &gt; 2 s thì ngủ tới khi &lt; 1 s
 -- lưu id cuối vào bảng job_checkpoints</code></pre>
-<p>Mốc <code>created_at</code> được tính một lần lúc job bắt đầu và truyền vào mọi lô, để kết quả không đổi theo thời điểm chạy từng lô.</p>
-<h4 class="ah">6. Rủi ro và cách kiểm chứng</h4>
 <ul>
-<li>Đồ thị độ trễ heartbeat lúc 01:00–02:00 sau khi đổi: đỉnh dưới 5 giây.</li>
-<li>Diễn tập failover lúc job đang chạy ở staging: thời gian tới khi replica nhận ghi.</li>
-<li>Review mọi job theo lịch: câu lệnh nào chạm hơn 10.000 row trong một transaction?</li>
-</ul>
-<h4 class="ah">7. Lỗi hay gặp với bài này</h4>
-<ul>
-<li>Tăng <code>replica_parallel_workers</code> cho một transaction lớn.</li>
-<li>Chia lô bằng <code>LIMIT</code> không kèm khoảng khoá chính, làm mỗi lô quét lại từ đầu.</li>
-<li>Chỉ nhìn <code>Seconds_Behind_Source</code>, thấy gần 0 trong 12 phút đầu (khi replica chưa nhận được transaction lớn) và tưởng ổn.</li>
-<li>Quên rằng độ trễ replica cũng là thời gian failover.</li>
+<li>Chia bằng <code>LIMIT 5000</code> không kèm khoảng khoá chính thì mỗi lô quét lại từ đầu qua các row đã xử lý: lô sau chậm hơn lô trước.</li>
+<li>Mốc <code>created_at</code> tính một lần lúc job bắt đầu và truyền vào mọi lô; dùng <code>NOW()</code> trong mỗi lô thì kết quả đổi theo thời điểm chạy.</li>
+<li>Đo độ trễ bằng heartbeat, không bằng <code>Seconds_Behind_Source</code> (Follow-up 1).</li>
+<li>Checkpoint để job dừng giữa chừng (deploy, lỗi) chạy tiếp được, như trang BullMQ.</li>
 </ul>
 </details>
 </div>
 
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> Còn <code>ALTER TABLE</code> 25 phút giữa ngày?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Với replica, một <code>ALTER</code> dài cũng là một sự kiện lớn: replica chạy lại nó, và mọi thứ phía sau chờ.</li>
+<li><code>ADD COLUMN</code> thường làm được bằng <code>ALGORITHM=INSTANT</code> trên 8.x (chỉ sửa metadata), nên không cần 25 phút. Ghi rõ <code>ALGORITHM=INSTANT</code> trong câu lệnh: nếu không làm được, MySQL báo lỗi thay vì âm thầm chép cả bảng.</li>
+<li>Thay đổi không INSTANT được: dùng công cụ online như gh-ost (chép theo lô, có giảm tốc theo độ trễ). Chi tiết ở chủ đề migration online (Month 4).</li>
+<li>Quy trình: mọi <code>ALTER</code> trên bảng lớn phải qua review, ghi rõ thuật toán và dự kiến ảnh hưởng tới replica.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn kiểm chứng thế nào là đã đạt "trễ dưới 5 giây, failover dưới 2 phút"?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Đồ thị độ trễ heartbeat lúc 01:00–02:00 sau khi đổi: đỉnh dưới 5 giây.</li>
+<li>Diễn tập failover ở staging trong lúc job đang chạy: đo thời gian tới khi replica nhận ghi.</li>
+<li>Review mọi job theo lịch: câu lệnh nào chạm hơn 10.000 row trong một transaction?</li>
+<li>Cảnh báo theo heartbeat, ngưỡng 5 giây, có ghi job nào đang chạy lúc đó.</li>
+</ul>
+</details>
+</div>
+
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Chẩn đoán</td><td>"Replica yếu"</td><td>Binlog gửi lúc commit; một transaction lớn; trễ và failover cùng một con số</td></tr>
+<tr><td>Đề xuất DBA</td><td>Đồng ý thêm worker</td><td>Giải thích vì sao worker song song không giúp</td></tr>
+<tr><td>Chia lô</td><td><code>LIMIT</code></td><td>Khoảng khoá chính, mốc thời gian cố định, giảm tốc theo heartbeat, checkpoint</td></tr>
+<tr><td>Schema</td><td>Không nhắc</td><td><code>INSTANT</code> hoặc công cụ online; quy trình review</td></tr>
+<tr><td>Đo</td><td><code>Seconds_Behind_Source</code></td><td>Heartbeat; diễn tập failover</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> tăng worker cho một transaction lớn; chỉ nhìn <code>Seconds_Behind_Source</code> và tưởng ổn trong 12 phút đầu; quên rằng độ trễ replica cũng là thời gian failover.</p>
+</details>
+</div>
+
+<!-- C21 -->
 <div class="case" id="c21">
 <h3>C21. Failover xong, mất 3 giây đơn hàng đã trả tiền</h3>
 <p class="src">Dựa trên: phần 02–03 của trang này; <a href="../idempotency-retries/index.html">Idempotency và retry</a> (C4).</p>
-<dl>
-<dt>Bối cảnh</dt><dd><p>Primary MySQL chết vì hỏng phần cứng lúc 14:03:17. Hệ thống tự động đưa replica (async, cùng region, khác zone) lên làm primary sau 40 giây. Sau sự cố, đối soát với cổng thanh toán cho thấy 212 giao dịch thành công ở cổng mà không có đơn trong database mới; tất cả trong 3 giây cuối trước khi primary chết. Primary cũ không khởi động lại được.</p></dd>
-<dt>Yêu cầu</dt><dd>Lần sau, một máy chết không làm mất transaction đã commit. Khôi phục 212 đơn đã mất. Commit p99 tăng không quá 5 ms.</dd>
-<dt>Ràng buộc</dt><dd>Vòng mạng giữa hai zone khoảng 0,5–1 ms (giả định, phải đo). Có 2 replica ở 2 zone khác nhau.</dd>
-<dt>Nhiệm vụ</dt><dd>Giải thích vì sao mất. Đề xuất cấu hình replication và quy trình failover. Kế hoạch khôi phục 212 đơn.</dd>
-</dl>
-<details class="hint"><summary>Gợi ý</summary><ul>
-<li>Với async, commit trả về trước hay sau khi replica nhận transaction?</li>
-<li>Semi-sync có hai chế độ chờ; chế độ nào bảo đảm client khác không thấy dữ liệu mà replica chưa có?</li>
-<li>Thông tin về 212 giao dịch còn nằm ở đâu ngoài database?</li>
-</ul></details>
-<details class="answer"><summary>Xem lời giải</summary>
-<h4 class="ah">1. Làm rõ đề bài</h4>
+<blockquote class="q">"Primary MySQL của chúng tôi chết vì hỏng phần cứng. Failover tự động mất 40 giây, nghe có vẻ ổn. Nhưng sau đó đối soát thấy 212 giao dịch đã thanh toán mà không có đơn. Chuyện gì xảy ra, và làm sao để không lặp lại?"</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>Replication kiểu gì? Replica ở đâu?</td><td>Async. 2 replica ở 2 zone khác primary, cùng region.</td><td>Async là nghi phạm số một.</td></tr>
+<tr><td>212 giao dịch nằm ở đâu trên thời gian?</td><td>Tất cả trong 3 giây cuối trước khi primary chết lúc 14:03:17.</td><td>Khớp với binlog chưa gửi kịp.</td></tr>
+<tr><td>Primary cũ còn đọc được không?</td><td>Không khởi động lại được; disk coi như mất.</td><td>Không cứu được binlog trên đó.</td></tr>
+<tr><td>Thông tin về giao dịch còn ở đâu?</td><td>Cổng thanh toán (số tiền, mã tham chiếu, thời điểm); log ứng dụng; các event đã đi qua outbox.</td><td>Nguồn để khôi phục.</td></tr>
+<tr><td>Yêu cầu?</td><td>Một máy chết không làm mất transaction đã commit. Commit p99 tăng không quá 5 ms.</td><td>RPO 0 với ngân sách độ trễ.</td></tr>
+<tr><td>Vòng mạng giữa zone?</td><td>Khoảng 0,5–1 ms (giả định, phải đo).</td><td>Cái giá của chờ replica xác nhận.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> tách hai việc: khôi phục 212 đơn (khẩn cấp, hướng khách hàng) và ngăn lặp lại (thiết kế). Việc thứ nhất bắt đầu ngay, không chờ việc thứ hai.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Vì sao mất? Failover nhanh hơn có giúp không?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p>Async: primary commit, trả lời client, rồi mới gửi binlog. 3 giây cuối nằm trong binlog của primary cũ, chưa tới replica. Primary cũ không khởi động lại được, nên mất.</p>
+<p>Failover nhanh hơn không giúp: thời gian failover (RTO) và lượng dữ liệu mất (RPO) là hai thứ khác nhau. Async không thể cho RPO 0, dù failover mất 1 giây.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> 212 khách đã trả tiền mà không có đơn. Bạn làm gì ngay hôm nay?</p>
+<details class="answer"><summary>Đáp án</summary>
 <ul>
-<li>Async: primary commit, trả lời client, rồi mới gửi binlog. 3 giây cuối nằm trong binlog của primary cũ, chưa tới replica. Primary cũ không khởi động lại được, nên dữ liệu đó mất.</li>
-<li>RPO (lượng dữ liệu được phép mất) mong muốn là 0 cho đơn hàng. Async không thể cho RPO 0.</li>
-<li>Câu hỏi: disk của primary cũ còn đọc được không? Nếu còn, binlog trên đó có thể cứu được. Giả định không.</li>
+<li>Lấy danh sách giao dịch thành công từ cổng thanh toán trong khoảng thời gian sự cố, so với đơn trong database mới.</li>
+<li>Nếu mỗi lần thanh toán mang idempotency key gắn với một đơn (C4), dựng lại đơn từ log ứng dụng, hoặc từ event đã đi qua outbox mà consumer đã nhận (kho, email có thể đã có bản sao).</li>
+<li>Đơn nào không dựng lại được: hoàn tiền và liên hệ khách. Không để khách tự phát hiện.</li>
+<li>Từ nay: đối soát hằng ngày (hoặc mỗi giờ) đơn với cổng thanh toán, để lần sau phát hiện trong vài phút chứ không phải sau sự cố.</li>
 </ul>
-<h4 class="ah">2. Ước lượng</h4>
-<ul>
-<li>Semi-sync <code>AFTER_SYNC</code> thêm một vòng mạng tới replica nhanh nhất vào mỗi commit: khoảng 0,5–1 ms khác zone, cộng thời gian replica ghi relay log. Nằm trong ngân sách 5 ms, nhưng phải đo (E43).</li>
-<li>Với <code>rpl_semi_sync_source_wait_for_replica_count</code> = 1 (mặc định) và 2 replica, một replica chết vẫn còn một cái xác nhận; commit không đứng.</li>
-<li>Nếu cả hai replica không trả lời: commit đứng tới 10 giây rồi chuyển về async. Đó là lúc RPO 0 mất.</li>
-</ul>
-<h4 class="ah">3. Các phương án</h4>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> Semi-sync có hai chế độ chờ, <code>AFTER_SYNC</code> và <code>AFTER_COMMIT</code>. Chọn cái nào? Commit chậm thêm bao nhiêu?</p>
+<details class="answer"><summary>Đáp án</summary>
 <div class="tablewrap"><table>
 <thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
 <tbody>
 <tr><td>A. Giữ async, failover nhanh hơn</td><td>Commit nhanh nhất</td><td>Vẫn mất dữ liệu</td></tr>
 <tr><td>B. Semi-sync <code>AFTER_SYNC</code>, đợi 1 trong 2 replica</td><td>Không mất transaction đã commit khi một máy chết; client khác không thấy dữ liệu replica chưa có</td><td>Thêm một vòng mạng; commit đứng tới timeout khi cả hai replica lỗi</td></tr>
-<tr><td>C. Semi-sync <code>AFTER_COMMIT</code></td><td>Như B</td><td>Client khác có thể đọc dữ liệu mà replica mới không có (manual 8.4)</td></tr>
-<tr><td>D. Group Replication (đồng thuận đa số)</td><td>Failover tự động có kiểm soát</td><td>Đổi lớn; trang tiếp theo</td></tr>
-<tr><td>E. Timeout semi-sync rất lớn</td><td>Không bao giờ âm thầm chuyển về async</td><td>Mất cả hai replica thì primary ngừng nhận ghi: đổi mất dữ liệu lấy mất khả dụng</td></tr>
+<tr><td>C. Semi-sync <code>AFTER_COMMIT</code></td><td>Như B về độ bền của client đang chờ</td><td>Client khác có thể đọc dữ liệu mà replica được đưa lên không có (manual 8.4)</td></tr>
+<tr><td>D. Group Replication</td><td>Failover tự động có kiểm soát</td><td>Đổi lớn (trang tiếp theo)</td></tr>
 </tbody></table></div>
-<h4 class="ah">4. Đánh đổi và quyết định</h4>
+<p><strong>Chọn B,</strong> với 2 replica ở 2 zone, <code>rpl_semi_sync_source_wait_for_replica_count = 1</code> (mặc định). Một replica chết vẫn còn một cái xác nhận; commit không đứng.</p>
+<p><strong>Chi phí:</strong> một vòng mạng tới replica nhanh nhất, khoảng 0,5–1 ms khác zone, cộng thời gian replica ghi relay log. Trong ngân sách 5 ms, nhưng phải đo (E43). Lưu ý: xác nhận nghĩa là replica đã <em>ghi vào relay log</em>, chưa phải đã áp dụng; semi-sync không làm đọc trên replica mới hơn.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> Cả hai replica cùng không trả lời. Semi-sync làm gì? Bạn muốn nó làm gì?</p>
+<details class="answer"><summary>Đáp án</summary>
 <ul>
-<li><strong>B</strong> với 2 replica ở 2 zone, đợi 1. Đây đúng là trường hợp manual mô tả: failover không mất dữ liệu.</li>
-<li><strong>Timeout:</strong> giữ ở mức vài giây, kèm cảnh báo ngay khi chuyển về async. Chọn E chỉ khi doanh nghiệp đồng ý rằng ngừng nhận đơn tốt hơn có thể mất đơn. Đây là quyết định của doanh nghiệp, cần ghi lại.</li>
-<li><strong>Quy trình failover:</strong> chọn replica có GTID đã nhận nhiều nhất; áp dụng hết relay log trước khi mở ghi; không dùng lại primary cũ làm nguồn (manual yêu cầu bỏ nó đi).</li>
+<li>Commit đứng tới <code>rpl_semi_sync_source_timeout</code> (mặc định 10 giây) rồi <strong>âm thầm chuyển về async</strong>. Từ lúc đó, RPO 0 không còn, và nếu primary chết tiếp thì lại mất dữ liệu.</li>
+<li>Timeout rất lớn: không bao giờ về async, nhưng mất cả hai replica thì primary ngừng nhận ghi. Đổi mất dữ liệu lấy mất khả dụng.</li>
+<li>Đây là quyết định của doanh nghiệp ("ngừng nhận đơn hay có thể mất đơn"), không phải của kỹ sư. Senior trình bày cả hai, kèm con số, và ghi lại quyết định.</li>
+<li>Dù chọn gì: cảnh báo ngay khi <code>Rpl_semi_sync_source_status = OFF</code>; theo dõi số replica semi-sync đang kết nối.</li>
 </ul>
-<h4 class="ah">5. Triển khai và khôi phục</h4>
-<ol class="list">
-<li><strong>Khôi phục 212 đơn:</strong> cổng thanh toán có dữ liệu (số tiền, mã tham chiếu, thời điểm). Nếu mỗi lần thanh toán mang idempotency key gắn với một đơn (C4), có thể dựng lại đơn từ log ứng dụng hoặc từ sự kiện đã đi qua outbox mà consumer đã nhận. Đơn nào không dựng lại được: hoàn tiền và liên hệ khách.</li>
-<li>Bật semi-sync <code>AFTER_SYNC</code> trên primary và hai replica; đo p50, p99 commit trước và sau ở staging rồi production.</li>
-<li>Cảnh báo: <code>Rpl_semi_sync_source_status</code> = OFF; số replica semi-sync đang kết nối.</li>
-<li>Diễn tập: tắt nguồn primary khi đang ghi liên tục; so số đơn đã báo thành công với số đơn trên primary mới.</li>
-</ol>
-<h4 class="ah">6. Rủi ro và cách kiểm chứng</h4>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai và kiểm chứng thế nào, kể cả quy trình failover?</p>
+<details class="answer"><summary>Đáp án</summary>
 <ul>
-<li>Semi-sync làm commit chậm hơn ước lượng (I/O ở replica). Đo trước khi bật trên production.</li>
-<li>Một replica nằm cùng zone với primary: một sự cố cả zone mất cả hai. Đặt replica semi-sync ở zone khác.</li>
-<li>Đối soát hằng ngày đơn với cổng thanh toán, để lần sau phát hiện trong vài phút chứ không phải sau sự cố.</li>
+<li>Bật semi-sync <code>AFTER_SYNC</code> trên primary và hai replica; đo p50, p99 commit trước và sau ở staging, rồi production.</li>
+<li>Replica semi-sync phải ở zone khác primary: một sự cố cả zone không được mất cả hai.</li>
+<li>Quy trình failover: chọn replica có GTID đã nhận nhiều nhất; áp dụng hết relay log trước khi mở ghi; không dùng lại primary cũ làm nguồn (manual yêu cầu bỏ nó đi và dựng lại).</li>
+<li>Diễn tập: tắt nguồn primary khi đang ghi liên tục; so số đơn đã báo thành công với số đơn trên primary mới. Phải bằng nhau.</li>
+<li>Cảnh báo: semi-sync tắt; số replica semi-sync; đối soát với cổng thanh toán lệch.</li>
 </ul>
-<h4 class="ah">7. Lỗi hay gặp với bài này</h4>
-<ul>
-<li>Nghĩ semi-sync thì "đọc trên replica luôn mới".</li>
-<li>Không cảnh báo khi semi-sync tự chuyển về async.</li>
-<li>Dùng <code>AFTER_COMMIT</code> mà không hiểu khác biệt khi failover.</li>
-<li>Không có cách đối soát với hệ thống bên ngoài để tìm phần đã mất.</li>
-</ul>
+</details>
+</div>
+
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Chẩn đoán</td><td>"Failover chậm"</td><td>Async; tách RTO khỏi RPO</td></tr>
+<tr><td>Khôi phục</td><td>Không nhắc</td><td>Đối soát với cổng, dựng lại từ log hoặc event, hoàn tiền phần còn lại</td></tr>
+<tr><td>Thiết kế</td><td>"Bật semi-sync"</td><td><code>AFTER_SYNC</code> và vì sao không <code>AFTER_COMMIT</code>; đợi 1 trong 2; replica khác zone</td></tr>
+<tr><td>Giới hạn</td><td>Tin semi-sync luôn chặt</td><td>Hành vi khi timeout; đưa quyết định cho business</td></tr>
+<tr><td>Kiểm chứng</td><td>Không có</td><td>Diễn tập tắt nguồn, đếm đơn, cảnh báo khi về async</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> nghĩ semi-sync thì đọc trên replica luôn mới; không cảnh báo khi semi-sync về async; không có cách đối soát với hệ thống bên ngoài để tìm phần đã mất.</p>
 </details>
 </div>
 </section>
