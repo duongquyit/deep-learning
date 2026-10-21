@@ -152,6 +152,13 @@ details.answer summary{font-weight:500;color:var(--struct)}
 .case details.answer[open]{background:var(--surface)}
 .ah{font-size:15.5px;color:var(--struct);margin:20px 0 6px}
 .answer .tablewrap{max-width:none}
+/* bài toán dạng phỏng vấn */
+.case .q{margin:10px 0 4px;padding:8px 0 8px 14px;border-left:3px solid var(--key);font-size:1.06rem;font-weight:500;color:var(--ink);max-width:none}
+.case .fu{margin:18px 0 0;padding-top:14px;border-top:1px solid var(--rule)}
+.case .fq{margin:0;font-weight:500}
+.case .fq b{display:block;font:600 12px var(--mono);letter-spacing:.04em;text-transform:uppercase;color:var(--struct);margin-bottom:4px}
+.case details.clar summary,.case details.rubric summary{color:var(--key)}
+.case details.rubric{margin-top:18px}
 @media (max-width:900px){.case{padding:14px}.case dl{grid-template-columns:minmax(0,1fr);gap:2px}.case dd{margin-bottom:8px}}
 
 /* ---- page widgets ---- */
@@ -503,218 +510,314 @@ UPDATE billing_customers
 <!-- 9 -->
 <section id="s9">
 <header><span class="num">09</span><h2>Bài toán thực tế</h2></header>
-<div class="prose"><p>Ba tình huống giống việc thật. Đọc đề, tự viết lời giải ra giấy (phương án, con số, đánh đổi), rồi mới mở lời giải. Gợi ý chỉ mở khi bí. Lời giải là lập luận từ tài liệu, không phải số đo; con số trong đó là ước lượng. Viết ngày 2026-10-20.</p></div>
+<div class="prose">
+<p>Mỗi bài là một vòng phỏng vấn system design cấp senior, khoảng 30–45 phút. Cách dùng:</p>
+<ol class="list">
+<li>Đọc câu hỏi của interviewer. Viết ra những gì bạn sẽ hỏi lại trước khi thiết kế, rồi mới mở "Hỏi lại interviewer" để xem câu hỏi nên hỏi và câu trả lời của interviewer. Các con số ở đó dùng cho những câu sau.</li>
+<li>Với mỗi follow-up, tự trả lời (nói to hoặc viết ra) trong vài phút, rồi mới mở đáp án.</li>
+<li>Cuối bài, dùng rubric để tự chấm: câu trả lời của bạn giống cột "mid" hay cột "senior", và có rơi vào red flag nào không.</li>
+</ol>
+<p>Đáp án là lập luận từ tài liệu, không phải số đo; con số trong đó là ước lượng. Viết ngày 2026-10-21.</p>
+</div>
 
-<div class="case" id="c22">
-<h3>C22. Bán vé concert ở hai region</h3>
-<p class="src">Dựa trên: phần 01–03 của trang này; <a href="../concurrency-control-strategies/index.html">Kiểm soát ghi đồng thời</a> (C1).</p>
-<dl>
-<dt>Bối cảnh</dt><dd><p>Công ty bán vé chạy ở region Singapore. Để khách ở Nhật nhanh hơn, CTO muốn chạy "active-active": mỗi region một database đầy đủ, cả hai cùng nhận đặt vé, đồng bộ hai chiều. Vòng mạng Singapore–Tokyo khoảng 70 ms (giả định, phải đo). Mỗi concert lớn mở bán 50.000 ghế; đỉnh 20.000 lượt đặt mỗi giây trong phút đầu, phần lớn từ một nước.</p></dd>
-<dt>Yêu cầu</dt><dd>Không bán trùng ghế. p99 đặt ghế dưới 300 ms cho khách ở cả hai nước. Mất một region thì region còn lại vẫn bán tiếp được trong 5 phút.</dd>
-<dt>Ràng buộc</dt><dd>MySQL 8.4. Team có kinh nghiệm với Group Replication, chưa dùng database phân tán khác.</dd>
-<dt>Nhiệm vụ</dt><dd>Đánh giá đề xuất active-active. Thiết kế cách giữ ghế, nói rõ hành vi khi đường mạng giữa hai region đứt.</dd>
-</dl>
-<details class="hint"><summary>Gợi ý</summary><ul>
-<li>Hai region cùng nhận đặt cùng một ghế khi đường mạng đứt: chuyện gì xảy ra lúc nối lại?</li>
-<li>Một concert có cần được bán ở hai nơi không?</li>
-<li>Xem sơ đồ ghế có cần nhất quán mạnh như đặt ghế không?</li>
-</ul></details>
-<details class="answer"><summary>Xem lời giải</summary>
-<h4 class="ah">1. Làm rõ đề bài</h4>
+<!-- C22 -->
+<div class="case iv" id="c22">
+<h3>C22. Giữ ghế cho hệ thống bán vé ở hai region</h3>
+<p class="src">Dựa trên: phần 01–03 của trang này; <a href="../concurrency-control-strategies/index.html">Kiểm soát ghi đồng thời</a> (C1); <a href="../replication-read-your-writes/index.html">Replication</a>.</p>
+<blockquote class="q">"Công ty bán vé concert đang chạy ở Singapore và muốn mở thêm Tokyo. Hãy thiết kế phần giữ ghế cho hệ thống chạy ở hai region."</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>Có chấp nhận bán trùng một ghế không, dù rất hiếm?</td><td>Không. Một lần cũng là sự cố.</td><td>Quyết định mức nhất quán của thao tác đặt ghế: đây là bất biến cứng.</td></tr>
+<tr><td>Khách của một concert ở đâu?</td><td>Phần lớn từ một nước; vài phần trăm từ nước kia.</td><td>Quyết định dữ liệu nên nằm gần ai.</td></tr>
+<tr><td>Tải đỉnh?</td><td>50.000 ghế mỗi concert; 20.000 lượt đặt mỗi giây trong phút đầu.</td><td>Tranh chấp trên vài nghìn ghế đẹp; liên quan C1.</td></tr>
+<tr><td>Yêu cầu độ trễ?</td><td>p99 đặt ghế dưới 300 ms ở cả hai nước.</td><td>Cho biết có đủ ngân sách cho một vòng mạng xa không.</td></tr>
+<tr><td>Vòng mạng Singapore–Tokyo?</td><td>Khoảng 70 ms (giả định, phải đo).</td><td>Chi phí của mỗi lần phối hợp giữa hai region.</td></tr>
+<tr><td>Mất cả một region thì sao?</td><td>Region còn lại phải bán tiếp được trong 5 phút. Mất đơn đã thanh toán là không chấp nhận.</td><td>RTO 5 phút, RPO gần 0: quyết định đồng bộ hay bất đồng bộ giữa hai region.</td></tr>
+<tr><td>Đang dùng gì?</td><td>MySQL 8.4; team có kinh nghiệm Group Replication.</td><td>Thiết kế nên dùng thứ team vận hành được.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> nhắc lại bất biến bằng một câu ("mỗi ghế bán nhiều nhất một lần, không ngoại lệ") và tách hai loại thao tác ngay từ đầu: đặt ghế (ghi, bất biến cứng) và xem sơ đồ ghế (đọc, chịu được cũ). Hai loại này sẽ có hai mức nhất quán khác nhau.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1</b>CTO đề xuất active-active: mỗi region một database đầy đủ, cả hai cùng nhận đặt vé, đồng bộ hai chiều. Bạn có đồng ý không?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p><strong>Không, cho thao tác đặt ghế.</strong> Lý do không chỉ là mạng đứt:</p>
 <ul>
-<li>Bất biến: mỗi ghế được bán nhiều nhất một lần. Đây là bất biến không được sai một lần nào, nên đặt ghế cần linearizable trên từng ghế.</li>
-<li>Active-active với đồng bộ hai chiều bất đồng bộ là "luôn trả lời" khi bị chia cắt: cả hai bên nhận cùng một ghế, phát hiện khi nối lại. Không đạt yêu cầu "không bán trùng".</li>
-<li>Câu hỏi: một concert có khách từ cả hai nước với tỉ lệ đáng kể không? Giả định không: mỗi concert có một thị trường chính.</li>
+<li>Đồng bộ hai chiều là bất đồng bộ. Ngay cả khi mạng tốt, có một cửa sổ ít nhất bằng một chiều mạng (khoảng 35 ms) mà hai region cùng thấy ghế 7 trống. Ở 20.000 lượt mỗi giây vào các ghế đẹp, hai lần đặt cùng một ghế trong cửa sổ đó là chuyện chắc chắn xảy ra, không phải hiếm.</li>
+<li>Khi mạng đứt, cửa sổ đó kéo dài suốt thời gian đứt.</li>
+<li>Khi phát hiện xung đột thì đã trả "thành công" cho cả hai khách. Hợp nhất bằng ghi sau thắng thì một khách mất vé mà không ai biết; hợp nhất bằng nghiệp vụ thì phải hoàn tiền và xin lỗi. Cả hai vi phạm yêu cầu.</li>
 </ul>
-<h4 class="ah">2. Ước lượng</h4>
-<ul>
-<li>Nếu mọi lần đặt phải được hai region đồng ý (đồng thuận qua hai region): mỗi lần ghi ít nhất 70 ms vòng mạng, cộng xử lý. Với ba nơi (ví dụ Singapore, Tokyo, và một nơi thứ ba làm trọng tài), đa số luôn cần một region ở xa.</li>
-<li>20.000 lượt mỗi giây vào cùng một concert: phần lớn là tranh chấp trên vài nghìn ghế đẹp. Phải gom hoặc chặn trước (C1); đồng thuận đa region cho từng lượt sẽ không chịu nổi.</li>
-<li>Đi từ Tokyo tới region sở hữu concert ở Singapore: 70 ms vòng mạng cộng khoảng 50–100 ms xử lý, khoảng 150 ms. Dưới 300 ms.</li>
-</ul>
-<h4 class="ah">3. Các phương án</h4>
 <div class="tablewrap"><table>
 <thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
 <tbody>
-<tr><td>A. Active-active, đồng bộ hai chiều, hợp nhất khi xung đột</td><td>Đọc và ghi nhanh ở cả hai nơi</td><td>Bán trùng khi mạng đứt hoặc chậm; hợp nhất bằng LWW làm mất đơn lặng lẽ</td></tr>
-<tr><td>B. Mỗi concert có một region sở hữu; mọi lần đặt đi về đó</td><td>Không xung đột; nhất quán mạnh trong một region</td><td>Khách ở xa chậm thêm một vòng mạng; region sở hữu chết thì concert đó ngừng bán tới khi chuyển</td></tr>
-<tr><td>C. Đồng thuận trên 3 region cho mọi lần đặt</td><td>Chịu được mất một region mà không mất dữ liệu</td><td>Mỗi lần ghi chờ region xa; team chưa có kinh nghiệm vận hành kiểu này</td></tr>
-<tr><td>D. Chia sẵn ghế cho mỗi region (Tokyo bán khu A, Singapore bán khu B)</td><td>Không xung đột, cả hai nơi nhanh</td><td>Một khu bán hết trong khi khu kia còn; khách không chọn được mọi ghế</td></tr>
+<tr><td>A. Active-active, hợp nhất khi xung đột</td><td>Nhanh ở cả hai nơi; vẫn bán được khi mạng đứt</td><td>Bán trùng là chắc chắn ở tải đỉnh</td></tr>
+<tr><td>B. Mỗi concert có một region sở hữu; mọi lần đặt đi về đó</td><td>Không xung đột; nhất quán mạnh trong một region, team đã quen</td><td>Khách ở xa thêm một vòng mạng; mạng đứt thì khách xa không đặt được</td></tr>
+<tr><td>C. Đồng thuận qua 3 region cho mọi lần đặt</td><td>Chịu được mất một region mà không mất đơn</td><td>Mỗi lần ghi chờ một region xa; cần region thứ ba; team chưa vận hành kiểu này</td></tr>
+<tr><td>D. Chia khu ghế cho mỗi region</td><td>Không xung đột, cả hai nơi nhanh</td><td>Một khu hết trong khi khu kia còn; cần nhà tổ chức đồng ý</td></tr>
 </tbody></table></div>
-<h4 class="ah">4. Đánh đổi và quyết định</h4>
-<p>Chọn B. Ở mỗi region, Group Replication 3 thành viên trên 3 zone. Sơ đồ ghế đọc được ở cả hai region với độ cũ vài giây.</p>
+<p><strong>Quyết định: B.</strong> Bảng <code>events</code> có cột <code>home_region</code>; API ở region kia chuyển request đặt ghế về region sở hữu. Active-active vẫn hợp lý cho phần đọc (sơ đồ ghế, thông tin concert). Cách nói với CTO: "đồng ý active-active cho đọc, không cho giữ ghế, và đây là con số: cửa sổ xung đột 35 ms nhân với 20.000 lượt mỗi giây".</p>
+<p><strong>Khi nào đổi ý:</strong> nếu nhà tổ chức chấp nhận chia khu, D cho độ trễ tốt nhất. A không bao giờ hợp với giữ ghế.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2</b>Giữa giờ mở bán, đường mạng giữa hai region đứt 30 giây. Concert thuộc Singapore. Khách ở Tokyo thấy gì? Khách ở Singapore thấy gì?</p>
+<details class="answer"><summary>Đáp án</summary>
 <ul>
-<li>Thao tác đặt ghế nhất quán mạnh trong region sở hữu. Khi đường mạng giữa hai region đứt, khách ở region kia không đặt được (từ chối kèm thông báo), nhưng không bao giờ bán trùng. Đây là chọn C cho thao tác đặt.</li>
-<li>Xem sơ đồ ghế: bản sao bất đồng bộ ở region gần khách, cũ vài giây. Lúc đặt mới kiểm tra chính xác. Đây là chọn A, L cho thao tác xem.</li>
-<li>Mất cả region sở hữu: chuyển quyền sở hữu concert sang region kia bằng quy trình có kiểm soát. Dữ liệu chưa sang kịp (async giữa hai region) có thể mất vài giây đơn; bù bằng đối soát với cổng thanh toán (C21 ở trang replication). Nếu không chấp nhận mất, cần C, và trả bằng độ trễ.</li>
+<li><strong>Singapore:</strong> không thấy gì khác. Cụm database của region sở hữu nằm trọn trong Singapore (trải trên nhiều zone), nên vẫn bán bình thường.</li>
+<li><strong>Tokyo:</strong> xem sơ đồ ghế được (bản sao cục bộ, cũ dần, có ghi "trạng thái có thể trễ"). Bấm đặt thì nhận "tạm thời chưa đặt được, thử lại sau ít giây" trong khoảng 1 giây, không treo. Đây là chọn C (nhất quán) cho thao tác đặt và A (luôn trả lời) cho thao tác xem.</li>
 </ul>
-<p>Khi nào đổi ý: nếu một concert thật sự có khách ở cả hai nước cùng tranh ghế, B vẫn đúng nhưng khách xa chậm hơn; D đáng xét khi nhà tổ chức đồng ý chia khu. A không bao giờ hợp với giữ ghế.</p>
-<h4 class="ah">5. Triển khai</h4>
-<ol class="list">
-<li>Bảng <code>events</code> có cột <code>home_region</code>. Lớp API ở mỗi region chuyển lần đặt của concert thuộc region khác sang region đó (gọi qua mạng nội bộ).</li>
-<li>Trong region sở hữu: luồng giữ ghế như C1 (cổng chặn sớm, câu ghi có điều kiện trên từng ghế, giữ chỗ 10 phút).</li>
-<li>Sơ đồ ghế: bản sao bất đồng bộ sang region kia, cộng cache vài giây; luôn ghi rõ "trạng thái có thể trễ vài giây".</li>
-<li>Diễn tập: cắt mạng giữa hai region trong giờ bán thử; region kia trả lời "tạm không đặt được" trong 1 giây, không treo request.</li>
-</ol>
-<h4 class="ah">6. Rủi ro và cách kiểm chứng</h4>
+<p>Phần senior hay được chấm ở đây là chi tiết vận hành:</p>
 <ul>
-<li>Đo vòng mạng thật và p99 đặt ghế từ Tokyo tới Singapore trong test tải.</li>
-<li>Đối soát sau mỗi đợt bán: số ghế đã bán bằng số vé đã phát, không ghế nào có hai đơn.</li>
-<li>Rủi ro: đường gọi chéo region chậm làm timeout dồn lại; đặt timeout và từ chối nhanh.</li>
+<li>Timeout ngắn và circuit breaker cho lời gọi chéo region. Không có thì mỗi request treo tới timeout mặc định, thread và connection ở Tokyo cạn dần, và Tokyo chết luôn cả phần xem.</li>
+<li>Client không được tự retry dồn dập; trả <code>Retry-After</code>, retry có jitter.</li>
+<li>Không có hàng đợi "nhận đơn tạm ở Tokyo rồi gửi sau": đó là active-active trá hình, vì đơn tạm đó vẫn phải được hứa với khách.</li>
 </ul>
-<h4 class="ah">7. Lỗi hay gặp với bài này</h4>
+<p><strong>Đánh đổi nói rõ với business:</strong> trong 30 giây, khách Tokyo của concert này không mua được. Với giả định vài phần trăm khách đến từ Tokyo, đó là vài phần trăm của 30 giây doanh thu, đổi lấy không bao giờ bán trùng.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3</b>Giờ mất cả region Singapore. Yêu cầu: Tokyo bán tiếp trong 5 phút, không mất đơn đã thanh toán. Làm thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p>Có hai câu hỏi tách riêng: <strong>dữ liệu có ở Tokyo chưa</strong> (RPO), và <strong>ai được quyết định chuyển</strong> (tránh split brain).</p>
+<h4 class="ah">Dữ liệu: đồng bộ sang Tokyo hay không</h4>
+<div class="tablewrap"><table>
+<thead><tr><th>Cách</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>Replica async ở Tokyo</td><td>Không thêm độ trễ ghi</td><td>Mất vài giây đơn cuối khi Singapore chết; ghế của các đơn đó có thể bị bán lại</td></tr>
+<tr><td>Semi-sync <code>AFTER_SYNC</code> tới replica ở Tokyo</td><td>Đơn chỉ được báo thành công khi Tokyo đã nhận binlog: không mất đơn khi chuyển</td><td>Mỗi commit thêm khoảng 70 ms; hết <code>rpl_semi_sync_source_timeout</code> (mặc định 10 giây) thì lặng lẽ về async</td></tr>
+<tr><td>Đồng thuận qua 3 region</td><td>Tự chuyển, không mất đơn</td><td>Cần region thứ ba; team chưa có kinh nghiệm</td></tr>
+</tbody></table></div>
+<p><strong>Tính ngân sách:</strong> khách Singapore khoảng 50–100 ms xử lý cộng 70 ms semi-sync; khách Tokyo thêm 70 ms đi về Singapore nữa, khoảng 190–240 ms. Vẫn dưới 300 ms, nhưng sát. Chọn semi-sync, và nói rõ hai cái giá: độ trễ, và hành vi khi đường Singapore–Tokyo đứt. Khi đó semi-sync chờ hết timeout rồi về async; từ lúc đó, mất Singapore là mất đơn. Muốn tuyệt đối không mất thì đặt timeout rất lớn, nghĩa là Singapore ngừng bán khi không nói chuyện được với Tokyo. Đây là lựa chọn của business, không phải của kỹ sư; senior đưa ra cả hai và con số.</p>
+<p class="fine">Nếu cụm trong region là Group Replication thay vì primary và replica, cách đưa xác nhận từ Tokyo vào đường commit phải kiểm tra lại trên manual; trang này chưa kiểm chứng việc kết hợp đó.</p>
+<h4 class="ah">Ai quyết định chuyển</h4>
+<p>Tokyo không phân biệt được "Singapore chết" với "đường mạng tới Singapore đứt". Nếu Tokyo tự nhận quyền sở hữu khi chỉ là mạng đứt, cả hai region cùng bán: đúng tình huống active-active vừa từ chối. Vì vậy:</p>
 <ul>
-<li>Chọn active-active cho dữ liệu có bất biến cứng.</li>
-<li>Dùng last write wins để "giải quyết" ghế bán trùng.</li>
-<li>Bắt cả thao tác xem ghế phải nhất quán mạnh, làm mọi trang chậm theo.</li>
-<li>Không nói rõ khách ở region kia thấy gì khi mạng đứt.</li>
+<li>Chuyển bằng quyết định của người trực (runbook), dựa trên tín hiệu từ một nơi thứ ba (giám sát ở cloud khác). 5 phút đủ cho quyết định có người.</li>
+<li>Trước khi Tokyo nhận, chặn ghi ở Singapore nếu còn liên lạc được (fencing: bật <code>super_read_only</code>, rút khỏi load balancer).</li>
+<li>Sau khi chuyển, đối soát với cổng thanh toán: mọi giao dịch đã trừ tiền phải có đơn.</li>
 </ul>
 </details>
 </div>
 
-<div class="case" id="c23">
-<h3>C23. Một hệ thống, năm mức nhất quán</h3>
-<p class="src">Dựa trên: phần 02–03 của trang này; các trang cache, replication và capacity.</p>
-<dl>
-<dt>Bối cảnh</dt><dd><p>Một sàn thương mại điện tử đang thiết kế lại lớp dữ liệu. Kiến trúc sư đề xuất: "mọi thứ nhất quán mạnh, mọi đọc đi primary" cho đơn giản. Team hạ tầng phản đối: primary sẽ quá tải. Các tính năng:</p>
-<ol class="list">
-<li>Tồn kho khi đặt hàng.</li>
-<li>Giỏ hàng của khách (khách dùng cả điện thoại và laptop).</li>
-<li>Số lượt thích sản phẩm.</li>
-<li>Lịch sử đơn của tôi.</li>
-<li>Gợi ý "khách cũng mua".</li>
-<li>Số dư ví.</li>
-</ol>
-<p>Đỉnh: 50.000 lượt đọc mỗi giây trên toàn hệ thống, 3.000 lượt ghi mỗi giây.</p></dd>
-<dt>Yêu cầu</dt><dd>Không sai tiền, không bán quá. Mỗi tính năng có độ cũ tối đa ghi rõ. Primary dưới 70% ở đỉnh.</dd>
-<dt>Ràng buộc</dt><dd>MySQL 8.4 primary và replica, Redis. Không thêm database mới.</dd>
-<dt>Nhiệm vụ</dt><dd>Với từng tính năng: mức nhất quán, độ cũ tối đa, đọc ở đâu, hành vi khi có sự cố, và lý do.</dd>
-</dl>
-<details class="hint"><summary>Gợi ý</summary><ul>
-<li>Với mỗi tính năng, hỏi: sai một lần thì tốn gì, và sửa được sau không?</li>
-<li>Giỏ hàng là ví dụ kinh điển trong bài Dynamo.</li>
-<li>Bao nhiêu phần trăm trong 50.000 lượt đọc thật sự cần primary?</li>
-</ul></details>
-<details class="answer"><summary>Xem lời giải</summary>
-<h4 class="ah">1. Làm rõ đề bài</h4>
-<p>"Mọi thứ nhất quán mạnh" trả giá ở mọi lượt đọc, kể cả những lượt không cần. Cách làm của senior là đi từng tính năng, hỏi "sai thì tốn gì", rồi chọn mức rẻ nhất mà vẫn đủ.</p>
-<h4 class="ah">2. Ước lượng</h4>
+<div class="fu">
+<p class="fq"><b>Follow-up 4</b>Trang sơ đồ ghế được 200.000 người mở cùng lúc. Có cần nhất quán mạnh không?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p>Không. Sơ đồ ghế chỉ là gợi ý; quyết định nằm ở câu ghi có điều kiện khi đặt. Bắt nó nhất quán mạnh nghĩa là 200.000 người cùng đọc từ primary của region sở hữu, cộng thêm một vòng mạng cho khách ở xa, chỉ để thấy một trạng thái sẽ cũ ngay sau đó.</p>
 <ul>
-<li>Giả sử phân bố lượt đọc: gợi ý và lượt thích 50%, trang sản phẩm (có tồn kho hiển thị) 30%, giỏ hàng 10%, lịch sử đơn 7%, số dư 3%.</li>
-<li>Chỉ số dư, giỏ hàng (khi thanh toán) và lịch sử đơn ngay sau khi đặt cần đọc mới. Khoảng 3% + một phần của 17%: dưới 10% lượt đọc phải về primary, tức dưới 5.000 mỗi giây.</li>
-<li>"Mọi đọc về primary": 50.000 lượt mỗi giây cộng 3.000 ghi. Với tỉ lệ chi phí đọc trên ghi như ở C19 trang replication, gấp nhiều lần sức một primary.</li>
+<li>Phục vụ từ cache hoặc replica gần khách, cũ vài giây, ghi rõ trên giao diện.</li>
+<li>Đẩy cập nhật theo lô (mỗi 1–2 giây) thay vì mỗi ghế một sự kiện.</li>
+<li>Khi khách bấm một ghế vừa bị giữ, trả lời nhanh và gợi ý ghế gần đó: cái giá của dữ liệu cũ là một lần bấm hỏng, không phải bán trùng.</li>
 </ul>
-<h4 class="ah">3. Các phương án</h4>
-<p>Không có một phương án cho cả hệ thống. Bảng dưới là phương án cho từng tính năng.</p>
+</details>
+</div>
+
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Làm rõ đề</td><td>Hỏi tải và số region</td><td>Hỏi bất biến, nơi có khách, RTO/RPO, ngân sách độ trễ; tách đọc và ghi</td></tr>
+<tr><td>Active-active</td><td>"Không ổn vì CAP"</td><td>Chỉ ra cửa sổ xung đột tồn tại cả khi mạng tốt, có con số; đồng ý active-active cho phần đọc</td></tr>
+<tr><td>Mạng đứt</td><td>"Tokyo không đặt được"</td><td>Thêm timeout ngắn, circuit breaker, không treo thread; nói được cái giá bằng doanh thu</td></tr>
+<tr><td>Mất region</td><td>"Failover sang Tokyo"</td><td>Tách RPO và split brain; semi-sync có con số độ trễ và hành vi khi timeout; fencing; đối soát thanh toán</td></tr>
+<tr><td>Sơ đồ ghế</td><td>Đọc primary cho chắc</td><td>Cũ có giới hạn, quyết định nằm ở lúc ghi</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> dùng ghi sau thắng để "giải" ghế trùng; để Tokyo tự nhận quyền sở hữu khi mất liên lạc; nói "Cassandra là AP nên dùng Cassandra" mà không nói thao tác nào cần gì; thiết kế không có câu nào về điều xảy ra khi có sự cố.</p>
+</details>
+</div>
+
+<!-- C23 -->
+<div class="case iv" id="c23">
+<h3>C23. Mọi lần đọc đi primary?</h3>
+<p class="src">Dựa trên: phần 02–03 của trang này; <a href="../replication-read-your-writes/index.html">Replication</a> (C19); <a href="../caching-invalidation/index.html">Cache</a>.</p>
+<blockquote class="q">"Kiến trúc sư của chúng tôi muốn mọi lần đọc đều đi primary cho nhất quán. Team hạ tầng nói primary sẽ quá tải. Bạn đứng về phía nào?"</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>Hệ thống làm gì, có những tính năng chính nào?</td><td>Sàn thương mại điện tử: tồn kho, giỏ hàng (khách dùng nhiều thiết bị), lượt thích, lịch sử đơn, gợi ý, ví.</td><td>Mức nhất quán chọn theo tính năng, không theo hệ thống.</td></tr>
+<tr><td>Tải đọc và ghi ở đỉnh?</td><td>50.000 lượt đọc, 3.000 lượt ghi mỗi giây.</td><td>Để so với sức của một primary.</td></tr>
+<tr><td>Primary đang chạy bao nhiêu phần trăm?</td><td>Khoảng 40% ở đỉnh khi chỉ nhận ghi và vài đọc quan trọng; phần đọc còn lại đi replica và cache.</td><td>Cho biết "mọi đọc về primary" nhân tải lên bao nhiêu.</td></tr>
+<tr><td>Phân bố lượt đọc?</td><td>Gợi ý và lượt thích 50%, trang sản phẩm 30%, giỏ 10%, lịch sử đơn 7%, ví 3%.</td><td>Để tính phần thật sự cần dữ liệu mới.</td></tr>
+<tr><td>Replica trễ bao nhiêu?</td><td>Thường dưới 1 giây; có lúc 30 giây khi batch đêm.</td><td>Cần kế hoạch cho lúc trễ, không chỉ lúc bình thường.</td></tr>
+<tr><td>Vì sao kiến trúc sư muốn vậy?</td><td>Tháng trước khách đặt đơn xong vào lịch sử không thấy đơn, gọi tổng đài.</td><td>Hiểu nỗi đau thật để giải đúng chỗ.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> hỏi câu cuối. Đề xuất "mọi đọc về primary" thường là phản ứng với một sự cố cụ thể; giải đúng sự cố đó (read-your-writes) thì phần lớn lý do của đề xuất biến mất.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1</b>Vậy bạn đứng về phía nào? Cho tôi con số.</p>
+<details class="answer"><summary>Đáp án</summary>
+<p><strong>Không đứng hẳn về phía nào.</strong> Kiến trúc sư đúng về vấn đề (khách phải thấy đơn của mình), team hạ tầng đúng về chi phí.</p>
+<ul>
+<li>Dữ liệu cần mới: ví 3%, lịch sử đơn và giỏ khi thanh toán phần lớn của 17%. Dưới 20% lượt đọc, tức dưới 10.000 lượt mỗi giây, và trong đó chỉ phần "ngay sau khi chính khách ghi" mới thật sự cần primary.</li>
+<li>"Mọi đọc về primary": thêm khoảng 45.000 lượt đọc mỗi giây vào một máy đang chạy 40% với phần nhỏ hơn nhiều. Nếu đọc tốn chừng một phần năm chi phí một lần ghi (giả định, phải đo), đó là thêm tải tương đương 9.000 lượt ghi mỗi giây, gấp ba lượng ghi hiện có. Primary vượt 100%.</li>
+<li>Và cái giá không chỉ là CPU: mọi lần đọc giờ phụ thuộc một máy, primary chậm là toàn bộ trang web chậm.</li>
+</ul>
+<p><strong>Đề xuất:</strong> giải sự cố lịch sử đơn bằng read-your-writes (Follow-up 3), giữ phần còn lại ở replica và cache, mỗi tính năng có độ cũ tối đa ghi rõ.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2</b>Đi từng tính năng: tồn kho, giỏ hàng, lượt thích, lịch sử đơn, gợi ý, ví. Mỗi cái cần mức nào, và làm gì khi có sự cố?</p>
+<details class="answer"><summary>Đáp án</summary>
 <div class="tablewrap"><table>
 <thead><tr><th>Tính năng</th><th>Mức</th><th>Cũ tối đa</th><th>Đọc ở đâu</th><th>Khi có sự cố</th></tr></thead>
 <tbody>
 <tr><td>Tồn kho khi đặt</td><td>Linearizable trên từng sản phẩm</td><td>0</td><td>Câu ghi có điều kiện trên primary</td><td>Primary không ghi được thì từ chối đặt</td></tr>
 <tr><td>Tồn kho hiển thị</td><td>Eventual</td><td>30 giây</td><td>Cache, replica</td><td>Trả bản cũ, ghi "có thể thay đổi"</td></tr>
-<tr><td>Giỏ hàng</td><td>Read-your-writes; hợp nhất khi xung đột (gộp món)</td><td>0 với chính khách</td><td>Primary hoặc Redis theo khách</td><td>Vẫn thêm được; xung đột gộp lại; kiểm tra lại giá và tồn kho khi thanh toán</td></tr>
+<tr><td>Giỏ hàng</td><td>Read-your-writes; gộp món khi xung đột</td><td>0 với chính khách</td><td>Primary hoặc Redis theo khách</td><td>Vẫn thêm được; kiểm tra lại giá và tồn kho khi thanh toán</td></tr>
 <tr><td>Lượt thích</td><td>Eventual, bộ đếm gom lô</td><td>1 phút</td><td>Redis, flush định kỳ (C15)</td><td>Có thể mất vài giây lượt thích</td></tr>
-<tr><td>Lịch sử đơn của tôi</td><td>Read-your-writes, monotonic</td><td>0 với chính khách</td><td>Replica có chờ GTID, quá hạn về primary (C19)</td><td>Replica trễ: tự chuyển về primary</td></tr>
+<tr><td>Lịch sử đơn của tôi</td><td>Read-your-writes, monotonic</td><td>0 với chính khách</td><td>Replica có chờ GTID, quá hạn về primary</td><td>Replica trễ: tự chuyển về primary</td></tr>
 <tr><td>Gợi ý</td><td>Eventual</td><td>1 ngày</td><td>Bảng tính sẵn, cache</td><td>Trả bản cũ hoặc ẩn khối</td></tr>
-<tr><td>Số dư ví</td><td>Linearizable</td><td>0</td><td>Primary; ghi bằng câu có điều kiện</td><td>Từ chối giao dịch, không bao giờ đoán</td></tr>
+<tr><td>Số dư ví</td><td>Linearizable</td><td>0</td><td>Primary; ghi bằng câu có điều kiện</td><td>Từ chối giao dịch, không đoán</td></tr>
 </tbody></table></div>
-<h4 class="ah">4. Đánh đổi và quyết định</h4>
+<p>Hai lựa chọn đáng giải thích thêm khi phỏng vấn:</p>
 <ul>
-<li>Phản biện kiến trúc sư bằng con số: "mọi đọc về primary" tốn gấp nhiều lần sức primary, trong khi chỉ dưới 10% lượt đọc cần dữ liệu mới.</li>
-<li>Đồng ý một phần với kiến trúc sư: đơn giản là có giá trị. Nên chỉ có ba "lớp" nhất quán trong code (mạnh, của tôi, cũ có giới hạn), mỗi lớp một hàm truy cập, thay vì mỗi màn hình tự chọn.</li>
-<li>Giỏ hàng chọn hợp nhất thay vì từ chối, vì không thêm được món vào giỏ làm mất doanh thu, còn món đã xoá quay lại thì khách tự xoá lại được. Mọi thứ được kiểm tra lại ở bước thanh toán.</li>
-</ul>
-<h4 class="ah">5. Triển khai</h4>
-<ul>
-<li>Thư viện truy cập dữ liệu có ba hàm: <code>readStrong()</code> (primary), <code>readMine(userId)</code> (GTID hoặc primary), <code>readStale(maxAge)</code> (cache hoặc replica).</li>
-<li>Review: mỗi endpoint mới phải khai báo lớp nhất quán và độ cũ tối đa.</li>
-<li>Metric theo lớp: tỉ lệ đọc về primary, độ cũ thực tế đo được (tuổi cache, độ trễ replica).</li>
-</ul>
-<h4 class="ah">6. Rủi ro và cách kiểm chứng</h4>
-<ul>
-<li>Rủi ro lớn nhất: ai đó dùng <code>readStale</code> cho một quyết định tiền. Kiểm tra trong review và test: mọi đường ghi tiền chỉ dùng câu ghi có điều kiện.</li>
-<li>Đo tải primary sau khi chia lớp; mục tiêu dưới 70%.</li>
-<li>Test hỗn loạn: làm replica trễ 30 giây, Redis chết; mỗi tính năng phải cư xử đúng như cột "khi có sự cố".</li>
-</ul>
-<h4 class="ah">7. Lỗi hay gặp với bài này</h4>
-<ul>
-<li>Chọn một mức cho cả hệ thống.</li>
-<li>Không ghi "cũ tối đa bao lâu", để mỗi người hiểu một kiểu.</li>
-<li>Dùng tồn kho hiển thị (cũ) để quyết định có cho đặt hay không.</li>
-<li>Để giỏ hàng từ chối thêm món khi có sự cố nhỏ.</li>
+<li><strong>Giỏ hàng chọn gộp thay vì từ chối.</strong> Không thêm được món là mất doanh thu; món đã xoá quay lại thì khách tự xoá lại được. Đây chính là lựa chọn của Dynamo. Mọi thứ được kiểm tra lại ở bước thanh toán, nơi có tiền.</li>
+<li><strong>Tồn kho có hai mặt.</strong> Số hiển thị và số quyết định là hai thứ khác nhau, với hai mức nhất quán khác nhau.</li>
 </ul>
 </details>
 </div>
 
-<div class="case" id="c24">
-<h3>C24. Đổi email ở một service, bốn service còn lại lệch nhau</h3>
+<div class="fu">
+<p class="fq"><b>Follow-up 3</b>Đêm qua batch làm replica trễ 30 giây. Khách đặt đơn xong, vào "đơn của tôi" không thấy. Bạn sửa thế nào mà không đẩy mọi đọc về primary?</p>
+<details class="answer"><summary>Đáp án</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Cách</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>Cửa sổ primary: đọc primary trong N giây sau khi khách ghi</td><td>Đơn giản</td><td>Chọn N là đoán; replica trễ 30 giây thì N = 5 vẫn sai</td></tr>
+<tr><td>Chờ GTID: nhớ GTID của lần ghi, replica chờ tới khi áp dụng xong, quá hạn thì về primary</td><td>Đúng bất kể độ trễ; chỉ trả giá khi cần</td><td>Cần lưu GTID theo phiên; lúc replica trễ, phần lớn đọc của khách vừa ghi sẽ về primary</td></tr>
+<tr><td>Đọc dữ liệu "của tôi" luôn từ primary</td><td>Không cần theo dõi gì</td><td>7% lượt đọc về primary lúc nào cũng vậy</td></tr>
+</tbody></table></div>
+<p><strong>Chọn chờ GTID</strong> (trang replication, phần 02). Câu hỏi senior phải tự đặt tiếp: lúc replica trễ 30 giây, mọi khách vừa ghi đều về primary. Bao nhiêu người? Với 3.000 lượt ghi mỗi giây và giả sử một phần ba trong đó là khách sẽ mở "đơn của tôi" ngay, primary nhận thêm khoảng 1.000 lượt đọc mỗi giây, chấp nhận được. Nếu không chấp nhận được thì cần giới hạn: quá ngưỡng thì trả bản replica kèm thông báo "đơn mới có thể mất vài giây để hiện". Và sửa gốc: batch đêm chia nhỏ để replica không trễ 30 giây (C20).</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4</b>Team có 50 developer. Làm sao để họ không dùng sai mức nhất quán, ví dụ đọc số dư từ replica?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li><strong>Ít lựa chọn:</strong> thư viện truy cập dữ liệu chỉ có ba hàm: <code>readStrong()</code> (primary), <code>readMine(userId)</code> (chờ GTID hoặc primary), <code>readStale(maxAge)</code> (cache hoặc replica). Không có connection "tự chọn".</li>
+<li><strong>Khai báo:</strong> mỗi endpoint khai báo lớp nhất quán và độ cũ tối đa; review dựa vào đó.</li>
+<li><strong>Quyết định tiền không dựa vào đọc:</strong> mọi thay đổi số dư, tồn kho là câu ghi có điều kiện (<code>UPDATE … WHERE balance &gt;= ?</code>). Khi đó dù ai đọc sai chỗ, bất biến vẫn đúng. Đây là lớp bảo vệ quan trọng nhất.</li>
+<li><strong>Đo:</strong> metric tỉ lệ đọc về primary theo lớp, độ cũ thực tế; test hỗn loạn làm replica trễ 30 giây và Redis chết, mỗi tính năng phải cư xử như bảng ở Follow-up 2.</li>
+</ul>
+</details>
+</div>
+
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Làm rõ đề</td><td>Hỏi tải</td><td>Hỏi vì sao kiến trúc sư muốn vậy; tìm ra sự cố gốc</td></tr>
+<tr><td>Chọn phe</td><td>Chọn một phe</td><td>Tách vấn đề (đúng) khỏi giải pháp (quá đắt); có con số</td></tr>
+<tr><td>Theo tính năng</td><td>Một mức cho cả hệ thống</td><td>Mỗi tính năng một mức, có độ cũ tối đa và hành vi khi sự cố</td></tr>
+<tr><td>Read-your-writes</td><td>Cửa sổ primary vài giây</td><td>Chờ GTID có quá hạn; tính tải dội về primary lúc replica trễ; sửa gốc gây trễ</td></tr>
+<tr><td>Ở quy mô team</td><td>"Viết tài liệu"</td><td>API ít lựa chọn, ghi có điều kiện làm lớp bảo vệ cuối, metric và test hỗn loạn</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> dùng tồn kho hiển thị để quyết định cho đặt; không ghi "cũ tối đa bao lâu"; để giỏ hàng từ chối khi có sự cố nhỏ; nói "eventual consistency" mà không nói eventual là bao lâu.</p>
+</details>
+</div>
+
+<!-- C24 -->
+<div class="case iv" id="c24">
+<h3>C24. Email lệch giữa năm service</h3>
 <p class="src">Dựa trên: phần 02 của trang này; <a href="../transactional-outbox/index.html">Transactional outbox</a>; <a href="../idempotency-retries/index.html">Idempotency và retry</a>.</p>
-<dl>
-<dt>Bối cảnh</dt><dd><p>Năm service đều lưu email khách hàng: user, billing, notification, CRM, analytics. Khi khách đổi email, user-service cập nhật database, rồi gọi HTTP lần lượt tới bốn service kia. Nếu một lời gọi lỗi, nó ghi log và bỏ qua.</p>
-<p>Sự cố: hoá đơn gửi tới email cũ; khách đổi email hai lần thì CRM giữ email thứ nhất; analytics có 3% khách mang email không còn tồn tại; một lần user-service rollback sau khi đã gọi billing, nên billing có email mà user-service không có.</p></dd>
-<dt>Yêu cầu</dt><dd>Mọi service có email đúng trong 1 phút. Hoá đơn và thông báo bảo mật luôn gửi tới email hiện tại. Không mất thay đổi khi một service tạm chết.</dd>
-<dt>Ràng buộc</dt><dd>Có Kafka và outbox từ Phase 3. Không gộp các service.</dd>
-<dt>Nhiệm vụ</dt><dd>Chỉ ra từng nguyên nhân. Thiết kế lại cách lan truyền thay đổi, và nói service nào được đọc bản sao, service nào phải hỏi user-service.</dd>
-</dl>
-<details class="hint"><summary>Gợi ý</summary><ul>
-<li>Gọi HTTP sau khi ghi database là loại ghi đôi nào?</li>
-<li>Vì sao CRM có thể nhận hai thay đổi theo thứ tự ngược?</li>
-<li>Gửi thông báo bảo mật tới email cũ hay mới thì an toàn hơn?</li>
-</ul></details>
-<details class="answer"><summary>Xem lời giải</summary>
-<h4 class="ah">1. Làm rõ đề bài: nguyên nhân</h4>
-<ul>
-<li><strong>Billing có email ma:</strong> gọi HTTP trước khi commit, rồi rollback. Ghi đôi kiểu "gửi trước, commit sau" (trang outbox).</li>
-<li><strong>Hoá đơn gửi email cũ, analytics lệch 3%:</strong> lời gọi lỗi thì bỏ qua. Ghi đôi kiểu "commit trước, gửi sau", không thử lại.</li>
-<li><strong>CRM giữ email thứ nhất:</strong> hai lời gọi tới CRM chạy chồng lên nhau (lần đổi thứ hai bắt đầu khi lần đầu còn đang retry ở tầng HTTP), lần đầu tới sau. CRM áp dụng cái tới sau.</li>
-<li>Gốc chung: không có một nguồn sự thật được tôn trọng, và lan truyền không bền, không có thứ tự.</li>
-</ul>
-<h4 class="ah">2. Ước lượng</h4>
-<ul>
-<li>Đổi email là thao tác hiếm, giả sử vài nghìn lần mỗi ngày. Lượng event không đáng kể; vấn đề hoàn toàn là tính đúng.</li>
-<li>Gửi hoá đơn: giả sử vài trăm nghìn mỗi ngày. Nếu billing hỏi user-service cho mỗi hoá đơn, user-service nhận thêm vài lần mỗi giây. Nhỏ.</li>
-</ul>
-<h4 class="ah">3. Các phương án</h4>
+<blockquote class="q">"Khách đổi email, nhưng hoá đơn tháng sau vẫn gửi tới email cũ. Bạn điều tra và sửa thế nào?"</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>Những service nào giữ email?</td><td>Năm: user, billing, notification, CRM, analytics. User-service là nơi khách đổi email.</td><td>Xác định ai là nguồn sự thật.</td></tr>
+<tr><td>Thay đổi lan sang các service khác bằng cách nào?</td><td>User-service gọi HTTP lần lượt tới bốn service. Lỗi thì ghi log và bỏ qua. Lời gọi nằm trong transaction, trước commit.</td><td>Đây là chỗ hỏng; câu hỏi quan trọng nhất.</td></tr>
+<tr><td>Có triệu chứng nào khác không?</td><td>CRM giữ email thứ nhất khi khách đổi hai lần trong một phút. Analytics có 3% khách mang email không còn tồn tại. Một lần billing có email mà user-service không có.</td><td>Mỗi triệu chứng chỉ ra một lỗi khác nhau.</td></tr>
+<tr><td>Hạ tầng có gì?</td><td>Kafka; outbox đã dùng cho đơn hàng.</td><td>Có sẵn công cụ, không cần thêm hạ tầng.</td></tr>
+<tr><td>Yêu cầu?</td><td>Mọi service đúng trong 1 phút. Hoá đơn và thông báo bảo mật luôn tới email hiện tại. Không mất thay đổi khi một service tạm chết.</td><td>Hai mức: bản sao thì eventual, thao tác nhạy cảm thì phải đúng.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> hỏi về triệu chứng khác trước khi đề xuất. Một lỗi thường không đi một mình; danh sách triệu chứng là bản đồ của các nguyên nhân.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1</b>Từ các triệu chứng đó, nguyên nhân là gì? Mỗi triệu chứng một nguyên nhân.</p>
+<details class="answer"><summary>Đáp án</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Triệu chứng</th><th>Nguyên nhân</th></tr></thead>
+<tbody>
+<tr><td>Billing có email mà user-service không có</td><td>Gọi HTTP trước commit, rồi transaction rollback. Ghi đôi kiểu "gửi trước, commit sau".</td></tr>
+<tr><td>Hoá đơn gửi email cũ; analytics lệch 3%</td><td>Lời gọi lỗi thì bỏ qua: ghi đôi kiểu "commit trước, gửi sau", không có retry bền.</td></tr>
+<tr><td>CRM giữ email thứ nhất</td><td>Hai lời gọi chạy chồng nhau (lần đầu còn đang retry ở tầng HTTP khi lần hai tới), lần đầu tới sau và đè lên. CRM áp dụng theo thứ tự tới, không theo thứ tự xảy ra.</td></tr>
+</tbody></table></div>
+<p>Gốc chung: không có cơ chế lan truyền vừa bền (không mất), vừa chỉ phát sau commit (không có event ma), vừa giữ được thứ tự theo từng khách.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2</b>Đề xuất cách sửa. Vì sao không chỉ thêm retry vào lời gọi HTTP?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p><strong>Retry chỉ sửa được một trong ba lỗi</strong> (lời gọi lỗi bị bỏ), và làm lỗi thứ tự tệ hơn: càng retry, càng nhiều lời gọi cũ tới muộn. Nó cũng không sửa lỗi gửi trước commit. Và retry nằm trong bộ nhớ của user-service: service khởi động lại là mất.</p>
 <div class="tablewrap"><table>
 <thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
 <tbody>
-<tr><td>A. Giữ HTTP, thêm retry</td><td>Ít thay đổi</td><td>Vẫn ghi đôi; retry làm thứ tự càng lộn</td></tr>
-<tr><td>B. Outbox, event <code>EmailChanged</code> có version, partition theo customer id</td><td>Không mất, không có event ma; thứ tự theo khách</td><td>Bản sao có độ trễ; consumer phải idempotent</td></tr>
-<tr><td>C. Không lưu bản sao; mọi service hỏi user-service khi cần</td><td>Luôn đúng</td><td>User-service thành phụ thuộc bắt buộc; analytics cần quét hàng triệu dòng</td></tr>
-<tr><td>D. Kết hợp: B cho bản sao, C cho thao tác nhạy cảm</td><td>Đúng ở chỗ cần, rẻ ở chỗ còn lại</td><td>Hai cách truy cập phải được ghi rõ</td></tr>
+<tr><td>A. Giữ HTTP, thêm retry</td><td>Ít thay đổi</td><td>Vẫn ghi đôi; thứ tự càng lộn</td></tr>
+<tr><td>B. Outbox, event <code>EmailChanged</code> có version, key theo customer id</td><td>Không mất, không có event ma; thứ tự theo khách</td><td>Bản sao có độ trễ; consumer phải idempotent</td></tr>
+<tr><td>C. Bỏ bản sao, mọi service hỏi user-service khi cần</td><td>Luôn đúng</td><td>User-service thành phụ thuộc bắt buộc; analytics cần quét hàng triệu dòng</td></tr>
+<tr><td>D. B cho bản sao, C cho thao tác nhạy cảm</td><td>Đúng ở chỗ cần, rẻ ở chỗ còn lại</td><td>Hai cách truy cập phải ghi rõ</td></tr>
 </tbody></table></div>
-<h4 class="ah">4. Đánh đổi và quyết định</h4>
-<p>Chọn D.</p>
-<ul>
-<li>User-service sở hữu email. Thay đổi đi qua outbox trong cùng transaction, partition key là customer id, event mang <code>version</code> tăng dần.</li>
-<li>CRM, analytics: giữ bản sao, cập nhật theo event, chỉ áp dụng khi version mới hơn.</li>
-<li>Billing và notification: vẫn giữ bản sao để hiển thị, nhưng ngay trước khi gửi hoá đơn hay thông báo bảo mật thì hỏi user-service. Thông báo "email của bạn vừa đổi" gửi tới <em>cả</em> email cũ và mới, theo thói quen bảo mật phổ biến, để chủ thật phát hiện nếu tài khoản bị chiếm.</li>
-</ul>
-<h4 class="ah">5. Triển khai</h4>
+<p><strong>Chọn D.</strong></p>
 <pre><code>-- user-service, một transaction
 UPDATE users SET email = ?, email_version = email_version + 1 WHERE id = ?;
 INSERT INTO outbox (aggregate_type, aggregate_id, type, payload)
 VALUES ('customer', ?, 'EmailChanged', JSON_OBJECT('email', ?, 'version', ?));
 
--- consumer ở CRM
+-- consumer ở CRM: chỉ áp dụng bản mới hơn
 UPDATE crm_contacts SET email = ?, email_version = ?
  WHERE customer_id = ? AND email_version &lt; ?;</code></pre>
+<p><strong>Sửa dữ liệu đang lệch:</strong> chạy một lần job phát <code>EmailChanged</code> cho mọi khách với version hiện tại; consumer tự sửa bản sao. Sau đó đối soát hằng ngày: so email và version giữa user-service và từng bản sao, lệch quá 1 phút thì cảnh báo.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3</b>Kafka đã giữ thứ tự rồi, sao còn cần version ở consumer?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p>Kafka giữ thứ tự <em>trong một partition</em>, và chỉ cho những gì đã vào Kafka theo đúng thứ tự. Thứ tự có thể bị phá ở trước và sau Kafka:</p>
 <ul>
-<li>Bù dữ liệu cũ: chạy một lần job phát <code>EmailChanged</code> cho mọi khách với version hiện tại; consumer tự sửa bản sao.</li>
-<li>Đối soát hằng ngày: so email và version giữa user-service và từng bản sao; lệch quá 1 phút thì cảnh báo.</li>
+<li><strong>Trước:</strong> nhiều tiến trình relay đọc outbox song song có thể đẩy hai event của cùng một khách theo thứ tự ngược. Producer retry mà không bật idempotence cũng có thể đảo thứ tự.</li>
+<li><strong>Trong:</strong> key khác nhau (ví dụ ai đó đổi key sang email) thì hai event của một khách vào hai partition.</li>
+<li><strong>Sau:</strong> consumer đẩy event lỗi sang hàng retry riêng rồi xử lý muộn; hoặc replay từ một offset cũ khi sửa sự cố.</li>
 </ul>
-<h4 class="ah">6. Rủi ro và cách kiểm chứng</h4>
+<p>Version ở consumer là lớp bảo vệ không phụ thuộc vào bất kỳ điều nào ở trên. Nó rẻ (một cột, một điều kiện <code>WHERE</code>) và biến "áp dụng lại event cũ" thành không làm gì, tức consumer idempotent luôn. Senior nói: "giữ thứ tự ở Kafka để giảm số lần xung đột, kiểm tra version ở consumer để đúng".</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4</b>Hoá đơn nên đọc email từ bản sao của billing hay hỏi user-service? Còn thông báo "email của bạn vừa được đổi" thì gửi tới đâu?</p>
+<details class="answer"><summary>Đáp án</summary>
 <ul>
-<li>Test: đổi email hai lần trong 1 giây, đẩy event qua với thứ tự đảo; mọi bản sao cuối cùng giữ email thứ hai.</li>
-<li>Test: tắt CRM 10 phút trong lúc đổi email; bật lại thì CRM bắt kịp.</li>
-<li>Rủi ro: user-service chậm làm billing chậm. Đặt timeout; nếu user-service không trả lời, hoãn gửi hoá đơn thay vì gửi tới email có thể cũ.</li>
+<li><strong>Hoá đơn:</strong> hỏi user-service ngay trước khi gửi. Hoá đơn ít (vài lần mỗi giây), cái giá của gửi sai (lộ thông tin tài chính tới email cũ) cao. Nếu user-service không trả lời trong timeout, <em>hoãn</em> gửi, không gửi tới email có thể cũ. Bản sao của billing vẫn dùng để hiển thị.</li>
+<li><strong>Thông báo đổi email:</strong> gửi tới <em>cả</em> email cũ và mới. Nếu tài khoản bị chiếm và kẻ tấn công đổi email, chủ thật nhận được cảnh báo ở email cũ. Đây là thói quen bảo mật phổ biến.</li>
+<li>Nguyên tắc chung: bản sao để đọc và hiển thị; quyết định nhạy cảm hỏi nơi sở hữu dữ liệu.</li>
 </ul>
-<h4 class="ah">7. Lỗi hay gặp với bài này</h4>
-<ul>
-<li>Thêm retry vào lời gọi HTTP và coi là xong.</li>
-<li>Áp dụng event theo thứ tự tới, không theo version.</li>
-<li>Để thao tác nhạy cảm (bảo mật, hoá đơn) đọc từ bản sao.</li>
-<li>Không có đối soát để biết các bản sao đang lệch.</li>
-</ul>
+</details>
+</div>
+
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Điều tra</td><td>Nhảy vào giải pháp</td><td>Hỏi thêm triệu chứng; ghép mỗi triệu chứng với một nguyên nhân</td></tr>
+<tr><td>Giải pháp</td><td>Thêm retry, hoặc "dùng Kafka"</td><td>Outbox + version + key theo khách; nói được vì sao retry làm tệ hơn</td></tr>
+<tr><td>Thứ tự</td><td>"Kafka giữ thứ tự"</td><td>Chỉ ra thứ tự vỡ trước, trong và sau Kafka; version ở consumer</td></tr>
+<tr><td>Thao tác nhạy cảm</td><td>Đọc bản sao như mọi chỗ khác</td><td>Hỏi nơi sở hữu, hoãn khi không chắc; thông báo tới cả hai email</td></tr>
+<tr><td>Dữ liệu đã hỏng</td><td>Không nhắc tới</td><td>Backfill bằng event, đối soát định kỳ có cảnh báo</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> đề xuất transaction phân tán (2PC) qua năm service cho một trường email; gộp năm service lại làm một; áp dụng event theo thứ tự tới; quên sửa dữ liệu đang lệch.</p>
 </details>
 </div>
 </section>
