@@ -143,6 +143,10 @@ details.answer summary{font-weight:500;color:var(--struct)}
 .case{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:0 var(--r-m) var(--r-m) 0;padding:16px 20px;margin:22px 0;max-width:720px}
 .case>h3{margin:0 0 6px;font-size:1.15rem}
 .case .src{font-size:13.5px;color:var(--ink-2);margin:0 0 12px}
+.case .ctx{background:var(--paper);border:1px solid var(--rule);border-radius:var(--r-m);padding:10px 14px;margin:8px 0 0;font-size:15px}
+.case .ctx-h{margin:0 0 4px;font-weight:600;color:var(--struct)}
+.case .ctx ul{margin:0;padding-left:20px}
+.case .ctx li{margin:2px 0}
 .case .q{margin:10px 0 4px;padding:8px 0 8px 14px;border-left:3px solid var(--key);font-size:1.06rem;font-weight:500;color:var(--ink);max-width:none}
 .case details{max-width:none;margin:12px 0 0}
 .case details.answer[open]{background:var(--surface)}
@@ -511,7 +515,7 @@ DELETE FROM events WHERE created_at &lt; '2026-01-01' ORDER BY id LIMIT 5000;</c
 <div class="prose">
 <p>Mỗi bài là một vòng phỏng vấn system design cấp senior, khoảng 30–45 phút. Cách dùng:</p>
 <ol class="list">
-<li>Đọc câu hỏi của interviewer. Viết ra những gì bạn sẽ hỏi lại trước khi thiết kế, rồi mới mở "Hỏi lại interviewer" để xem câu hỏi nên hỏi và câu trả lời của interviewer. Các con số ở đó dùng cho những câu sau.</li>
+<li>Đọc bối cảnh và câu hỏi của interviewer. Bối cảnh là những gì interviewer nói lúc đầu: hệ thống, cách đang làm, quy mô, chuyện đã xảy ra. Viết ra những gì bạn sẽ hỏi thêm trước khi thiết kế, rồi mới mở "Hỏi lại interviewer" để xem câu hỏi nên hỏi và câu trả lời của interviewer: con số chính xác, yêu cầu, ràng buộc. Các con số ở đó dùng cho những câu sau.</li>
 <li>Với mỗi follow-up, tự trả lời (nói to hoặc viết ra) trong vài phút, rồi mới mở đáp án. Follow-up cuối luôn là triển khai và kiểm chứng: thiết kế đã chọn được làm ra sao, test gì, theo dõi gì, lùi lại thế nào.</li>
 <li>Cuối bài, dùng rubric để tự chấm: câu trả lời của bạn giống cột "mid" hay cột "senior", và có rơi vào red flag nào không.</li>
 </ol>
@@ -522,7 +526,8 @@ DELETE FROM events WHERE created_at &lt; '2026-01-01' ORDER BY id LIMIT 5000;</c
 <div class="case" id="c19">
 <h3>C19. "Tôi vừa đặt đơn mà không thấy đâu"</h3>
 <p class="src">Dựa trên: phần 01–02 của trang này; <a href="../capacity-estimation/index.html">Ước lượng capacity</a>.</p>
-<blockquote class="q">"Khách app giao đồ ăn của chúng tôi phàn nàn: đặt đơn xong, vào 'Đơn của tôi' không thấy đơn. Team đề xuất chuyển hết lượt đọc về primary. Bạn nghĩ sao?"</blockquote>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> App giao đồ ăn: một MySQL 8.4 primary và 3 replica async cùng region; một proxy chia mọi <code>SELECT</code> đều cho 3 replica.</li><li><strong>Quy mô:</strong> Đỉnh 1.500 ghi và 12.000 đọc mỗi giây; primary đang ở 55% CPU. Replica thường trễ 20–80 ms.</li><li><strong>Đã xảy ra:</strong> Đặt đơn xong, màn "Đơn của tôi" không có đơn, vài giây sau mới có; đôi khi có rồi lại mất khi kéo để tải lại; chi tiết đơn đôi khi trả 404.</li></ul></div>
+<blockquote class="q">"Team đề xuất chuyển hết lượt đọc về primary. Bạn nghĩ sao, và bạn sẽ làm gì?"</blockquote>
 
 <details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
 <div class="tablewrap"><table>
@@ -623,7 +628,8 @@ DELETE FROM events WHERE created_at &lt; '2026-01-01' ORDER BY id LIMIT 5000;</c
 <div class="case" id="c20">
 <h3>C20. Replica trễ 40 phút mỗi đêm</h3>
 <p class="src">Dựa trên: phần 02 và 04 của trang này; <a href="../capacity-estimation/index.html">Ước lượng capacity</a> (C13).</p>
-<blockquote class="q">"Mỗi đêm, sau job archive lúc 01:00, replica của chúng tôi trễ tới 40 phút. Một lần primary chết đúng lúc đó, và failover mất 35 phút. Vì sao, và bạn sửa thế nào?"</blockquote>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> MySQL 8.4, một primary và 2 replica async. Báo cáo kinh doanh chạy trên replica lúc 7:00.</li><li><strong>Đang làm:</strong> Job archive lúc 01:00 chạy một câu <code>UPDATE orders SET archived = 1 WHERE created_at &lt; NOW() - INTERVAL 90 DAY …</code>, chạm khoảng 6 triệu row, mất 12 phút trên primary.</li><li><strong>Đã xảy ra:</strong> Sau đó replica trễ tới 40 phút; báo cáo sáng có lúc thiếu số đêm trước. Một lần primary chết lúc 01:20, và failover mất 35 phút.</li></ul></div>
+<blockquote class="q">"Vì sao 12 phút trên primary lại thành 40 phút trễ, và bạn sửa thế nào?"</blockquote>
 
 <details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
 <div class="tablewrap"><table>
@@ -731,7 +737,8 @@ UPDATE orders SET archived = 1
 <div class="case" id="c21">
 <h3>C21. Failover xong, mất 3 giây đơn hàng đã trả tiền</h3>
 <p class="src">Dựa trên: phần 02–03 của trang này; <a href="../idempotency-retries/index.html">Idempotency và retry</a> (C4).</p>
-<blockquote class="q">"Primary MySQL của chúng tôi chết vì hỏng phần cứng. Failover tự động mất 40 giây, nghe có vẻ ổn. Nhưng sau đó đối soát thấy 212 giao dịch đã thanh toán mà không có đơn. Chuyện gì xảy ra, và làm sao để không lặp lại?"</blockquote>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> MySQL 8.4 primary với 2 replica async ở 2 zone khác, cùng region. Có tự động failover. Đơn hàng được thanh toán qua cổng bên ngoài.</li><li><strong>Đã xảy ra:</strong> Primary chết vì hỏng phần cứng lúc 14:03:17 và không khởi động lại được. Replica được đưa lên sau 40 giây. Đối soát sau đó thấy 212 giao dịch đã thanh toán ở cổng mà không có đơn trong database, tất cả trong 3 giây cuối trước sự cố.</li></ul></div>
+<blockquote class="q">"Chuyện gì đã xảy ra, và làm sao để không lặp lại?"</blockquote>
 
 <details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
 <div class="tablewrap"><table>
