@@ -143,6 +143,10 @@ details.answer summary{font-weight:500;color:var(--struct)}
 .case{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:0 var(--r-m) var(--r-m) 0;padding:16px 20px;margin:22px 0;max-width:720px}
 .case>h3{margin:0 0 6px;font-size:1.15rem}
 .case .src{font-size:13.5px;color:var(--ink-2);margin:0 0 12px}
+.case .ctx{background:var(--paper);border:1px solid var(--rule);border-radius:var(--r-m);padding:10px 14px;margin:8px 0 0;font-size:15px}
+.case .ctx-h{margin:0 0 4px;font-weight:600;color:var(--struct)}
+.case .ctx ul{margin:0;padding-left:20px}
+.case .ctx li{margin:2px 0}
 .case .q{margin:10px 0 4px;padding:8px 0 8px 14px;border-left:3px solid var(--key);font-size:1.06rem;font-weight:500;color:var(--ink);max-width:none}
 .case details{max-width:none;margin:12px 0 0}
 .case details.answer[open]{background:var(--surface)}
@@ -506,7 +510,7 @@ UPDATE billing_customers
 <div class="prose">
 <p>Mỗi bài là một vòng phỏng vấn system design cấp senior, khoảng 30–45 phút. Cách dùng:</p>
 <ol class="list">
-<li>Đọc câu hỏi của interviewer. Viết ra những gì bạn sẽ hỏi lại trước khi thiết kế, rồi mới mở "Hỏi lại interviewer" để xem câu hỏi nên hỏi và câu trả lời của interviewer. Các con số ở đó dùng cho những câu sau.</li>
+<li>Đọc bối cảnh và câu hỏi của interviewer. Bối cảnh là những gì interviewer nói lúc đầu: hệ thống, cách đang làm, quy mô, chuyện đã xảy ra. Viết ra những gì bạn sẽ hỏi thêm trước khi thiết kế, rồi mới mở "Hỏi lại interviewer" để xem câu hỏi nên hỏi và câu trả lời của interviewer: con số chính xác, yêu cầu, ràng buộc. Các con số ở đó dùng cho những câu sau.</li>
 <li>Với mỗi follow-up, tự trả lời (nói to hoặc viết ra) trong vài phút, rồi mới mở đáp án. Follow-up cuối luôn là triển khai và kiểm chứng: thiết kế đã chọn được làm ra sao, test gì, theo dõi gì, lùi lại thế nào.</li>
 <li>Cuối bài, dùng rubric để tự chấm: câu trả lời của bạn giống cột "mid" hay cột "senior", và có rơi vào red flag nào không.</li>
 </ol>
@@ -517,7 +521,8 @@ UPDATE billing_customers
 <div class="case" id="c22">
 <h3>C22. Giữ ghế cho hệ thống bán vé ở hai region</h3>
 <p class="src">Dựa trên: phần 01–03 của trang này; <a href="../concurrency-control-strategies/index.html">Kiểm soát ghi đồng thời</a> (C1); <a href="../replication-read-your-writes/index.html">Replication</a>.</p>
-<blockquote class="q">"Công ty bán vé concert đang chạy ở Singapore và muốn mở thêm Tokyo. Hãy thiết kế phần giữ ghế cho hệ thống chạy ở hai region."</blockquote>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> Công ty bán vé concert, đang chạy ở region Singapore trên MySQL 8.4. Mỗi concert lớn có khoảng 50.000 ghế; phút đầu mở bán có hàng chục nghìn lượt đặt mỗi giây.</li><li><strong>Kế hoạch:</strong> Mở thêm region Tokyo để khách ở Nhật dùng nhanh hơn. CTO nghiêng về chạy cả hai region cùng nhận đặt vé.</li><li><strong>Điều không được xảy ra:</strong> Một ghế bị bán cho hai người.</li></ul></div>
+<blockquote class="q">"Hãy thiết kế phần giữ ghế khi hệ thống chạy ở hai region."</blockquote>
 
 <details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
 <div class="tablewrap"><table>
@@ -647,7 +652,8 @@ UPDATE billing_customers
 <div class="case" id="c23">
 <h3>C23. Mọi lần đọc đi primary?</h3>
 <p class="src">Dựa trên: phần 02–03 của trang này; <a href="../replication-read-your-writes/index.html">Replication</a> (C19); <a href="../caching-invalidation/index.html">Cache</a>.</p>
-<blockquote class="q">"Kiến trúc sư của chúng tôi muốn mọi lần đọc đều đi primary cho nhất quán. Team hạ tầng nói primary sẽ quá tải. Bạn đứng về phía nào?"</blockquote>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> Sàn thương mại điện tử: MySQL 8.4 primary với replica, cộng Redis. Tính năng chính: tồn kho, giỏ hàng, lượt thích, lịch sử đơn, gợi ý, ví.</li><li><strong>Quy mô:</strong> Đỉnh khoảng 50.000 đọc và 3.000 ghi mỗi giây; phần lớn đọc đang đi replica và cache.</li><li><strong>Đang tranh luận:</strong> Tháng trước khách đặt đơn xong không thấy đơn và gọi tổng đài. Kiến trúc sư muốn mọi lần đọc đi primary; team hạ tầng nói primary sẽ quá tải.</li></ul></div>
+<blockquote class="q">"Bạn đứng về phía nào?"</blockquote>
 
 <details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
 <div class="tablewrap"><table>
@@ -761,7 +767,8 @@ UPDATE billing_customers
 <div class="case" id="c24">
 <h3>C24. Email lệch giữa năm service</h3>
 <p class="src">Dựa trên: phần 02 của trang này; <a href="../transactional-outbox/index.html">Transactional outbox</a>; <a href="../idempotency-retries/index.html">Idempotency và retry</a>.</p>
-<blockquote class="q">"Khách đổi email, nhưng hoá đơn tháng sau vẫn gửi tới email cũ. Bạn điều tra và sửa thế nào?"</blockquote>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> Năm service đều lưu email khách hàng: user, billing, notification, CRM, analytics. Khách đổi email ở user-service. Có Kafka và outbox.</li><li><strong>Đang làm:</strong> User-service cập nhật database rồi gọi HTTP lần lượt tới bốn service kia; lời gọi nào lỗi thì ghi log và bỏ qua.</li><li><strong>Đã xảy ra:</strong> Hoá đơn tháng sau vẫn gửi tới email cũ. Ngoài ra còn vài chuyện lạ khác mà team chưa giải thích được.</li></ul></div>
+<blockquote class="q">"Bạn điều tra và sửa thế nào?"</blockquote>
 
 <details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
 <div class="tablewrap"><table>
