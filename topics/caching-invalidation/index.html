@@ -139,20 +139,20 @@ details.answer summary{font-weight:500;color:var(--struct)}
 }
 
 
-/* bài toán thực tế */
+/* bài toán thực tế: dạng phỏng vấn */
 .case{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:0 var(--r-m) var(--r-m) 0;padding:16px 20px;margin:22px 0;max-width:720px}
 .case>h3{margin:0 0 6px;font-size:1.15rem}
 .case .src{font-size:13.5px;color:var(--ink-2);margin:0 0 12px}
-.case dl{margin:0;display:grid;grid-template-columns:104px minmax(0,1fr);gap:8px 16px}
-.case dt{font-weight:600;color:var(--struct);font-size:15px}
-.case dd{margin:0}
-.case dd p:last-child,.case dd ul:last-child{margin-bottom:0}
+.case .q{margin:10px 0 4px;padding:8px 0 8px 14px;border-left:3px solid var(--key);font-size:1.06rem;font-weight:500;color:var(--ink);max-width:none}
 .case details{max-width:none;margin:12px 0 0}
-.case details.hint{background:var(--paper)}
 .case details.answer[open]{background:var(--surface)}
+.case details.clar>summary,.case details.rubric>summary{color:var(--key)}
+.case .fu{margin:18px 0 0;padding-top:14px;border-top:1px solid var(--rule)}
+.case .fq{margin:0;font-weight:500}
+.case .fq b{color:var(--struct);margin-right:4px}
 .ah{font-size:15.5px;color:var(--struct);margin:20px 0 6px}
 .answer .tablewrap{max-width:none}
-@media (max-width:900px){.case{padding:14px}.case dl{grid-template-columns:minmax(0,1fr);gap:2px}.case dd{margin-bottom:8px}}
+@media (max-width:900px){.case{padding:14px}}
 
 /* ---- page widgets ---- */
 .n rect{fill:var(--surface);stroke:var(--rule-strong);stroke-width:1}
@@ -543,122 +543,193 @@ INFO memory      # used_memory, maxmemory</code></pre>
 <!-- 9 -->
 <section id="s9">
 <header><span class="num">09</span><h2>Bài toán thực tế</h2></header>
-<div class="prose"><p>Ba tình huống giống việc thật. Đọc đề, tự viết lời giải ra giấy (phương án, con số, đánh đổi), rồi mới mở lời giải. Gợi ý chỉ mở khi bí. Lời giải là lập luận từ tài liệu, không phải số đo; con số trong đó là ước lượng. Viết ngày 2026-10-20.</p></div>
+<div class="prose">
+<p>Mỗi bài là một vòng phỏng vấn system design cấp senior, khoảng 30–45 phút. Cách dùng:</p>
+<ol class="list">
+<li>Đọc câu hỏi của interviewer. Viết ra những gì bạn sẽ hỏi lại trước khi thiết kế, rồi mới mở "Hỏi lại interviewer" để xem câu hỏi nên hỏi và câu trả lời của interviewer. Các con số ở đó dùng cho những câu sau.</li>
+<li>Với mỗi follow-up, tự trả lời (nói to hoặc viết ra) trong vài phút, rồi mới mở đáp án. Follow-up cuối luôn là triển khai và kiểm chứng: thiết kế đã chọn được làm ra sao, test gì, theo dõi gì, lùi lại thế nào.</li>
+<li>Cuối bài, dùng rubric để tự chấm: câu trả lời của bạn giống cột "mid" hay cột "senior", và có rơi vào red flag nào không.</li>
+</ol>
+<p>Đáp án là lập luận từ tài liệu, không phải số đo; con số trong đó là ước lượng. Viết ngày 2026-10-21.</p>
+</div>
 
+<!-- C16 -->
 <div class="case" id="c16">
 <h3>C16. Giá trên trang khác giá lúc thanh toán</h3>
 <p class="src">Dựa trên: phần 01–03 của trang này; <a href="../transactional-outbox/index.html">Transactional outbox</a>.</p>
-<dl>
-<dt>Bối cảnh</dt><dd><p>Sàn thương mại có 30 pod API. Mỗi pod có cache trong bộ nhớ (LRU, TTL 10 phút) đặt trước Redis (TTL 30 phút), đặt trước MySQL. Giá sản phẩm được đổi từ 3 nơi: trang admin, một job đồng bộ giá từ nhà cung cấp chạy mỗi giờ, và một API cho đối tác. Chỉ trang admin có xoá key Redis sau khi ghi. Không nơi nào xoá cache trong pod.</p>
-<p>Sự cố: sau đợt giảm giá lúc 12:00, khách thấy giá cũ tới 12:40; vài đơn được tính tiền theo giá cũ, vài đơn theo giá mới, tuỳ pod. Bộ phận chăm sóc khách hàng nhận nhiều khiếu nại.</p></dd>
-<dt>Yêu cầu</dt><dd>Giá lúc thanh toán luôn đúng. Giá hiển thị đúng trong vòng 30 giây sau khi đổi. Trang sản phẩm vẫn chịu được 20.000 lượt đọc mỗi giây.</dd>
-<dt>Ràng buộc</dt><dd>Database chịu được khoảng 2.000 lượt đọc mỗi giây. Có Kafka và outbox từ Phase 3.</dd>
-<dt>Nhiệm vụ</dt><dd>Giải thích vì sao giá cũ kéo dài tới 40 phút. Thiết kế lại cách giữ cache đúng, và nói giá lúc thanh toán lấy từ đâu.</dd>
-</dl>
-<details class="hint"><summary>Gợi ý</summary><ul>
-<li>Cộng TTL của hai tầng cache.</li>
-<li>Có bao nhiêu đường ghi giá, và bao nhiêu đường có xoá cache?</li>
-<li>Giá hiển thị và giá tính tiền có cần cùng một độ mới không?</li>
-</ul></details>
-<details class="answer"><summary>Xem lời giải</summary>
-<h4 class="ah">1. Làm rõ đề bài</h4>
-<p>Hai lỗi chồng lên nhau:</p>
+<blockquote class="q">"Sau đợt giảm giá lúc 12:00, khách vẫn thấy giá cũ tới 12:40, và có đơn bị tính tiền theo giá cũ. Bạn điều tra và sửa thế nào?"</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>Giá được cache ở những tầng nào?</td><td>30 pod API, mỗi pod có cache trong bộ nhớ (LRU, TTL 10 phút) đặt trước Redis (TTL 30 phút), đặt trước MySQL.</td><td>Mỗi tầng là một nơi giữ giá cũ.</td></tr>
+<tr><td>Giá được đổi từ đâu?</td><td>Ba nơi: trang admin, job đồng bộ giá từ nhà cung cấp mỗi giờ, API cho đối tác.</td><td>Đếm số đường ghi.</td></tr>
+<tr><td>Đường nào có xoá cache?</td><td>Chỉ trang admin xoá key Redis. Không nơi nào xoá cache trong pod.</td><td>Thiếu invalidation ở hai đường và một tầng.</td></tr>
+<tr><td>Thanh toán lấy giá từ đâu?</td><td>Cùng hàm đọc giá với trang sản phẩm, qua cache.</td><td>Lỗi nặng nhất.</td></tr>
+<tr><td>Tải đọc? Database chịu bao nhiêu?</td><td>20.000 lượt đọc trang sản phẩm mỗi giây; database khoảng 2.000.</td><td>Không bỏ được cache.</td></tr>
+<tr><td>Yêu cầu?</td><td>Giá thanh toán luôn đúng; giá hiển thị đúng trong 30 giây sau khi đổi. Có Kafka và outbox.</td><td>Hai yêu cầu nhất quán khác nhau.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> hỏi "có bao nhiêu đường ghi, và đường nào có xoá cache". Invalidation thường hỏng ở đường ghi mà không ai nhớ tới.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Vì sao giá cũ kéo dài tới 40 phút?</p>
+<details class="answer"><summary>Đáp án</summary>
 <ul>
-<li><strong>Thiếu invalidation:</strong> job đồng bộ và API đối tác không xoá gì. Đợt giảm giá lúc 12:00 nhiều khả năng đi qua một trong hai đường đó. Không có invalidation nào hết.</li>
-<li><strong>Cache hai tầng:</strong> kể cả khi Redis được xoá, cache trong pod vẫn giữ giá cũ tới 10 phút. Một pod có thể nạp lại giá cũ từ Redis ngay trước khi Redis bị xoá, rồi giữ nó thêm 10 phút. Trường hợp xấu nhất: Redis vừa được nạp lúc 11:59 với TTL 30 phút, và cache trong pod nạp lại từ Redis lúc 12:29 với TTL 10 phút. Giá cũ tồn tại tới khoảng 12:39–12:40, khớp với sự cố.</li>
-<li><strong>Lỗi nghiêm trọng nhất:</strong> thanh toán đọc giá qua cache. Tiền không được phép dựa vào bản cũ.</li>
+<li><strong>Thiếu invalidation:</strong> đợt giảm giá nhiều khả năng đi qua job đồng bộ hoặc API đối tác, không xoá gì cả.</li>
+<li><strong>Hai tầng TTL cộng dồn:</strong> Redis vừa được nạp lúc 11:59 với TTL 30 phút, giữ giá cũ tới 12:29. Một pod nạp lại từ Redis lúc 12:29 với TTL 10 phút, giữ tới khoảng 12:39–12:40. Khớp sự cố.</li>
+<li>Kể cả khi Redis được xoá, một pod có thể vừa nạp giá cũ từ Redis ngay trước đó và giữ thêm 10 phút.</li>
 </ul>
-<h4 class="ah">2. Ước lượng</h4>
+<p>"Cũ tối đa bao lâu" của nhiều tầng cache là tổng TTL các tầng, không phải TTL lớn nhất.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> Việc đầu tiên bạn làm là gì?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p><strong>Cho thanh toán đọc giá từ database (primary), không qua cache.</strong> Đây là thay đổi quan trọng nhất và rẻ nhất: tiền không được dựa vào bản cũ.</p>
 <ul>
-<li>Tải nếu không có cache: 20.000 lượt mỗi giây, gấp 10 lần sức database. Phải giữ cache.</li>
-<li>Thanh toán: giả sử 1% số lượt xem, tức khoảng 200 lượt mỗi giây ở đỉnh. Đọc giá từ database cho 200 lượt mỗi giây là nhỏ so với sức 2.000.</li>
-<li>Mục tiêu 30 giây: cache trong pod với TTL 10 phút không thể đạt được mà không có invalidation chủ động. Hoặc TTL trong pod ngắn (khoảng 15 giây), hoặc phải xoá được cache trong pod.</li>
+<li>Thanh toán giả sử 1% số lượt xem, khoảng 200 lượt mỗi giây ở đỉnh: nhỏ so với sức 2.000 của database.</li>
+<li>Lưu giá (và phiên bản giá) trên dòng đơn hàng tại lúc đặt, để đối soát.</li>
+<li>Nếu giá lúc thanh toán khác giá đã hiển thị trong giỏ, hiện cảnh báo để khách xác nhận lại.</li>
 </ul>
-<h4 class="ah">3. Các phương án</h4>
+<p>Senior sửa phần làm sai tiền trước, rồi mới sửa phần làm khách khó chịu.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> Đồng nghiệp đề xuất thêm lệnh xoá Redis vào hai đường ghi còn thiếu. Đủ chưa?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p>Sửa được hôm nay, nhưng chờ lần quên tiếp theo (đường ghi thứ tư), và không đụng tới cache trong pod.</p>
 <div class="tablewrap"><table>
 <thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
 <tbody>
-<tr><td>A. Thêm lệnh xoá Redis vào hai đường ghi còn thiếu</td><td>Sửa nhanh</td><td>Vẫn phụ thuộc việc nhớ xoá; không xử lý cache trong pod</td></tr>
-<tr><td>B. Bỏ cache trong pod</td><td>Chỉ còn một tầng</td><td>Mỗi lượt đọc thêm một vòng mạng tới Redis; Redis chịu 20.000 lượt mỗi giây, vẫn ổn</td></tr>
-<tr><td>C. TTL trong pod ngắn (15 giây)</td><td>Giới hạn sai lệch tầng pod ở 15 giây, không cần cơ chế xoá</td><td>Thêm tải lên Redis: 30 pod × số sản phẩm nóng / 15 giây, nhỏ</td></tr>
-<tr><td>D. Xoá qua event: outbox phát <code>PriceChanged</code>; một consumer xoá Redis; mỗi pod nghe kênh pub/sub và xoá cache của mình</td><td>Không đường ghi nào bị quên; đạt mục tiêu vài giây</td><td>Thêm thành phần; pub/sub của Redis không bền, pod mất kết nối là lỡ tin</td></tr>
-<tr><td>E. Key có version: <code>product:42:v17</code>, version lưu ở một chỗ đọc rẻ</td><td>Key cũ tự bị bỏ, không cần xoá</td><td>Vẫn phải đọc version ở mỗi request; dồn tải vào chỗ lưu version</td></tr>
+<tr><td>A. Thêm lệnh xoá vào hai đường còn thiếu</td><td>Nhanh</td><td>Phụ thuộc việc nhớ xoá; không xử lý cache trong pod</td></tr>
+<tr><td>B. Bỏ cache trong pod</td><td>Chỉ còn một tầng</td><td>Thêm một vòng mạng mỗi lượt đọc</td></tr>
+<tr><td>C. TTL trong pod ngắn (15 giây)</td><td>Giới hạn sai lệch tầng pod, không cần cơ chế xoá</td><td>Thêm tải lên Redis (nhỏ)</td></tr>
+<tr><td>D. Xoá qua event: outbox phát <code>PriceChanged</code>; consumer xoá Redis; pod nghe pub/sub</td><td>Không đường ghi nào bị quên</td><td>Pub/sub của Redis không bền; pod mất kết nối là lỡ tin</td></tr>
+<tr><td>E. Key có version (<code>product:42:v17</code>)</td><td>Key cũ tự bị bỏ</td><td>Phải đọc version mỗi request</td></tr>
 </tbody></table></div>
-<h4 class="ah">4. Đánh đổi và quyết định</h4>
+<p><strong>Chọn D cho Redis, C cho pod.</strong> Mọi đường ghi phát <code>PriceChanged</code> qua outbox trong cùng transaction; consumer xoá key Redis và thử lại tới khi được. Pod: TTL 15 giây có jitter, cộng pub/sub để xoá sớm khi có thể; lỡ tin thì TTL vẫn giữ mục tiêu 30 giây. <strong>Khi nào đổi ý:</strong> Redis gần quá tải sau khi TTL pod ngắn lại thì E cho sản phẩm nóng nhất.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> Consumer xoá Redis xong, nhưng một request đọc database cũ ngay trước đó rồi ghi giá cũ lại vào Redis. Có xảy ra không?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p>Có: đó là cuộc đua kinh điển của cache-aside (widget về cuộc đua ở đầu trang này). Request A miss, đọc giá cũ từ database (hoặc replica trễ); giá được cập nhật và key bị xoá; A ghi giá cũ vào Redis, giữ nó trọn TTL 30 phút.</p>
 <ul>
-<li><strong>Thanh toán đọc giá từ database (primary), không qua cache.</strong> Đây là thay đổi quan trọng nhất và rẻ nhất.</li>
-<li><strong>D cho Redis:</strong> mọi đường ghi giá phát <code>PriceChanged</code> qua outbox trong cùng transaction. Consumer xoá key Redis, thử lại tới khi được. Không còn phụ thuộc vào việc từng đường ghi nhớ xoá.</li>
-<li><strong>C cho cache trong pod</strong> (TTL 15 giây, có jitter), cộng pub/sub để xoá sớm khi có thể. Pub/sub lỡ tin thì TTL 15 giây vẫn giữ mục tiêu 30 giây.</li>
-<li>Hiển thị cảnh báo trong giỏ hàng nếu giá lúc thanh toán khác giá đã hiển thị, để khách xác nhận lại.</li>
-</ul>
-<p>Khi nào đổi ý: nếu Redis gần quá tải sau khi TTL trong pod ngắn lại, dùng E cho các sản phẩm nóng nhất.</p>
-<h4 class="ah">5. Triển khai</h4>
-<ol class="list">
-<li>Tuần 1: thanh toán đọc giá từ primary; bỏ đọc qua cache trong luồng đặt hàng.</li>
-<li>Tuần 1: TTL cache trong pod giảm còn 15 giây ± 20%.</li>
-<li>Tuần 2: outbox <code>PriceChanged</code> ở cả ba đường ghi; consumer xoá Redis; kênh pub/sub <code>price-invalidate</code> cho các pod.</li>
-<li>Thêm kiểm tra định kỳ: lấy mẫu 1.000 sản phẩm vừa đổi giá, so cache với database 60 giây sau khi đổi.</li>
-</ol>
-<h4 class="ah">6. Rủi ro và cách kiểm chứng</h4>
-<ul>
-<li>Metric: tỉ lệ mẫu lệch giữa cache và database (mục tiêu gần 0 sau 30 giây); độ trễ từ lúc commit giá tới lúc consumer xoá key.</li>
-<li>Test: đổi giá qua cả ba đường; đo thời gian tới khi mọi pod hiển thị giá mới.</li>
-<li>Đối soát đơn: giá trên đơn phải bằng giá trong database tại lúc đặt (lưu kèm phiên bản giá trên dòng đơn hàng).</li>
-</ul>
-<h4 class="ah">7. Lỗi hay gặp với bài này</h4>
-<ul>
-<li>Sửa bằng cách chỉ thêm lệnh xoá vào hai đường ghi còn thiếu, chờ lần quên tiếp theo.</li>
-<li>Quên cache trong pod khi tính "cũ tối đa bao lâu".</li>
-<li>Để thanh toán đọc giá qua cache.</li>
-<li>Dựa vào Redis pub/sub như một kênh tin cậy.</li>
+<li>Ghi lại có điều kiện theo version: giá trong cache mang version; lần nạp chỉ ghi nếu version mới hơn bản đang có (Lua script, như trên trang này).</li>
+<li>Hoặc xoá hai lần: consumer xoá ngay, và xoá lại sau vài giây.</li>
+<li>Hoặc TTL Redis ngắn hơn cho giá (ví dụ 5 phút) để giới hạn thiệt hại.</li>
+<li>Không nạp cache từ replica cho dữ liệu vừa đổi: độ trễ replica làm cửa sổ đua dài ra.</li>
 </ul>
 </details>
 </div>
 
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai và kiểm chứng thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li><strong>Tuần 1:</strong> thanh toán đọc giá từ primary; TTL cache trong pod còn 15 giây ± 20%.</li>
+<li><strong>Tuần 2:</strong> outbox <code>PriceChanged</code> ở cả ba đường ghi; consumer xoá Redis; kênh pub/sub <code>price-invalidate</code> cho pod; nạp cache theo version.</li>
+<li>Kiểm tra định kỳ: lấy mẫu 1.000 sản phẩm vừa đổi giá, so cache với database 60 giây sau khi đổi; tỉ lệ lệch phải gần 0.</li>
+<li>Metric: độ trễ từ lúc commit giá tới lúc consumer xoá key.</li>
+<li>Test: đổi giá qua cả ba đường; đo thời gian tới khi mọi pod hiển thị giá mới (dưới 30 giây).</li>
+<li>Đối soát đơn: giá trên đơn bằng giá trong database tại lúc đặt.</li>
+</ul>
+</details>
+</div>
+
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Chẩn đoán</td><td>"TTL dài quá"</td><td>Thiếu invalidation ở hai đường ghi; TTL hai tầng cộng dồn ra đúng 40 phút</td></tr>
+<tr><td>Ưu tiên</td><td>Sửa cache trước</td><td>Thanh toán đọc từ database trước</td></tr>
+<tr><td>Invalidation</td><td>Thêm lệnh xoá</td><td>Event qua outbox cho mọi đường ghi; TTL ngắn ở pod làm lưới</td></tr>
+<tr><td>Cuộc đua</td><td>Không nhắc</td><td>Nạp lại giá cũ sau khi xoá; version hoặc xoá hai lần</td></tr>
+<tr><td>Kiểm chứng</td><td>Không có</td><td>Lấy mẫu so cache với database; đối soát đơn</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> để thanh toán đọc giá qua cache; quên cache trong pod khi tính "cũ tối đa bao lâu"; dựa vào Redis pub/sub như kênh tin cậy.</p>
+</details>
+</div>
+
+<!-- C17 -->
 <div class="case" id="c17">
 <h3>C17. Trang chủ chậm đúng 9:00 mỗi sáng</h3>
 <p class="src">Dựa trên: phần 02 của trang này (stampede, jitter); <a href="../capacity-estimation/index.html">Ước lượng capacity</a>.</p>
-<dl>
-<dt>Bối cảnh</dt><dd><p>Trang chủ của một ứng dụng tin tức được ghép từ 12 khối (tin nổi bật, theo chuyên mục, xu hướng…). Mỗi khối là một key Redis, TTL 1 giờ, tính bằng một câu truy vấn tổng hợp mất 1–3 giây. Một job làm nóng cache chạy lúc 8:00 mỗi sáng và nạp cả 12 key cùng lúc.</p>
-<p>Từ 8:59:58 tới 9:00:30 mỗi ngày: CPU database lên 100%, p99 trang chủ lên 12 giây, nhiều request timeout. 9:00 cũng là giờ đỉnh: 6.000 lượt xem trang chủ mỗi giây.</p></dd>
-<dt>Yêu cầu</dt><dd>p99 trang chủ dưới 300 ms suốt cả ngày. Nội dung được phép cũ tới 5 phút.</dd>
-<dt>Ràng buộc</dt><dd>Không thể làm câu truy vấn tổng hợp nhanh hơn trong quý này.</dd>
-<dt>Nhiệm vụ</dt><dd>Giải thích bằng con số. Thiết kế lại cách nạp và làm mới.</dd>
-</dl>
-<details class="hint"><summary>Gợi ý</summary><ul>
-<li>12 key nạp lúc 8:00 với TTL 1 giờ thì hết hạn lúc nào?</li>
-<li>6.000 request mỗi giây trong 3 giây tính lại là bao nhiêu câu truy vấn?</li>
-<li>Người dùng có cần khối "xu hướng" mới tới từng giây không?</li>
-</ul></details>
-<details class="answer"><summary>Xem lời giải</summary>
-<h4 class="ah">1. Làm rõ đề bài</h4>
-<p>12 key nạp cùng lúc lúc 8:00, cùng TTL 1 giờ, nên cùng hết hạn lúc 9:00, đúng giờ đỉnh. Đây là stampede nhân 12: hết hạn đồng loạt cộng không có chống stampede.</p>
-<p>"Cũ tới 5 phút" là thông tin quyết định: không cần tính lại khi có người đọc. Có thể tính lại ở nền theo lịch, và người đọc không bao giờ phải chờ.</p>
-<h4 class="ah">2. Ước lượng</h4>
+<blockquote class="q">"Trang chủ app tin tức của chúng tôi chậm tới 12 giây trong khoảng 30 giây quanh 9:00 mỗi sáng, ngày nào cũng vậy. Phần còn lại trong ngày thì ổn. Bạn đoán chuyện gì đang xảy ra?"</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>Trang chủ được ghép thế nào?</td><td>12 khối (tin nổi bật, chuyên mục, xu hướng…). Mỗi khối là một key Redis, TTL 1 giờ, tính bằng một câu truy vấn tổng hợp 1–3 giây.</td><td>12 key cùng TTL.</td></tr>
+<tr><td>Có gì chạy theo lịch không?</td><td>Job làm nóng cache lúc 8:00 nạp cả 12 key cùng lúc.</td><td>8:00 + 1 giờ = 9:00.</td></tr>
+<tr><td>Database lúc đó?</td><td>CPU 100% từ 8:59:58 tới 9:00:30.</td><td>Xác nhận stampede.</td></tr>
+<tr><td>Tải lúc 9:00?</td><td>Giờ đỉnh: 6.000 lượt xem trang chủ mỗi giây.</td><td>Hết hạn đúng giờ đỉnh.</td></tr>
+<tr><td>Nội dung được cũ bao lâu?</td><td>Tới 5 phút.</td><td>Không cần tính lại khi có người đọc.</td></tr>
+<tr><td>Làm câu truy vấn nhanh hơn được không?</td><td>Không trong quý này. p99 trang chủ phải dưới 300 ms cả ngày.</td><td>Người đọc không được chờ câu 1–3 giây.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> nghe "đúng một giờ mỗi ngày" là hỏi ngay "có gì chạy theo lịch, TTL bao nhiêu". Sự cố theo đồng hồ gần như luôn có nguyên nhân theo đồng hồ.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Giải thích bằng con số.</p>
+<details class="answer"><summary>Đáp án</summary>
 <ul>
-<li>Mỗi lượt xem trang chủ đọc 12 key. Khi hết hạn, mỗi key bị miss bởi mọi request trong 1–3 giây tính lại: 6.000 × 2 giây ≈ 12.000 câu cho mỗi key, nhân 12 khối là khoảng 144.000 câu truy vấn nặng trong vài giây.</li>
-<li>Database chậm đi vì tải đó, câu truy vấn lâu hơn 3 giây, cửa sổ miss dài ra, và vòng lặp tự nuôi nhau tới khi request timeout và người dùng bỏ đi.</li>
-<li>Nếu làm mới theo lịch: 12 câu mỗi 2 phút, tức 0,1 câu mỗi giây. Không đáng kể.</li>
+<li>12 key nạp cùng lúc lúc 8:00, cùng TTL 1 giờ, nên cùng hết hạn lúc 9:00, đúng giờ đỉnh: stampede nhân 12.</li>
+<li>Khi một key hết hạn, mọi request trong 1–3 giây tính lại đều miss: 6.000 × 2 giây ≈ 12.000 câu cho mỗi key, nhân 12 khối là khoảng 144.000 câu truy vấn nặng trong vài giây.</li>
+<li>Database chậm đi, câu truy vấn lâu hơn 3 giây, cửa sổ miss dài ra, vòng lặp tự nuôi nhau tới khi request timeout và người dùng bỏ đi.</li>
 </ul>
-<h4 class="ah">3. Các phương án</h4>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> Thêm jitter vào TTL có đủ không? Còn khoá "một người tính lại"?</p>
+<details class="answer"><summary>Đáp án</summary>
 <div class="tablewrap"><table>
 <thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
 <tbody>
 <tr><td>A. Jitter TTL</td><td>Không còn 12 key hết hạn cùng giây</td><td>Mỗi key vẫn bị stampede riêng</td></tr>
-<tr><td>B. Khoá một người tính lại</td><td>Mỗi lần hết hạn chỉ 1 câu truy vấn</td><td>Người đọc chờ 1–3 giây khi trùng lúc làm mới; vượt mục tiêu p99</td></tr>
-<tr><td>C. Stale-while-revalidate</td><td>Người đọc không chờ; 1 câu mỗi lần làm mới</td><td>Cần lưu hạn mềm; cần khoá cho việc làm mới</td></tr>
-<tr><td>D. Làm mới theo lịch ở nền, key không có hạn cứng ngắn</td><td>Đường đọc không bao giờ chạm database; tải dự đoán được</td><td>Làm mới cả khi không ai xem; job làm mới chết thì nội dung cũ dần (cần cảnh báo)</td></tr>
-<tr><td>E. XFetch</td><td>Không cần khoá, không cần job</td><td>Vẫn có thể có vài câu cùng lúc; người trúng xúc xắc phải chờ 1–3 giây</td></tr>
+<tr><td>B. Khoá một người tính lại</td><td>Mỗi lần hết hạn chỉ 1 câu truy vấn</td><td>Người đọc chờ 1–3 giây; vượt p99 300 ms</td></tr>
+<tr><td>C. Stale-while-revalidate</td><td>Người đọc không chờ; 1 câu mỗi lần làm mới</td><td>Cần hạn mềm và khoá cho việc làm mới</td></tr>
+<tr><td>D. Làm mới theo lịch ở nền</td><td>Đường đọc không bao giờ chạm database; tải dự đoán được</td><td>Làm mới cả khi không ai xem; job chết thì nội dung cũ dần</td></tr>
+<tr><td>E. XFetch</td><td>Không cần khoá, không cần job</td><td>Người trúng xúc xắc vẫn chờ 1–3 giây</td></tr>
 </tbody></table></div>
-<h4 class="ah">4. Đánh đổi và quyết định</h4>
-<p>Chọn D, có C làm dự phòng, cộng jitter.</p>
+<p>A một mình không đủ: 6.000 request mỗi giây vẫn dồn vào từng key khi nó hết hạn. B đúng về tải nhưng sai về độ trễ: mục tiêu là p99 300 ms, không phải "database không sập". Phải đọc kỹ yêu cầu: người đọc không bao giờ được chờ câu truy vấn.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> Vậy bạn chọn gì?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p><strong>D, có C làm dự phòng, cộng jitter.</strong></p>
 <ul>
-<li>Nội dung được cũ 5 phút và chỉ có 12 key, nên làm mới theo lịch là đơn giản nhất: mỗi key được tính lại mỗi 2 phút, lệch giờ nhau. Đường đọc chỉ đọc Redis.</li>
-<li>Key có TTL cứng 15 phút làm lưới an toàn. Nếu job làm mới chết, key vẫn còn 15 phút để người trực sửa; khi đó C chạy: request đầu tiên sau hạn mềm làm mới ở nền, mọi người khác vẫn nhận bản cũ.</li>
-<li>Job làm nóng lúc 8:00 bỏ đi; job làm mới theo lịch thay luôn nó.</li>
+<li>Nội dung được cũ 5 phút và chỉ có 12 key: làm mới mỗi key mỗi 2 phút, lệch giờ nhau. 12 câu mỗi 2 phút là 0,1 câu mỗi giây, không đáng kể. Đường đọc chỉ đọc Redis.</li>
+<li>Key có TTL cứng 15 phút làm lưới an toàn: job làm mới chết thì còn 15 phút để người trực sửa; khi đó C chạy: request đầu tiên sau hạn mềm làm mới ở nền, mọi người khác vẫn nhận bản cũ.</li>
+<li>Bỏ job làm nóng lúc 8:00; job làm mới thay nó.</li>
 </ul>
-<p>Khi nào đổi ý: nếu số key lên hàng nghìn (trang cá nhân hoá theo người dùng), làm mới theo lịch thành lãng phí; khi đó C hoặc E cho từng key.</p>
-<h4 class="ah">5. Triển khai</h4>
+<p><strong>Khi nào đổi ý:</strong> số key lên hàng nghìn (trang cá nhân hoá theo người dùng) thì làm mới theo lịch thành lãng phí; dùng C hoặc E cho từng key.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> Nếu cả Redis bị xoá sạch (khởi động lại không có dữ liệu) đúng lúc 9:00 thì sao?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Đường đọc không được gọi câu truy vấn nặng khi cache trống: trả khối rỗng có thông báo ("đang cập nhật"), không phải gọi database với 6.000 request mỗi giây.</li>
+<li>Job làm mới thấy key thiếu thì làm ngay (có khoá <code>NX</code> chặn trùng), 12 câu trong vài giây, trang đầy đủ trở lại trong khoảng 2 phút hoặc nhanh hơn.</li>
+<li>Đây là nguyên tắc thiết kế: cache là tối ưu, nhưng đường đọc phải có hành vi rõ ràng khi cache không có, và hành vi đó không được là "đổ tải lên database".</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai và kiểm chứng thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
 <pre><code>// worker, mỗi 10 giây kiểm tra; mỗi khối có lịch riêng
 for (const block of BLOCKS) {
   if (Date.now() &lt; nextRefresh[block.id]) continue;
@@ -669,91 +740,131 @@ for (const block of BLOCKS) {
     JSON.stringify({ data, softExpiry: Date.now() + 300_000 }), 'EX', 900);
   nextRefresh[block.id] = Date.now() + 120_000 + Math.random() * 20_000;
 }</code></pre>
-<p>Đường đọc: <code>GET home:{id}</code>. Nếu quá <code>softExpiry</code>, vẫn trả dữ liệu, và đẩy một job làm mới khối đó (khoá <code>NX</code> chặn trùng). Nếu key không còn (hiếm), trả khối rỗng có thông báo thay vì gọi database trên đường đọc.</p>
-<h4 class="ah">6. Rủi ro và cách kiểm chứng</h4>
 <ul>
+<li>Đường đọc: <code>GET home:{id}</code>; quá <code>softExpiry</code> thì vẫn trả dữ liệu và đẩy một job làm mới khối đó.</li>
 <li>Metric: tuổi của từng khối (cảnh báo khi quá 5 phút); số câu truy vấn tổng hợp mỗi phút (khoảng 6); p99 trang chủ lúc 9:00.</li>
-<li>Test: xoá cả 12 key lúc tải đỉnh ở staging; trang vẫn trả trong 300 ms với khối rỗng, và các khối được làm mới trong 2 phút.</li>
-<li>Rủi ro: một khối tính sai và bị cache 15 phút. Có nút xoá khối thủ công cho người vận hành.</li>
-</ul>
-<h4 class="ah">7. Lỗi hay gặp với bài này</h4>
-<ul>
-<li>Chỉ thêm jitter và nghĩ là xong.</li>
-<li>Dùng khoá mà để người đọc chờ, trong khi mục tiêu p99 là 300 ms.</li>
-<li>Làm nóng cache cùng một lúc với cùng TTL.</li>
-<li>Để đường đọc gọi câu truy vấn nặng khi cache trống.</li>
+<li>Test ở staging: xoá cả 12 key lúc tải đỉnh; trang vẫn trả trong 300 ms với khối rỗng, các khối được làm mới trong 2 phút.</li>
+<li>Rủi ro: một khối tính sai và bị cache 15 phút. Có nút xoá khối thủ công.</li>
 </ul>
 </details>
 </div>
 
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Chẩn đoán</td><td>"Database yếu lúc đỉnh"</td><td>Job 8:00 + TTL 1 giờ; stampede nhân 12, có con số</td></tr>
+<tr><td>Đọc yêu cầu</td><td>Giải quyết tải database</td><td>Thấy p99 300 ms loại bỏ khoá chờ</td></tr>
+<tr><td>Thiết kế</td><td>Jitter</td><td>Làm mới theo lịch, hạn mềm, TTL cứng làm lưới</td></tr>
+<tr><td>Cache trống</td><td>Không nhắc</td><td>Đường đọc không đổ tải xuống database</td></tr>
+<tr><td>Kiểm chứng</td><td>Không có</td><td>Xoá key lúc đỉnh ở staging; metric tuổi khối</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> chỉ thêm jitter; dùng khoá mà để người đọc chờ; làm nóng cache cùng lúc với cùng TTL; để đường đọc gọi câu truy vấn nặng khi cache trống.</p>
+</details>
+</div>
+
+<!-- C18 -->
 <div class="case" id="c18">
 <h3>C18. Khoá tài khoản mà người dùng vẫn truy cập được 15 phút</h3>
 <p class="src">Dựa trên: phần 03 và 06 của trang này.</p>
-<dl>
-<dt>Bối cảnh</dt><dd><p>Một ứng dụng B2B có 40 service. Mỗi service kiểm tra quyền bằng cách gọi service auth, kết quả cache trong Redis 15 phút theo khoá <code>perm:{userId}</code>. Access token là JWT, hết hạn sau 15 phút, refresh token 30 ngày. Tổng cộng khoảng 30.000 lần kiểm tra quyền mỗi giây.</p>
-<p>Sự cố: một nhân viên bị sa thải lúc 14:00, admin khoá tài khoản ngay. Nhân viên đó vẫn tải được dữ liệu khách hàng tới 14:13. Bộ phận an ninh yêu cầu: khoá tài khoản hoặc rút quyền phải có hiệu lực trong 5 giây.</p></dd>
-<dt>Yêu cầu</dt><dd>Khoá tài khoản, rút quyền, đăng xuất mọi thiết bị: hiệu lực trong 5 giây. Không thêm quá 2 ms vào p99 của mỗi request.</dd>
-<dt>Ràng buộc</dt><dd>Service auth chịu được khoảng 3.000 request mỗi giây. Không đổi toàn bộ hệ thống token trong quý này.</dd>
-<dt>Nhiệm vụ</dt><dd>Chỉ ra mọi chỗ "nhớ" quyền cũ. Thiết kế cơ chế thu hồi đạt 5 giây mà không làm sập service auth.</dd>
-</dl>
-<details class="hint"><summary>Gợi ý</summary><ul>
-<li>Có hai nơi giữ quyền cũ: cache quyền và chính JWT.</li>
-<li>Kiểm tra "người này có bị khoá không" rẻ hơn nhiều so với "người này có quyền gì".</li>
-<li>Thu hồi là sự kiện hiếm; kiểm tra là sự kiện ở mọi request.</li>
-</ul></details>
-<details class="answer"><summary>Xem lời giải</summary>
-<h4 class="ah">1. Làm rõ đề bài</h4>
-<ul>
-<li><strong>Nơi thứ nhất:</strong> <code>perm:{userId}</code> TTL 15 phút, không bị xoá khi admin khoá tài khoản.</li>
-<li><strong>Nơi thứ hai:</strong> JWT tự chứa, hợp lệ tới khi hết hạn. Kể cả cache được xoá, service nào chỉ kiểm tra chữ ký JWT vẫn cho qua tới 15 phút.</li>
-<li><strong>Nơi thứ ba:</strong> refresh token 30 ngày; nếu không bị thu hồi, nhân viên lấy được access token mới.</li>
-</ul>
-<p>Câu hỏi: "trong 5 giây" áp dụng cho mọi loại thay đổi quyền, hay chỉ khoá tài khoản và rút quyền nhạy cảm? Giả định: khoá tài khoản và đăng xuất mọi thiết bị cần 5 giây; thêm quyền mới thì chậm vài phút cũng được.</p>
-<h4 class="ah">2. Ước lượng</h4>
-<ul>
-<li>Bỏ cache, gọi auth cho mọi request: 30.000 mỗi giây, gấp 10 lần sức auth. Không được.</li>
-<li>Một lệnh Redis <code>GET</code> trong cùng datacenter cỡ dưới 1 ms: vừa ngân sách 2 ms.</li>
-<li>Thu hồi xảy ra vài chục lần mỗi ngày: chi phí ghi không đáng kể.</li>
-<li>Cache trong pod 5 giây: mỗi pod hỏi Redis cho mỗi người dùng đang hoạt động 1 lần mỗi 5 giây. Với 20.000 người dùng hoạt động và 200 pod, tối đa khoảng 800.000 lệnh mỗi giây ở trường hợp xấu nhất nếu mọi pod thấy mọi người dùng. Thực tế ít hơn nhiều, nhưng phải đo.</li>
-</ul>
-<h4 class="ah">3. Các phương án</h4>
+<blockquote class="q">"Một nhân viên bị sa thải lúc 14:00, admin khoá tài khoản ngay. Người đó vẫn tải được dữ liệu khách hàng tới 14:13. Bộ phận an ninh muốn việc khoá có hiệu lực trong 5 giây. Bạn làm thế nào?"</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>Các service kiểm tra quyền thế nào?</td><td>40 service. Mỗi service gọi service auth; kết quả cache trong Redis 15 phút theo <code>perm:{userId}</code>. Khoá tài khoản không xoá key này.</td><td>Nơi thứ nhất giữ quyền cũ.</td></tr>
+<tr><td>Token là gì, sống bao lâu?</td><td>Access token JWT, hết hạn 15 phút; refresh token 30 ngày.</td><td>JWT tự chứa: nơi thứ hai. Refresh token: nơi thứ ba.</td></tr>
+<tr><td>Bao nhiêu lần kiểm tra?</td><td>Khoảng 30.000 lần kiểm tra quyền mỗi giây. Service auth chịu khoảng 3.000.</td><td>Không bỏ được cache.</td></tr>
+<tr><td>"5 giây" áp dụng cho thay đổi nào?</td><td>Khoá tài khoản, rút quyền nhạy cảm, đăng xuất mọi thiết bị. Thêm quyền mới chậm vài phút cũng được.</td><td>Chỉ một loại thay đổi cần nhanh.</td></tr>
+<tr><td>Ngân sách độ trễ?</td><td>Không thêm quá 2 ms vào p99 mỗi request.</td><td>Đủ cho một lệnh Redis.</td></tr>
+<tr><td>Giới hạn?</td><td>Không đổi toàn bộ hệ thống token trong quý này.</td><td>Phải làm việc với JWT hiện có.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> liệt kê mọi nơi "nhớ" quyền, không chỉ cache. Với JWT, chính token là một bản cache không xoá được.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Liệt kê mọi chỗ giữ quyền cũ.</p>
+<details class="answer"><summary>Đáp án</summary>
+<ol class="list">
+<li><code>perm:{userId}</code> TTL 15 phút, không bị xoá khi khoá.</li>
+<li>JWT tự chứa, hợp lệ tới khi hết hạn. Kể cả cache được xoá, service nào chỉ kiểm tra chữ ký vẫn cho qua tới 15 phút.</li>
+<li>Refresh token 30 ngày: nếu không bị thu hồi, lấy được access token mới mãi.</li>
+</ol>
+<p>Sự cố 13 phút khớp với (1) hoặc (2). Nếu chỉ sửa một, hai cái còn lại vẫn mở.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> Đồng nghiệp đề xuất JWT hết hạn sau 1 phút và bỏ cache quyền. Bạn nghĩ sao?</p>
+<details class="answer"><summary>Đáp án</summary>
 <div class="tablewrap"><table>
 <thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
 <tbody>
 <tr><td>A. Xoá <code>perm:{userId}</code> khi khoá</td><td>Sửa nơi thứ nhất</td><td>JWT vẫn hợp lệ 15 phút</td></tr>
 <tr><td>B. JWT hết hạn sau 1 phút</td><td>Đơn giản</td><td>Refresh gấp 15 lần, tải lên auth; vẫn 60 giây, không phải 5</td></tr>
-<tr><td>C. Danh sách thu hồi trong Redis: mỗi request kiểm tra <code>revoked:{userId}</code> hoặc <code>epoch:{userId}</code> so với giá trị trong JWT</td><td>Một lệnh Redis nhỏ; hiệu lực ngay</td><td>Mỗi request thêm một lần đọc Redis; Redis thành phụ thuộc bắt buộc</td></tr>
-<tr><td>D. Đẩy sự kiện thu hồi tới mọi pod (pub/sub), pod giữ danh sách trong bộ nhớ</td><td>Không tốn gì ở mỗi request</td><td>Pub/sub có thể lỡ tin; pod mới khởi động phải nạp danh sách</td></tr>
-<tr><td>E. Bỏ cache quyền</td><td>Luôn đúng</td><td>Auth sập</td></tr>
+<tr><td>C. Kiểm tra "đã bị thu hồi chưa" trong Redis mỗi request (epoch)</td><td>Một lệnh Redis nhỏ; hiệu lực ngay</td><td>Redis thành phụ thuộc bắt buộc</td></tr>
+<tr><td>D. Đẩy sự kiện thu hồi tới mọi pod, giữ trong bộ nhớ</td><td>Không tốn gì mỗi request</td><td>Pub/sub có thể lỡ tin; pod mới phải nạp danh sách</td></tr>
+<tr><td>E. Bỏ cache quyền</td><td>Luôn đúng</td><td>30.000 lần mỗi giây, gấp 10 sức auth: auth sập</td></tr>
 </tbody></table></div>
-<h4 class="ah">4. Đánh đổi và quyết định</h4>
-<p>Chọn C cho kiểm tra "có bị thu hồi không", A cho cache quyền, và thu hồi refresh token ở auth. D chỉ là lớp tối ưu sau này.</p>
+<p>Đề xuất của đồng nghiệp là B + E: không đạt 5 giây và làm sập auth. Ý chính: <strong>tách hai câu hỏi</strong>. "Người này còn hợp lệ không" phải mới và rẻ; "người này có quyền gì" có thể cache vài phút. Chỉ câu thứ nhất cần 5 giây, và nó trả lời được bằng một số nguyên.</p>
+<p><strong>Chọn C + A + thu hồi refresh token.</strong> D chỉ là lớp tối ưu sau này nếu lần đọc Redis thành vấn đề.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> Mô tả cơ chế epoch. Rút một quyền nhạy cảm thì làm gì? Thêm quyền thì sao?</p>
+<details class="answer"><summary>Đáp án</summary>
 <ul>
-<li>Tách hai câu hỏi: "người này có còn hợp lệ không" (phải mới, rẻ) và "người này có quyền gì" (có thể cache vài phút). Chỉ câu hỏi thứ nhất cần 5 giây.</li>
-<li>Mỗi người dùng có <code>epoch</code> (số nguyên). JWT mang <code>epoch</code> lúc được cấp. Khoá tài khoản hoặc đăng xuất mọi thiết bị thì tăng <code>epoch</code> trong database và Redis. Mỗi request so <code>epoch</code> trong JWT với Redis: nhỏ hơn thì từ chối.</li>
-<li>Rút quyền nhạy cảm: tăng <code>epoch</code> luôn, buộc người dùng đăng nhập lại. Thêm quyền: chỉ xoá <code>perm:{userId}</code>.</li>
-<li><strong>Khi Redis không trả lời:</strong> đây là quyết định an ninh, không chỉ kỹ thuật. Với dữ liệu khách hàng, từ chối (fail closed) an toàn hơn cho qua. Ghi rõ lựa chọn này và để bộ phận an ninh duyệt.</li>
+<li>Mỗi người dùng có <code>auth_epoch</code> (số nguyên). JWT mang epoch lúc được cấp.</li>
+<li>Khoá tài khoản hoặc đăng xuất mọi thiết bị: tăng epoch trong database và Redis.</li>
+<li>Mỗi request: kiểm tra chữ ký, rồi <code>GET epoch:{userId}</code> (dưới 1 ms trong cùng datacenter, vừa ngân sách 2 ms); epoch trong JWT nhỏ hơn thì 401.</li>
+<li>Rút quyền nhạy cảm: tăng epoch luôn, buộc đăng nhập lại. Đơn giản, đúng, và thu hồi là sự kiện hiếm (vài chục lần mỗi ngày).</li>
+<li>Thêm quyền: chỉ xoá <code>perm:{userId}</code>; chậm vài phút cũng được.</li>
 </ul>
-<h4 class="ah">5. Triển khai</h4>
-<ol class="list">
-<li>Bảng <code>users</code> thêm cột <code>auth_epoch INT NOT NULL DEFAULT 0</code>; Redis <code>epoch:{userId}</code>, không TTL, nạp lại từ database khi thiếu.</li>
-<li>Auth đưa <code>epoch</code> vào JWT khi cấp.</li>
-<li>Middleware ở mọi service: kiểm tra chữ ký JWT, rồi <code>GET epoch:{userId}</code>; nếu thiếu thì hỏi auth (hiếm); nếu JWT cũ hơn thì trả 401.</li>
-<li>Khoá tài khoản: trong một transaction, cập nhật trạng thái và tăng <code>auth_epoch</code>, ghi outbox <code>UserRevoked</code>. Consumer đặt <code>epoch:{userId}</code> trong Redis, xoá <code>perm:{userId}</code>, và thu hồi refresh token. Sau khi tăng epoch trong database, auth cũng ghi thẳng vào Redis để không phải chờ consumer.</li>
-</ol>
-<h4 class="ah">6. Rủi ro và cách kiểm chứng</h4>
+<p>Tải: 30.000 lệnh <code>GET</code> mỗi giây lên Redis, nhỏ so với sức Redis; thu hồi chỉ là vài lần ghi.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> Redis không trả lời. Cho request qua hay chặn?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p>Đây là quyết định an ninh, không chỉ kỹ thuật, và senior nói rõ như vậy.</p>
 <ul>
-<li>Test: khoá một tài khoản đang gửi request liên tục; đo thời gian tới request bị từ chối đầu tiên ở mọi service (mục tiêu dưới 5 giây).</li>
-<li>Metric: p99 của middleware; tỉ lệ request bị từ chối do epoch; số lần Redis không trả lời và đã từ chối hay cho qua.</li>
-<li>Rủi ro: một service tự kiểm tra JWT mà không qua middleware. Rà mọi service, đưa kiểm tra vào thư viện chung.</li>
+<li><strong>Chặn (fail closed):</strong> an toàn cho dữ liệu khách hàng; cái giá là Redis sập thì cả 40 service ngừng phục vụ.</li>
+<li><strong>Cho qua (fail open):</strong> hệ thống vẫn chạy; cái giá là trong lúc Redis sập, người vừa bị khoá có thể truy cập lại.</li>
+<li>Có thể chia theo mức nhạy cảm: endpoint dữ liệu khách hàng chặn; endpoint ít nhạy cảm cho qua. Hoặc hỏi thẳng auth (có giới hạn tốc độ) làm dự phòng.</li>
 </ul>
-<h4 class="ah">7. Lỗi hay gặp với bài này</h4>
+<p>Ghi lựa chọn vào tài liệu thiết kế và để bộ phận an ninh duyệt. Điều tệ nhất là không ai quyết định, và hành vi được quyết bởi cách thư viện xử lý timeout.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai và kiểm chứng thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
 <ul>
-<li>Chỉ xoá cache quyền, quên JWT và refresh token.</li>
-<li>Giảm TTL của mọi thứ xuống vài giây, đẩy hết tải sang auth.</li>
-<li>Không quyết định rõ khi Redis lỗi thì cho qua hay chặn.</li>
-<li>Gộp "có quyền gì" và "còn hợp lệ không" vào một cache cùng TTL.</li>
+<li>Bảng <code>users</code> thêm <code>auth_epoch INT NOT NULL DEFAULT 0</code>; Redis <code>epoch:{userId}</code>, không TTL, nạp lại từ database khi thiếu.</li>
+<li>Auth đưa epoch vào JWT khi cấp.</li>
+<li>Middleware dùng chung ở mọi service: kiểm tra chữ ký, rồi epoch; thiếu key thì hỏi auth (hiếm).</li>
+<li>Khoá tài khoản: một transaction cập nhật trạng thái, tăng <code>auth_epoch</code>, ghi outbox <code>UserRevoked</code>. Auth ghi thẳng Redis ngay sau commit để không chờ consumer; consumer đặt lại epoch (phòng lần ghi thẳng lỗi), xoá <code>perm:{userId}</code>, thu hồi refresh token.</li>
+<li>Test: khoá một tài khoản đang gửi request liên tục; đo thời gian tới request bị từ chối đầu tiên ở mọi service (dưới 5 giây).</li>
+<li>Metric: p99 middleware; số request bị từ chối do epoch; số lần Redis không trả lời và đã chặn hay cho qua.</li>
+<li>Rủi ro: một service tự kiểm tra JWT không qua middleware. Rà mọi service, đưa kiểm tra vào thư viện chung.</li>
 </ul>
+</details>
+</div>
+
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Chẩn đoán</td><td>Cache quyền</td><td>Ba nơi: cache, JWT, refresh token</td></tr>
+<tr><td>Thiết kế</td><td>TTL ngắn cho mọi thứ</td><td>Tách "còn hợp lệ" khỏi "có quyền gì"; epoch rẻ, mới</td></tr>
+<tr><td>Tải</td><td>Không tính</td><td>30.000 so với 3.000; vì sao không đẩy sang auth</td></tr>
+<tr><td>Lỗi Redis</td><td>Không nhắc</td><td>Fail open hay closed là quyết định an ninh, có người duyệt</td></tr>
+<tr><td>Kiểm chứng</td><td>Không có</td><td>Đo thời gian thu hồi thật ở mọi service</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> chỉ xoá cache quyền, quên JWT và refresh token; giảm TTL mọi thứ xuống vài giây, đẩy hết tải sang auth; không quyết định rõ khi Redis lỗi.</p>
 </details>
 </div>
 </section>
