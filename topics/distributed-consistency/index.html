@@ -139,27 +139,20 @@ details.answer summary{font-weight:500;color:var(--struct)}
 }
 
 
-/* bài toán thực tế */
+/* bài toán thực tế: dạng phỏng vấn */
 .case{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:0 var(--r-m) var(--r-m) 0;padding:16px 20px;margin:22px 0;max-width:720px}
 .case>h3{margin:0 0 6px;font-size:1.15rem}
 .case .src{font-size:13.5px;color:var(--ink-2);margin:0 0 12px}
-.case dl{margin:0;display:grid;grid-template-columns:104px minmax(0,1fr);gap:8px 16px}
-.case dt{font-weight:600;color:var(--struct);font-size:15px}
-.case dd{margin:0}
-.case dd p:last-child,.case dd ul:last-child{margin-bottom:0}
-.case details{max-width:none;margin:12px 0 0}
-.case details.hint{background:var(--paper)}
-.case details.answer[open]{background:var(--surface)}
-.ah{font-size:15.5px;color:var(--struct);margin:20px 0 6px}
-.answer .tablewrap{max-width:none}
-/* bài toán dạng phỏng vấn */
 .case .q{margin:10px 0 4px;padding:8px 0 8px 14px;border-left:3px solid var(--key);font-size:1.06rem;font-weight:500;color:var(--ink);max-width:none}
+.case details{max-width:none;margin:12px 0 0}
+.case details.answer[open]{background:var(--surface)}
+.case details.clar>summary,.case details.rubric>summary{color:var(--key)}
 .case .fu{margin:18px 0 0;padding-top:14px;border-top:1px solid var(--rule)}
 .case .fq{margin:0;font-weight:500}
-.case .fq b{display:block;font:600 12px var(--mono);letter-spacing:.04em;text-transform:uppercase;color:var(--struct);margin-bottom:4px}
-.case details.clar summary,.case details.rubric summary{color:var(--key)}
-.case details.rubric{margin-top:18px}
-@media (max-width:900px){.case{padding:14px}.case dl{grid-template-columns:minmax(0,1fr);gap:2px}.case dd{margin-bottom:8px}}
+.case .fq b{color:var(--struct);margin-right:4px}
+.ah{font-size:15.5px;color:var(--struct);margin:20px 0 6px}
+.answer .tablewrap{max-width:none}
+@media (max-width:900px){.case{padding:14px}}
 
 /* ---- page widgets ---- */
 .n rect{fill:var(--surface);stroke:var(--rule-strong);stroke-width:1}
@@ -514,14 +507,14 @@ UPDATE billing_customers
 <p>Mỗi bài là một vòng phỏng vấn system design cấp senior, khoảng 30–45 phút. Cách dùng:</p>
 <ol class="list">
 <li>Đọc câu hỏi của interviewer. Viết ra những gì bạn sẽ hỏi lại trước khi thiết kế, rồi mới mở "Hỏi lại interviewer" để xem câu hỏi nên hỏi và câu trả lời của interviewer. Các con số ở đó dùng cho những câu sau.</li>
-<li>Với mỗi follow-up, tự trả lời (nói to hoặc viết ra) trong vài phút, rồi mới mở đáp án.</li>
+<li>Với mỗi follow-up, tự trả lời (nói to hoặc viết ra) trong vài phút, rồi mới mở đáp án. Follow-up cuối luôn là triển khai và kiểm chứng: thiết kế đã chọn được làm ra sao, test gì, theo dõi gì, lùi lại thế nào.</li>
 <li>Cuối bài, dùng rubric để tự chấm: câu trả lời của bạn giống cột "mid" hay cột "senior", và có rơi vào red flag nào không.</li>
 </ol>
 <p>Đáp án là lập luận từ tài liệu, không phải số đo; con số trong đó là ước lượng. Viết ngày 2026-10-21.</p>
 </div>
 
 <!-- C22 -->
-<div class="case iv" id="c22">
+<div class="case" id="c22">
 <h3>C22. Giữ ghế cho hệ thống bán vé ở hai region</h3>
 <p class="src">Dựa trên: phần 01–03 của trang này; <a href="../concurrency-control-strategies/index.html">Kiểm soát ghi đồng thời</a> (C1); <a href="../replication-read-your-writes/index.html">Replication</a>.</p>
 <blockquote class="q">"Công ty bán vé concert đang chạy ở Singapore và muốn mở thêm Tokyo. Hãy thiết kế phần giữ ghế cho hệ thống chạy ở hai region."</blockquote>
@@ -542,7 +535,7 @@ UPDATE billing_customers
 </details>
 
 <div class="fu">
-<p class="fq"><b>Follow-up 1</b>CTO đề xuất active-active: mỗi region một database đầy đủ, cả hai cùng nhận đặt vé, đồng bộ hai chiều. Bạn có đồng ý không?</p>
+<p class="fq"><b>Follow-up 1.</b> CTO đề xuất active-active: mỗi region một database đầy đủ, cả hai cùng nhận đặt vé, đồng bộ hai chiều. Bạn có đồng ý không?</p>
 <details class="answer"><summary>Đáp án</summary>
 <p><strong>Không, cho thao tác đặt ghế.</strong> Lý do không chỉ là mạng đứt:</p>
 <ul>
@@ -564,7 +557,7 @@ UPDATE billing_customers
 </div>
 
 <div class="fu">
-<p class="fq"><b>Follow-up 2</b>Giữa giờ mở bán, đường mạng giữa hai region đứt 30 giây. Concert thuộc Singapore. Khách ở Tokyo thấy gì? Khách ở Singapore thấy gì?</p>
+<p class="fq"><b>Follow-up 2.</b> Giữa giờ mở bán, đường mạng giữa hai region đứt 30 giây. Concert thuộc Singapore. Khách ở Tokyo thấy gì? Khách ở Singapore thấy gì?</p>
 <details class="answer"><summary>Đáp án</summary>
 <ul>
 <li><strong>Singapore:</strong> không thấy gì khác. Cụm database của region sở hữu nằm trọn trong Singapore (trải trên nhiều zone), nên vẫn bán bình thường.</li>
@@ -581,7 +574,7 @@ UPDATE billing_customers
 </div>
 
 <div class="fu">
-<p class="fq"><b>Follow-up 3</b>Giờ mất cả region Singapore. Yêu cầu: Tokyo bán tiếp trong 5 phút, không mất đơn đã thanh toán. Làm thế nào?</p>
+<p class="fq"><b>Follow-up 3.</b> Giờ mất cả region Singapore. Yêu cầu: Tokyo bán tiếp trong 5 phút, không mất đơn đã thanh toán. Làm thế nào?</p>
 <details class="answer"><summary>Đáp án</summary>
 <p>Có hai câu hỏi tách riêng: <strong>dữ liệu có ở Tokyo chưa</strong> (RPO), và <strong>ai được quyết định chuyển</strong> (tránh split brain).</p>
 <h4 class="ah">Dữ liệu: đồng bộ sang Tokyo hay không</h4>
@@ -605,13 +598,33 @@ UPDATE billing_customers
 </div>
 
 <div class="fu">
-<p class="fq"><b>Follow-up 4</b>Trang sơ đồ ghế được 200.000 người mở cùng lúc. Có cần nhất quán mạnh không?</p>
+<p class="fq"><b>Follow-up 4.</b> Trang sơ đồ ghế được 200.000 người mở cùng lúc. Có cần nhất quán mạnh không?</p>
 <details class="answer"><summary>Đáp án</summary>
 <p>Không. Sơ đồ ghế chỉ là gợi ý; quyết định nằm ở câu ghi có điều kiện khi đặt. Bắt nó nhất quán mạnh nghĩa là 200.000 người cùng đọc từ primary của region sở hữu, cộng thêm một vòng mạng cho khách ở xa, chỉ để thấy một trạng thái sẽ cũ ngay sau đó.</p>
 <ul>
 <li>Phục vụ từ cache hoặc replica gần khách, cũ vài giây, ghi rõ trên giao diện.</li>
 <li>Đẩy cập nhật theo lô (mỗi 1–2 giây) thay vì mỗi ghế một sự kiện.</li>
 <li>Khi khách bấm một ghế vừa bị giữ, trả lời nhanh và gợi ý ghế gần đó: cái giá của dữ liệu cũ là một lần bấm hỏng, không phải bán trùng.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai và kiểm chứng thiết kế này thế nào trước đợt mở bán đầu tiên ở Tokyo?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ol class="list">
+<li>Bảng <code>events</code> thêm cột <code>home_region</code>. Lớp API ở mỗi region: đặt ghế của concert thuộc region khác thì chuyển về region đó qua mạng nội bộ, connection giữ sẵn (không bắt tay TLS mỗi request), timeout 1 giây, circuit breaker.</li>
+<li>Trong region sở hữu: luồng giữ ghế như C1 (cổng chặn sớm, câu ghi có điều kiện trên từng ghế, giữ chỗ 10 phút).</li>
+<li>Semi-sync <code>AFTER_SYNC</code> từ primary Singapore tới một replica ở Tokyo; cảnh báo ngay khi semi-sync về async.</li>
+<li>Sơ đồ ghế: replica bất đồng bộ ở region gần khách cộng cache vài giây, giao diện ghi "trạng thái có thể trễ vài giây".</li>
+<li>Runbook chuyển quyền sở hữu: tín hiệu từ giám sát ở nơi thứ ba, fencing Singapore (<code>super_read_only</code>, rút khỏi load balancer), đổi <code>home_region</code>, đối soát thanh toán.</li>
+</ol>
+<p><strong>Kiểm chứng:</strong></p>
+<ul>
+<li>Đo vòng mạng thật Singapore–Tokyo và p99 đặt ghế từ Tokyo trong test tải; đạt khi dưới 300 ms ở đỉnh 20.000 lượt mỗi giây.</li>
+<li>Diễn tập cắt mạng giữa hai region trong một đợt bán thử: Singapore bán bình thường; Tokyo trả "tạm chưa đặt được" trong 1 giây, không treo; thread và connection ở Tokyo không cạn.</li>
+<li>Diễn tập mất region: tắt Singapore khi đang bán thử, chạy runbook, đo thời gian tới khi Tokyo bán được (dưới 5 phút) và số đơn đã thanh toán bị mất (bằng 0).</li>
+<li>Đối soát sau mỗi đợt: số ghế đã bán bằng số vé đã phát, không ghế nào có hai đơn.</li>
 </ul>
 </details>
 </div>
@@ -631,7 +644,7 @@ UPDATE billing_customers
 </div>
 
 <!-- C23 -->
-<div class="case iv" id="c23">
+<div class="case" id="c23">
 <h3>C23. Mọi lần đọc đi primary?</h3>
 <p class="src">Dựa trên: phần 02–03 của trang này; <a href="../replication-read-your-writes/index.html">Replication</a> (C19); <a href="../caching-invalidation/index.html">Cache</a>.</p>
 <blockquote class="q">"Kiến trúc sư của chúng tôi muốn mọi lần đọc đều đi primary cho nhất quán. Team hạ tầng nói primary sẽ quá tải. Bạn đứng về phía nào?"</blockquote>
@@ -651,7 +664,7 @@ UPDATE billing_customers
 </details>
 
 <div class="fu">
-<p class="fq"><b>Follow-up 1</b>Vậy bạn đứng về phía nào? Cho tôi con số.</p>
+<p class="fq"><b>Follow-up 1.</b> Vậy bạn đứng về phía nào? Cho tôi con số.</p>
 <details class="answer"><summary>Đáp án</summary>
 <p><strong>Không đứng hẳn về phía nào.</strong> Kiến trúc sư đúng về vấn đề (khách phải thấy đơn của mình), team hạ tầng đúng về chi phí.</p>
 <ul>
@@ -664,7 +677,7 @@ UPDATE billing_customers
 </div>
 
 <div class="fu">
-<p class="fq"><b>Follow-up 2</b>Đi từng tính năng: tồn kho, giỏ hàng, lượt thích, lịch sử đơn, gợi ý, ví. Mỗi cái cần mức nào, và làm gì khi có sự cố?</p>
+<p class="fq"><b>Follow-up 2.</b> Đi từng tính năng: tồn kho, giỏ hàng, lượt thích, lịch sử đơn, gợi ý, ví. Mỗi cái cần mức nào, và làm gì khi có sự cố?</p>
 <details class="answer"><summary>Đáp án</summary>
 <div class="tablewrap"><table>
 <thead><tr><th>Tính năng</th><th>Mức</th><th>Cũ tối đa</th><th>Đọc ở đâu</th><th>Khi có sự cố</th></tr></thead>
@@ -686,7 +699,7 @@ UPDATE billing_customers
 </div>
 
 <div class="fu">
-<p class="fq"><b>Follow-up 3</b>Đêm qua batch làm replica trễ 30 giây. Khách đặt đơn xong, vào "đơn của tôi" không thấy. Bạn sửa thế nào mà không đẩy mọi đọc về primary?</p>
+<p class="fq"><b>Follow-up 3.</b> Đêm qua batch làm replica trễ 30 giây. Khách đặt đơn xong, vào "đơn của tôi" không thấy. Bạn sửa thế nào mà không đẩy mọi đọc về primary?</p>
 <details class="answer"><summary>Đáp án</summary>
 <div class="tablewrap"><table>
 <thead><tr><th>Cách</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
@@ -700,13 +713,32 @@ UPDATE billing_customers
 </div>
 
 <div class="fu">
-<p class="fq"><b>Follow-up 4</b>Team có 50 developer. Làm sao để họ không dùng sai mức nhất quán, ví dụ đọc số dư từ replica?</p>
+<p class="fq"><b>Follow-up 4.</b> Team có 50 developer. Làm sao để họ không dùng sai mức nhất quán, ví dụ đọc số dư từ replica?</p>
 <details class="answer"><summary>Đáp án</summary>
 <ul>
 <li><strong>Ít lựa chọn:</strong> thư viện truy cập dữ liệu chỉ có ba hàm: <code>readStrong()</code> (primary), <code>readMine(userId)</code> (chờ GTID hoặc primary), <code>readStale(maxAge)</code> (cache hoặc replica). Không có connection "tự chọn".</li>
 <li><strong>Khai báo:</strong> mỗi endpoint khai báo lớp nhất quán và độ cũ tối đa; review dựa vào đó.</li>
 <li><strong>Quyết định tiền không dựa vào đọc:</strong> mọi thay đổi số dư, tồn kho là câu ghi có điều kiện (<code>UPDATE … WHERE balance &gt;= ?</code>). Khi đó dù ai đọc sai chỗ, bất biến vẫn đúng. Đây là lớp bảo vệ quan trọng nhất.</li>
 <li><strong>Đo:</strong> metric tỉ lệ đọc về primary theo lớp, độ cũ thực tế; test hỗn loạn làm replica trễ 30 giây và Redis chết, mỗi tính năng phải cư xử như bảng ở Follow-up 2.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai việc chia lớp nhất quán thế nào, và làm sao biết nó đúng?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ol class="list">
+<li>Đo trước: tỉ lệ thời gian theo digest câu lệnh trên primary, để có con số thật thay cho giả định "đọc tốn 1/5 ghi".</li>
+<li>Viết thư viện truy cập ba hàm (<code>readStrong</code>, <code>readMine</code>, <code>readStale</code>); mặc định của code cũ là <code>readStrong</code> để không đổi hành vi.</li>
+<li>Chuyển từng tính năng theo bảng ở Follow-up 2, bắt đầu từ cái rủi ro thấp nhất (gợi ý, lượt thích), mỗi bước sau một feature flag.</li>
+<li>Bật <code>readMine</code> cho lịch sử đơn sau khi có GTID trong phiên; bắt đầu với 5% người dùng.</li>
+</ol>
+<p><strong>Kiểm chứng:</strong></p>
+<ul>
+<li>Metric theo lớp: tỉ lệ đọc về primary, độ cũ thực tế (tuổi cache, độ trễ replica), CPU primary ở đỉnh (dưới 70%).</li>
+<li>Test tự động: đặt đơn rồi mở "đơn của tôi" ngay 1.000 lần với replica bị làm chậm; không lần nào thiếu đơn.</li>
+<li>Test hỗn loạn: replica trễ 30 giây, Redis chết; mỗi tính năng cư xử như cột "khi có sự cố".</li>
+<li>Đường lui: mỗi tính năng có flag quay về <code>readStrong</code>.</li>
 </ul>
 </details>
 </div>
@@ -726,7 +758,7 @@ UPDATE billing_customers
 </div>
 
 <!-- C24 -->
-<div class="case iv" id="c24">
+<div class="case" id="c24">
 <h3>C24. Email lệch giữa năm service</h3>
 <p class="src">Dựa trên: phần 02 của trang này; <a href="../transactional-outbox/index.html">Transactional outbox</a>; <a href="../idempotency-retries/index.html">Idempotency và retry</a>.</p>
 <blockquote class="q">"Khách đổi email, nhưng hoá đơn tháng sau vẫn gửi tới email cũ. Bạn điều tra và sửa thế nào?"</blockquote>
@@ -745,7 +777,7 @@ UPDATE billing_customers
 </details>
 
 <div class="fu">
-<p class="fq"><b>Follow-up 1</b>Từ các triệu chứng đó, nguyên nhân là gì? Mỗi triệu chứng một nguyên nhân.</p>
+<p class="fq"><b>Follow-up 1.</b> Từ các triệu chứng đó, nguyên nhân là gì? Mỗi triệu chứng một nguyên nhân.</p>
 <details class="answer"><summary>Đáp án</summary>
 <div class="tablewrap"><table>
 <thead><tr><th>Triệu chứng</th><th>Nguyên nhân</th></tr></thead>
@@ -759,7 +791,7 @@ UPDATE billing_customers
 </div>
 
 <div class="fu">
-<p class="fq"><b>Follow-up 2</b>Đề xuất cách sửa. Vì sao không chỉ thêm retry vào lời gọi HTTP?</p>
+<p class="fq"><b>Follow-up 2.</b> Đề xuất cách sửa. Vì sao không chỉ thêm retry vào lời gọi HTTP?</p>
 <details class="answer"><summary>Đáp án</summary>
 <p><strong>Retry chỉ sửa được một trong ba lỗi</strong> (lời gọi lỗi bị bỏ), và làm lỗi thứ tự tệ hơn: càng retry, càng nhiều lời gọi cũ tới muộn. Nó cũng không sửa lỗi gửi trước commit. Và retry nằm trong bộ nhớ của user-service: service khởi động lại là mất.</p>
 <div class="tablewrap"><table>
@@ -784,7 +816,7 @@ UPDATE crm_contacts SET email = ?, email_version = ?
 </div>
 
 <div class="fu">
-<p class="fq"><b>Follow-up 3</b>Kafka đã giữ thứ tự rồi, sao còn cần version ở consumer?</p>
+<p class="fq"><b>Follow-up 3.</b> Kafka đã giữ thứ tự rồi, sao còn cần version ở consumer?</p>
 <details class="answer"><summary>Đáp án</summary>
 <p>Kafka giữ thứ tự <em>trong một partition</em>, và chỉ cho những gì đã vào Kafka theo đúng thứ tự. Thứ tự có thể bị phá ở trước và sau Kafka:</p>
 <ul>
@@ -797,12 +829,32 @@ UPDATE crm_contacts SET email = ?, email_version = ?
 </div>
 
 <div class="fu">
-<p class="fq"><b>Follow-up 4</b>Hoá đơn nên đọc email từ bản sao của billing hay hỏi user-service? Còn thông báo "email của bạn vừa được đổi" thì gửi tới đâu?</p>
+<p class="fq"><b>Follow-up 4.</b> Hoá đơn nên đọc email từ bản sao của billing hay hỏi user-service? Còn thông báo "email của bạn vừa được đổi" thì gửi tới đâu?</p>
 <details class="answer"><summary>Đáp án</summary>
 <ul>
 <li><strong>Hoá đơn:</strong> hỏi user-service ngay trước khi gửi. Hoá đơn ít (vài lần mỗi giây), cái giá của gửi sai (lộ thông tin tài chính tới email cũ) cao. Nếu user-service không trả lời trong timeout, <em>hoãn</em> gửi, không gửi tới email có thể cũ. Bản sao của billing vẫn dùng để hiển thị.</li>
 <li><strong>Thông báo đổi email:</strong> gửi tới <em>cả</em> email cũ và mới. Nếu tài khoản bị chiếm và kẻ tấn công đổi email, chủ thật nhận được cảnh báo ở email cũ. Đây là thói quen bảo mật phổ biến.</li>
 <li>Nguyên tắc chung: bản sao để đọc và hiển thị; quyết định nhạy cảm hỏi nơi sở hữu dữ liệu.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn chuyển từ HTTP sang event thế nào mà không dừng hệ thống, và kiểm chứng ra sao?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ol class="list">
+<li>Consumer ở bốn service idempotent theo version trước (câu <code>UPDATE … WHERE email_version &lt; ?</code>), chạy song song với HTTP cũ.</li>
+<li>User-service ghi outbox trong cùng transaction; relay phát <code>EmailChanged</code> key theo customer id. HTTP cũ vẫn chạy: mỗi thay đổi tới hai lần, version làm lần thứ hai không đổi gì.</li>
+<li>Bỏ lời gọi HTTP trước commit ngay (nguồn của email ma), sau đó bỏ hẳn HTTP khi đối soát cho thấy event đủ.</li>
+<li>Billing và notification: thêm lời hỏi user-service trước khi gửi hoá đơn và thông báo bảo mật, có timeout và hoãn gửi.</li>
+<li>Backfill: job phát <code>EmailChanged</code> với version hiện tại cho mọi khách, theo lô, có giảm tốc.</li>
+</ol>
+<p><strong>Kiểm chứng:</strong></p>
+<ul>
+<li>Test: đổi email hai lần trong 1 giây, đẩy event qua với thứ tự đảo; mọi bản sao cuối cùng giữ email thứ hai.</li>
+<li>Test: tắt CRM 10 phút trong lúc đổi email; bật lại thì CRM bắt kịp.</li>
+<li>Đối soát hằng ngày: so email và version giữa user-service và từng bản sao; lệch quá 1 phút thì cảnh báo. Sau backfill, tỉ lệ lệch của analytics từ 3% về 0.</li>
+<li>Metric: độ trễ consumer; số event bị bỏ qua vì version cũ (tăng đột biến là dấu hiệu thứ tự đang vỡ ở đâu đó).</li>
 </ul>
 </details>
 </div>
