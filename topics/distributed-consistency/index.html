@@ -840,7 +840,7 @@ UPDATE crm_contacts SET email = ?, email_version = ?
 </div>
 
 <div class="fu">
-<p class="fq"><b>Follow-up 5.</b> Bạn chuyển từ HTTP sang event thế nào mà không dừng hệ thống, và kiểm chứng ra sao?</p>
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai việc chuyển từ HTTP sang event thế nào mà không dừng hệ thống, và kiểm chứng ra sao?</p>
 <details class="answer"><summary>Đáp án</summary>
 <ol class="list">
 <li>Consumer ở bốn service idempotent theo version trước (câu <code>UPDATE … WHERE email_version &lt; ?</code>), chạy song song với HTTP cũ.</li>
