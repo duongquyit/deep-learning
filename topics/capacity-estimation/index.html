@@ -143,6 +143,10 @@ details.answer summary{font-weight:500;color:var(--struct)}
 .case{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:0 var(--r-m) var(--r-m) 0;padding:16px 20px;margin:22px 0;max-width:720px}
 .case>h3{margin:0 0 6px;font-size:1.15rem}
 .case .src{font-size:13.5px;color:var(--ink-2);margin:0 0 12px}
+.case .ctx{background:var(--paper);border:1px solid var(--rule);border-radius:var(--r-m);padding:10px 14px;margin:8px 0 0;font-size:15px}
+.case .ctx-h{margin:0 0 4px;font-weight:600;color:var(--struct)}
+.case .ctx ul{margin:0;padding-left:20px}
+.case .ctx li{margin:2px 0}
 .case .q{margin:10px 0 4px;padding:8px 0 8px 14px;border-left:3px solid var(--key);font-size:1.06rem;font-weight:500;color:var(--ink);max-width:none}
 .case details{max-width:none;margin:12px 0 0}
 .case details.answer[open]{background:var(--surface)}
@@ -512,7 +516,7 @@ SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_read%';</code></pre>
 <div class="prose">
 <p>Mỗi bài là một vòng phỏng vấn system design cấp senior, khoảng 30–45 phút. Cách dùng:</p>
 <ol class="list">
-<li>Đọc câu hỏi của interviewer. Viết ra những gì bạn sẽ hỏi lại trước khi thiết kế, rồi mới mở "Hỏi lại interviewer" để xem câu hỏi nên hỏi và câu trả lời của interviewer. Các con số ở đó dùng cho những câu sau.</li>
+<li>Đọc bối cảnh và câu hỏi của interviewer. Bối cảnh là những gì interviewer nói lúc đầu: hệ thống, cách đang làm, quy mô, chuyện đã xảy ra. Viết ra những gì bạn sẽ hỏi thêm trước khi thiết kế, rồi mới mở "Hỏi lại interviewer" để xem câu hỏi nên hỏi và câu trả lời của interviewer: con số chính xác, yêu cầu, ràng buộc. Các con số ở đó dùng cho những câu sau.</li>
 <li>Với mỗi follow-up, tự trả lời (nói to hoặc viết ra) trong vài phút, rồi mới mở đáp án. Follow-up cuối luôn là triển khai và kiểm chứng: thiết kế đã chọn được làm ra sao, test gì, theo dõi gì, lùi lại thế nào.</li>
 <li>Cuối bài, dùng rubric để tự chấm: câu trả lời của bạn giống cột "mid" hay cột "senior", và có rơi vào red flag nào không.</li>
 </ol>
@@ -523,7 +527,8 @@ SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_read%';</code></pre>
 <div class="case" id="c13">
 <h3>C13. Lịch sử giao dịch của ví: 5 năm dữ liệu trên một MySQL?</h3>
 <p class="src">Dựa trên: phần 02 và 04 của trang này; <a href="../index-write-cost/index.html">Chi phí ghi của index</a>; <a href="../innodb-buffer-pool-redo-undo/index.html">Buffer pool</a>.</p>
-<blockquote class="q">"Ví điện tử của chúng tôi phải giữ lịch sử giao dịch 5 năm theo luật. Hiện tất cả nằm trong một bảng MySQL. Một MySQL có trụ được không? Nếu không thì bạn làm gì?"</blockquote>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> Ví điện tử, 3 triệu người dùng hoạt động mỗi ngày. Mọi giao dịch nằm trong một bảng <code>ledger</code> trên một MySQL 8.4 primary (64 GB RAM, disk 2 TB).</li><li><strong>Cách dùng:</strong> Màn "Lịch sử" hiện 20 giao dịch gần nhất, lọc theo tháng; phần lớn người dùng chỉ xem 30 ngày gần nhất.</li><li><strong>Yêu cầu mới:</strong> Luật yêu cầu giữ lịch sử 5 năm. Team không muốn tự quản lý shard trong năm nay.</li></ul></div>
+<blockquote class="q">"Một MySQL có trụ được không? Nếu không thì bạn làm gì?"</blockquote>
 
 <details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
 <div class="tablewrap"><table>
@@ -652,7 +657,8 @@ PARTITION BY RANGE COLUMNS (created_at) (
 <div class="case" id="c14">
 <h3>C14. Black Friday: tải gấp 8 lần trong 2 giờ</h3>
 <p class="src">Dựa trên: phần 02 của trang này (Little, hàng đợi); <a href="../idempotency-retries/index.html">Idempotency và retry</a> (C6).</p>
-<blockquote class="q">"Marketing dự báo Black Friday tải checkout gấp 8 lần trong 2 giờ. Còn 3 tuần. HPA đã cho phép tới 80 pod. Chúng tôi có ổn không?"</blockquote>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> Service checkout chạy 10 pod, gọi một MySQL primary và một service thanh toán bên ngoài. HPA cho phép tối đa 80 pod.</li><li><strong>Hiện tại:</strong> Giờ cao điểm bình thường 600 request mỗi giây, p99 120 ms, CPU pod 40%, CPU MySQL 35%.</li><li><strong>Sắp tới:</strong> Marketing dự báo Black Friday tải gấp 8 lần trong 2 giờ, mở bán lúc 0:00. Còn 3 tuần.</li></ul></div>
+<blockquote class="q">"Chúng tôi có ổn không? Nếu không, kế hoạch 3 tuần của bạn là gì?"</blockquote>
 
 <details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
 <div class="tablewrap"><table>
@@ -757,7 +763,8 @@ PARTITION BY RANGE COLUMNS (created_at) (
 <div class="case" id="c15">
 <h3>C15. Đếm lượt xem: tổng tải nhỏ, một bài viral làm sập</h3>
 <p class="src">Dựa trên: phần 03 của trang này; <a href="../concurrency-control-strategies/index.html">Kiểm soát ghi đồng thời</a> (row nóng); <a href="../transactional-outbox/index.html">Transactional outbox</a>.</p>
-<blockquote class="q">"Trang tin của chúng tôi chỉ có khoảng 17 lượt xem bài mỗi giây. Vậy mà hôm qua một bài viral làm sập cả site. Giải thích, và thiết kế lại cách đếm lượt xem."</blockquote>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> Trang tin tức, MySQL 8.4 và Redis. Lượt xem dùng để hiển thị trên bài và để tính doanh thu quảng cáo cuối ngày.</li><li><strong>Đang làm:</strong> Mỗi lượt xem chạy <code>UPDATE articles SET views = views + 1 WHERE id = ?</code>.</li><li><strong>Quy mô:</strong> 1,5 triệu lượt xem mỗi ngày, khoảng 17 lượt mỗi giây.</li><li><strong>Đã xảy ra:</strong> Hôm qua một bài viral nhận khoảng 3.000 lượt xem mỗi giây trong 40 phút. Request vào bài đó timeout, rồi lỗi lan sang cả các trang khác.</li></ul></div>
+<blockquote class="q">"Vì sao chỉ 17 lượt mỗi giây mà vẫn sập? Hãy thiết kế lại cách đếm lượt xem."</blockquote>
 
 <details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
 <div class="tablewrap"><table>
