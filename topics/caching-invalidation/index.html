@@ -143,6 +143,10 @@ details.answer summary{font-weight:500;color:var(--struct)}
 .case{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:0 var(--r-m) var(--r-m) 0;padding:16px 20px;margin:22px 0;max-width:720px}
 .case>h3{margin:0 0 6px;font-size:1.15rem}
 .case .src{font-size:13.5px;color:var(--ink-2);margin:0 0 12px}
+.case .ctx{background:var(--paper);border:1px solid var(--rule);border-radius:var(--r-m);padding:10px 14px;margin:8px 0 0;font-size:15px}
+.case .ctx-h{margin:0 0 4px;font-weight:600;color:var(--struct)}
+.case .ctx ul{margin:0;padding-left:20px}
+.case .ctx li{margin:2px 0}
 .case .q{margin:10px 0 4px;padding:8px 0 8px 14px;border-left:3px solid var(--key);font-size:1.06rem;font-weight:500;color:var(--ink);max-width:none}
 .case details{max-width:none;margin:12px 0 0}
 .case details.answer[open]{background:var(--surface)}
@@ -546,7 +550,7 @@ INFO memory      # used_memory, maxmemory</code></pre>
 <div class="prose">
 <p>Mỗi bài là một vòng phỏng vấn system design cấp senior, khoảng 30–45 phút. Cách dùng:</p>
 <ol class="list">
-<li>Đọc câu hỏi của interviewer. Viết ra những gì bạn sẽ hỏi lại trước khi thiết kế, rồi mới mở "Hỏi lại interviewer" để xem câu hỏi nên hỏi và câu trả lời của interviewer. Các con số ở đó dùng cho những câu sau.</li>
+<li>Đọc bối cảnh và câu hỏi của interviewer. Bối cảnh là những gì interviewer nói lúc đầu: hệ thống, cách đang làm, quy mô, chuyện đã xảy ra. Viết ra những gì bạn sẽ hỏi thêm trước khi thiết kế, rồi mới mở "Hỏi lại interviewer" để xem câu hỏi nên hỏi và câu trả lời của interviewer: con số chính xác, yêu cầu, ràng buộc. Các con số ở đó dùng cho những câu sau.</li>
 <li>Với mỗi follow-up, tự trả lời (nói to hoặc viết ra) trong vài phút, rồi mới mở đáp án. Follow-up cuối luôn là triển khai và kiểm chứng: thiết kế đã chọn được làm ra sao, test gì, theo dõi gì, lùi lại thế nào.</li>
 <li>Cuối bài, dùng rubric để tự chấm: câu trả lời của bạn giống cột "mid" hay cột "senior", và có rơi vào red flag nào không.</li>
 </ol>
@@ -557,7 +561,8 @@ INFO memory      # used_memory, maxmemory</code></pre>
 <div class="case" id="c16">
 <h3>C16. Giá trên trang khác giá lúc thanh toán</h3>
 <p class="src">Dựa trên: phần 01–03 của trang này; <a href="../transactional-outbox/index.html">Transactional outbox</a>.</p>
-<blockquote class="q">"Sau đợt giảm giá lúc 12:00, khách vẫn thấy giá cũ tới 12:40, và có đơn bị tính tiền theo giá cũ. Bạn điều tra và sửa thế nào?"</blockquote>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> Sàn thương mại, 30 pod API. Giá sản phẩm được cache hai tầng: cache trong bộ nhớ mỗi pod (TTL 10 phút) trước Redis (TTL 30 phút) trước MySQL.</li><li><strong>Đang làm:</strong> Giá được đổi từ ba nơi: trang admin, job đồng bộ giá từ nhà cung cấp mỗi giờ, API cho đối tác. Trang sản phẩm và thanh toán dùng chung một hàm đọc giá.</li><li><strong>Đã xảy ra:</strong> Sau đợt giảm giá lúc 12:00, khách thấy giá cũ tới 12:40; vài đơn bị tính tiền theo giá cũ, vài đơn theo giá mới, tuỳ pod.</li></ul></div>
+<blockquote class="q">"Bạn điều tra và sửa thế nào?"</blockquote>
 
 <details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
 <div class="tablewrap"><table>
@@ -660,7 +665,8 @@ INFO memory      # used_memory, maxmemory</code></pre>
 <div class="case" id="c17">
 <h3>C17. Trang chủ chậm đúng 9:00 mỗi sáng</h3>
 <p class="src">Dựa trên: phần 02 của trang này (stampede, jitter); <a href="../capacity-estimation/index.html">Ước lượng capacity</a>.</p>
-<blockquote class="q">"Trang chủ app tin tức của chúng tôi chậm tới 12 giây trong khoảng 30 giây quanh 9:00 mỗi sáng, ngày nào cũng vậy. Phần còn lại trong ngày thì ổn. Bạn đoán chuyện gì đang xảy ra?"</blockquote>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> App tin tức. Trang chủ ghép từ 12 khối (tin nổi bật, chuyên mục, xu hướng…); mỗi khối là một key Redis, tính bằng một câu truy vấn tổng hợp mất 1–3 giây.</li><li><strong>Đang làm:</strong> Mỗi key có TTL 1 giờ. Một job làm nóng cache chạy lúc 8:00 mỗi sáng.</li><li><strong>Đã xảy ra:</strong> Từ khoảng 8:59:58 tới 9:00:30 mỗi ngày, CPU database lên 100% và p99 trang chủ lên 12 giây. 9:00 cũng là giờ đỉnh.</li></ul></div>
+<blockquote class="q">"Bạn đoán chuyện gì đang xảy ra, và sửa thế nào?"</blockquote>
 
 <details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
 <div class="tablewrap"><table>
@@ -767,7 +773,8 @@ for (const block of BLOCKS) {
 <div class="case" id="c18">
 <h3>C18. Khoá tài khoản mà người dùng vẫn truy cập được 15 phút</h3>
 <p class="src">Dựa trên: phần 03 và 06 của trang này.</p>
-<blockquote class="q">"Một nhân viên bị sa thải lúc 14:00, admin khoá tài khoản ngay. Người đó vẫn tải được dữ liệu khách hàng tới 14:13. Bộ phận an ninh muốn việc khoá có hiệu lực trong 5 giây. Bạn làm thế nào?"</blockquote>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> Ứng dụng B2B với 40 service. Đăng nhập cấp JWT (hết hạn 15 phút) và refresh token (30 ngày). Mỗi service kiểm tra quyền qua service auth, kết quả cache trong Redis 15 phút.</li><li><strong>Quy mô:</strong> Khoảng 30.000 lần kiểm tra quyền mỗi giây.</li><li><strong>Đã xảy ra:</strong> Một nhân viên bị sa thải lúc 14:00, admin khoá tài khoản ngay, nhưng người đó vẫn tải được dữ liệu khách hàng tới 14:13.</li></ul></div>
+<blockquote class="q">"Bộ phận an ninh muốn khoá tài khoản có hiệu lực trong 5 giây. Bạn làm thế nào?"</blockquote>
 
 <details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
 <div class="tablewrap"><table>
