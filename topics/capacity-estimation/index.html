@@ -139,20 +139,20 @@ details.answer summary{font-weight:500;color:var(--struct)}
 }
 
 
-/* bài toán thực tế */
+/* bài toán thực tế: dạng phỏng vấn */
 .case{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:0 var(--r-m) var(--r-m) 0;padding:16px 20px;margin:22px 0;max-width:720px}
 .case>h3{margin:0 0 6px;font-size:1.15rem}
 .case .src{font-size:13.5px;color:var(--ink-2);margin:0 0 12px}
-.case dl{margin:0;display:grid;grid-template-columns:104px minmax(0,1fr);gap:8px 16px}
-.case dt{font-weight:600;color:var(--struct);font-size:15px}
-.case dd{margin:0}
-.case dd p:last-child,.case dd ul:last-child{margin-bottom:0}
+.case .q{margin:10px 0 4px;padding:8px 0 8px 14px;border-left:3px solid var(--key);font-size:1.06rem;font-weight:500;color:var(--ink);max-width:none}
 .case details{max-width:none;margin:12px 0 0}
-.case details.hint{background:var(--paper)}
 .case details.answer[open]{background:var(--surface)}
+.case details.clar>summary,.case details.rubric>summary{color:var(--key)}
+.case .fu{margin:18px 0 0;padding-top:14px;border-top:1px solid var(--rule)}
+.case .fq{margin:0;font-weight:500}
+.case .fq b{color:var(--struct);margin-right:4px}
 .ah{font-size:15.5px;color:var(--struct);margin:20px 0 6px}
 .answer .tablewrap{max-width:none}
-@media (max-width:900px){.case{padding:14px}.case dl{grid-template-columns:minmax(0,1fr);gap:2px}.case dd{margin-bottom:8px}}
+@media (max-width:900px){.case{padding:14px}}
 
 /* ---- page widgets ---- */
 .n rect{fill:var(--surface);stroke:var(--rule-strong);stroke-width:1}
@@ -509,58 +509,104 @@ SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_read%';</code></pre>
 <!-- 9 -->
 <section id="s9">
 <header><span class="num">09</span><h2>Bài toán thực tế</h2></header>
-<div class="prose"><p>Ba tình huống giống việc thật. Đọc đề, tự viết lời giải ra giấy (phương án, con số, đánh đổi), rồi mới mở lời giải. Gợi ý chỉ mở khi bí. Lời giải là lập luận từ tài liệu, không phải số đo; con số trong đó là ước lượng. Viết ngày 2026-10-20.</p></div>
+<div class="prose">
+<p>Mỗi bài là một vòng phỏng vấn system design cấp senior, khoảng 30–45 phút. Cách dùng:</p>
+<ol class="list">
+<li>Đọc câu hỏi của interviewer. Viết ra những gì bạn sẽ hỏi lại trước khi thiết kế, rồi mới mở "Hỏi lại interviewer" để xem câu hỏi nên hỏi và câu trả lời của interviewer. Các con số ở đó dùng cho những câu sau.</li>
+<li>Với mỗi follow-up, tự trả lời (nói to hoặc viết ra) trong vài phút, rồi mới mở đáp án. Follow-up cuối luôn là triển khai và kiểm chứng: thiết kế đã chọn được làm ra sao, test gì, theo dõi gì, lùi lại thế nào.</li>
+<li>Cuối bài, dùng rubric để tự chấm: câu trả lời của bạn giống cột "mid" hay cột "senior", và có rơi vào red flag nào không.</li>
+</ol>
+<p>Đáp án là lập luận từ tài liệu, không phải số đo; con số trong đó là ước lượng. Viết ngày 2026-10-21.</p>
+</div>
 
+<!-- C13 -->
 <div class="case" id="c13">
 <h3>C13. Lịch sử giao dịch của ví: 5 năm dữ liệu trên một MySQL?</h3>
 <p class="src">Dựa trên: phần 02 và 04 của trang này; <a href="../index-write-cost/index.html">Chi phí ghi của index</a>; <a href="../innodb-buffer-pool-redo-undo/index.html">Buffer pool</a>.</p>
-<dl>
-<dt>Bối cảnh</dt><dd><p>Ví điện tử có 3 triệu người dùng hoạt động mỗi ngày. Mỗi người trung bình 4 giao dịch mỗi ngày, mỗi giao dịch sinh 2 row trong bảng <code>ledger</code> (nợ và có), mỗi row khoảng 300 byte. Bảng có khoá chính <code>BIGINT</code> tự tăng và 3 secondary index: <code>(wallet_id, created_at)</code>, <code>(transfer_id)</code>, <code>(created_at)</code>. Màn hình "Lịch sử" hiển thị 20 giao dịch gần nhất, có lọc theo tháng; 90% lượt xem chỉ xem 30 ngày gần nhất. Mỗi người mở màn hình này 3 lần mỗi ngày. Hệ số đỉnh 5.</p>
-<p>Luật yêu cầu giữ 5 năm. Primary hiện có 64 GB RAM, buffer pool 48 GB, disk 2 TB.</p></dd>
-<dt>Yêu cầu</dt><dd>Màn hình lịch sử có p99 dưới 100 ms. Không hết disk trong 5 năm. Thêm index hoặc sửa schema không làm gián đoạn quá vài phút.</dd>
-<dt>Ràng buộc</dt><dd>MySQL 8.4. Team không muốn tự quản lý shard trong năm nay.</dd>
-<dt>Nhiệm vụ</dt><dd>Ước lượng QPS đọc và ghi ở đỉnh, dung lượng sau 1 năm và 5 năm, working set. Nói chỗ nào nghẽn trước, và đề xuất thiết kế lưu trữ.</dd>
-</dl>
-<details class="hint"><summary>Gợi ý</summary><ul>
-<li>Tính QPS trước, rồi tự hỏi: QPS có phải vấn đề không?</li>
-<li>Working set là 30 ngày, không phải 5 năm.</li>
-<li>Thêm một index trên bảng vài TB mất bao lâu?</li>
-</ul></details>
-<details class="answer"><summary>Xem lời giải</summary>
-<h4 class="ah">1. Làm rõ đề bài</h4>
+<blockquote class="q">"Ví điện tử của chúng tôi phải giữ lịch sử giao dịch 5 năm theo luật. Hiện tất cả nằm trong một bảng MySQL. Một MySQL có trụ được không? Nếu không thì bạn làm gì?"</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>Bao nhiêu người dùng, bao nhiêu giao dịch?</td><td>3 triệu người dùng hoạt động mỗi ngày, trung bình 4 giao dịch mỗi người mỗi ngày. Mỗi giao dịch 2 row (nợ và có), mỗi row khoảng 300 byte. Hệ số đỉnh 5.</td><td>Đầu vào cho QPS và dung lượng.</td></tr>
+<tr><td>Bảng có những index nào?</td><td>Khoá chính BIGINT tự tăng; 3 secondary index: <code>(wallet_id, created_at)</code>, <code>(transfer_id)</code>, <code>(created_at)</code>.</td><td>Index thường chiếm nhiều chỗ ngang dữ liệu.</td></tr>
+<tr><td>Ai đọc, đọc gì?</td><td>Màn hình "Lịch sử": 20 giao dịch gần nhất, lọc theo tháng; 90% lượt xem chỉ xem 30 ngày gần nhất. Mỗi người mở 3 lần mỗi ngày.</td><td>Xác định working set.</td></tr>
+<tr><td>"Giữ 5 năm" có cần xem được trong app?</td><td>12 tháng gần nhất xem được trong app; cũ hơn chỉ cần trích xuất trong vài giờ khi kiểm toán yêu cầu.</td><td>Dữ liệu cũ không cần nằm ở primary.</td></tr>
+<tr><td>Phần cứng?</td><td>64 GB RAM, buffer pool 48 GB, disk 2 TB.</td><td>Hai trần: RAM và disk.</td></tr>
+<tr><td>Giới hạn?</td><td>MySQL 8.4. p99 lịch sử dưới 100 ms. Sửa schema không gián đoạn quá vài phút. Team không muốn tự quản lý shard năm nay.</td><td>Loại sharding khỏi lựa chọn đầu tiên.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> hỏi "giữ 5 năm" nghĩa là gì về truy cập. Luật yêu cầu giữ, không yêu cầu truy vấn trong 100 ms; câu trả lời này quyết định 80% thiết kế.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Ước lượng QPS đọc, ghi ở đỉnh, dung lượng sau 1 và 5 năm, và working set.</p>
+<details class="answer"><summary>Đáp án</summary>
 <ul>
-<li>"Giữ 5 năm" có cần truy vấn được nhanh không, hay chỉ cần trích xuất khi có yêu cầu kiểm toán? Giả định: 12 tháng gần nhất phải xem được trong app; cũ hơn chỉ cần trích xuất trong vài giờ.</li>
-<li>Index <code>(created_at)</code> dùng cho gì? Giả định cho báo cáo nội bộ; báo cáo nên chạy trên replica.</li>
-<li>Số giao dịch có tăng không? Giả định tăng 50% mỗi năm; tính cả hai trường hợp phẳng và tăng.</li>
+<li><strong>Ghi:</strong> 3.000.000 × 4 × 2 = 24 triệu row mỗi ngày; / 100.000 giây ≈ 240 row mỗi giây trung bình; × 5 ≈ 1.200 ở đỉnh, tức khoảng 600 transaction mỗi giây.</li>
+<li><strong>Đọc:</strong> 3.000.000 × 3 / 100.000 ≈ 90 mỗi giây; × 5 ≈ 450 ở đỉnh. Mỗi lần là range scan 20 entry cộng 20 lần tra PRIMARY.</li>
+<li><strong>Dữ liệu:</strong> 24 triệu × 300 B ≈ 7,2 GB thô mỗi ngày. Ba secondary index và page không đầy: nhân khoảng 2, tức khoảng 14 GB mỗi ngày. Một năm khoảng 5 TB; 5 năm khoảng 25 TB nếu không tăng.</li>
+<li><strong>Working set 30 ngày:</strong> 30 × 14 GB ≈ 420 GB. Buffer pool 48 GB chứa được khoảng 3 ngày.</li>
 </ul>
-<h4 class="ah">2. Ước lượng</h4>
+<p><strong>Kết luận:</strong> QPS không phải vấn đề. Disk hết sau khoảng 5 tháng, và working set gấp gần 10 lần buffer pool. Đó là hai chỗ nghẽn trước.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> QPS nhỏ vậy thì mua disk lớn hơn là xong, đúng không?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p><strong>Không.</strong> Disk chỉ là một trong các vấn đề của một bảng 25 TB:</p>
 <ul>
-<li><strong>Ghi:</strong> 3.000.000 × 4 × 2 = 24 triệu row mỗi ngày. / 100.000 ≈ 240 row mỗi giây trung bình; × 5 ≈ 1.200 ở đỉnh. Mỗi giao dịch ghi 2 row trong một transaction, nên khoảng 600 transaction mỗi giây ở đỉnh.</li>
-<li><strong>Đọc:</strong> 3.000.000 × 3 / 100.000 ≈ 90 mỗi giây; × 5 ≈ 450 ở đỉnh. Mỗi lần đọc là một range scan 20 entry trên <code>(wallet_id, created_at)</code> cộng 20 lần tra PRIMARY. QPS nhỏ.</li>
-<li><strong>Dữ liệu:</strong> 24 triệu × 300 B ≈ 7,2 GB mỗi ngày dữ liệu thô. Ba secondary index và page không đầy: nhân khoảng 2, tức khoảng 14 GB mỗi ngày. Một năm khoảng 5 TB; 5 năm khoảng 25 TB nếu không tăng, nhiều hơn nếu tăng 50% mỗi năm.</li>
-<li><strong>Working set 30 ngày:</strong> khoảng 30 × 14 GB ≈ 420 GB. Buffer pool 48 GB chỉ chứa được khoảng 3 ngày.</li>
+<li>Thêm index, đổi schema, sao lưu, dựng replica mới: mỗi việc tính bằng ngày. Yêu cầu "không gián đoạn quá vài phút" khó giữ.</li>
+<li>Xoá dữ liệu quá hạn bằng <code>DELETE … WHERE created_at &lt; …</code> trên bảng vài TB là hàng giờ ghi nặng và replica trễ.</li>
+<li>Working set vẫn không vừa RAM.</li>
 </ul>
-<p>Kết luận từ ước lượng: QPS không phải vấn đề. Dung lượng vượt disk sau khoảng 5 tháng, và working set lớn gấp gần 10 lần buffer pool. Đó là hai chỗ nghẽn trước.</p>
-<h4 class="ah">3. Các phương án</h4>
 <div class="tablewrap"><table>
 <thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
 <tbody>
-<tr><td>A. Giữ nguyên một bảng, mua disk lớn hơn</td><td>Không đổi code</td><td>25 TB một bảng: thêm index, sao lưu, dựng replica mất ngày; working set vẫn không vừa RAM</td></tr>
-<tr><td>B. Partition theo tháng (<code>PARTITION BY RANGE</code>)</td><td>Xoá dữ liệu cũ bằng <code>DROP PARTITION</code> gần như tức thì; truy vấn theo tháng chỉ chạm một partition</td><td>Khoá chính phải chứa cột partition; mọi unique index cũng vậy; vẫn một server</td></tr>
-<tr><td>C. Bảng nóng 13 tháng + kho lưu trữ cho phần cũ</td><td>Bảng chính chỉ giữ 13 tháng (khoảng 5,5 TB nếu không tăng): vẫn lớn nhưng có trần; phần cũ sang storage rẻ (object storage dạng Parquet, hoặc một MySQL lưu trữ)</td><td>Truy vấn phần cũ chậm và qua đường khác; cần job chuyển dữ liệu</td></tr>
-<tr><td>D. Giảm kích thước mỗi row và index</td><td>Rẻ; tác động lên mọi con số</td><td>Có giới hạn; phải đổi schema</td></tr>
-<tr><td>E. Chia shard theo <code>wallet_id</code></td><td>Mở rộng gần như vô hạn</td><td>Team không muốn quản lý shard; truy vấn chéo shard khó</td></tr>
+<tr><td>A. Một bảng, disk lớn hơn</td><td>Không đổi code</td><td>Như trên</td></tr>
+<tr><td>B. Partition theo tháng</td><td>Xoá cũ bằng <code>DROP PARTITION</code> gần như tức thì; truy vấn theo tháng chạm một partition</td><td>Khoá chính và mọi unique index phải chứa cột partition; không có foreign key</td></tr>
+<tr><td>C. Bảng nóng 13 tháng, phần cũ sang kho lưu trữ</td><td>Primary có trần dung lượng; phần cũ ở storage rẻ</td><td>Truy vấn phần cũ chậm, qua đường khác; cần job chuyển</td></tr>
+<tr><td>D. Giảm kích thước row và index</td><td>Rẻ; tác động lên mọi con số</td><td>Có giới hạn; đổi schema</td></tr>
+<tr><td>E. Shard theo <code>wallet_id</code></td><td>Mở rộng gần như vô hạn</td><td>Team không muốn; truy vấn chéo shard khó</td></tr>
 </tbody></table></div>
-<h4 class="ah">4. Đánh đổi và quyết định</h4>
-<p>Chọn B + C + D, chưa cần E.</p>
+<p><strong>Chọn B + C + D, chưa cần E.</strong></p>
 <ul>
-<li><strong>D trước:</strong> bỏ index <code>(created_at)</code> trên primary (báo cáo dùng replica có index riêng, hoặc dùng partition). Rà kiểu cột: <code>DECIMAL</code> thay vì chuỗi, <code>TINYINT</code> cho trạng thái. Giảm 20–30% là hợp lý, nhưng phải đo.</li>
-<li><strong>B:</strong> partition theo tháng trên <code>created_at</code>. Khoá chính đổi thành <code>(id, created_at)</code>. Màn hình lịch sử luôn có điều kiện thời gian nên optimizer chỉ chạm 1–2 partition (partition pruning).</li>
-<li><strong>C:</strong> giữ 13 tháng trên primary. Mỗi tháng, xuất partition cũ nhất sang kho lưu trữ, kiểm tra số row và tổng tiền, rồi <code>DROP PARTITION</code>. Primary còn khoảng 13 × 420 GB ≈ 5,5 TB nếu không tăng. Vẫn lớn; cần disk khoảng 8 TB, hoặc làm D tốt hơn.</li>
-<li><strong>Working set:</strong> 420 GB không thể vừa 48 GB. Nhưng mỗi ví chỉ cần vài page cho 20 giao dịch gần nhất, nhờ index <code>(wallet_id, created_at)</code>. Mỗi lần xem tốn khoảng 1–2 lần đọc page từ disk cho index và tối đa 20 lần cho PRIMARY nếu row rải rác. Ở 450 lượt xem mỗi giây, cỡ vài nghìn lần đọc ngẫu nhiên mỗi giây: SSD chịu được. Có thể giảm số lần tra PRIMARY bằng index phủ, hoặc bằng khoá chính <code>(wallet_id, created_at, id)</code> để row của một ví nằm cạnh nhau. Lựa chọn này phải cân với chi phí ghi (khoá chính không tăng dần thì tách page nhiều hơn).</li>
+<li>D trước: bỏ index <code>(created_at)</code> trên primary (báo cáo chạy trên replica có index riêng). Rà kiểu cột. Giảm 20–30% là hợp lý, nhưng phải đo.</li>
+<li>B: partition theo tháng; khoá chính <code>(id, created_at)</code>. Câu lịch sử luôn có điều kiện thời gian nên chỉ chạm 1–2 partition.</li>
+<li>C: giữ 13 tháng; mỗi tháng xuất partition cũ nhất, kiểm tra số row và tổng tiền, rồi <code>DROP PARTITION</code>. Primary còn khoảng 13 × 420 GB ≈ 5,5 TB nếu không tăng: vẫn cần disk khoảng 8 TB, hoặc làm D tốt hơn.</li>
 </ul>
-<p>Khi nào đổi ý: nếu giao dịch tăng hơn 3 lần mỗi năm, hoặc số ghi đỉnh vượt khoảng 60% mức primary chịu được (đo bằng E36), thì lên kế hoạch E.</p>
-<h4 class="ah">5. Triển khai</h4>
+<p><strong>Khi nào đổi ý:</strong> giao dịch tăng hơn 3 lần mỗi năm, hoặc ghi đỉnh vượt khoảng 60% mức primary chịu được (đo bằng E36): lên kế hoạch shard.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> Working set 420 GB, buffer pool 48 GB. Màn hình lịch sử có giữ được p99 dưới 100 ms không?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p><strong>Có thể, vì mỗi lần xem chỉ cần vài page.</strong> "Working set" của cả bảng không vừa RAM, nhưng mỗi ví chỉ cần các page chứa 20 giao dịch gần nhất của nó.</p>
+<ul>
+<li>Nhờ index <code>(wallet_id, created_at)</code>: khoảng 1–2 lần đọc page từ disk cho index, và tối đa 20 lần cho PRIMARY nếu row nằm rải rác (row của một ví được chèn xen với hàng triệu ví khác theo thời gian).</li>
+<li>450 lượt xem mỗi giây × khoảng 20 lần đọc ngẫu nhiên là cỡ vài nghìn IOPS: SSD chịu được, mỗi lần đọc dưới 1 ms.</li>
+<li>Giảm số lần tra PRIMARY: index phủ cho các cột màn hình cần, hoặc khoá chính <code>(wallet_id, created_at, id)</code> để row của một ví nằm cạnh nhau. Cái giá của cách thứ hai: khoá chính không tăng dần, nên mỗi lần chèn tách page nhiều hơn, ghi đắt hơn. Đây là đánh đổi đọc với ghi, phải đo bằng tải thật.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> Đổi bảng đang chạy sang partition thế nào mà không gián đoạn?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li><code>ALTER TABLE … PARTITION BY</code> trên bảng có sẵn dựng lại cả bảng; với vài TB là hàng giờ và không online. Không làm thế.</li>
+<li>Cách online: tạo bảng mới có partition, chép dữ liệu bằng công cụ như gh-ost hoặc ghi kép rồi backfill, kiểm tra, rồi đổi tên trong vài giây. Đây là chủ đề Month 4 (migration online).</li>
+<li>Dễ hơn: vì chỉ cần giữ 13 tháng trên primary, bảng mới chỉ cần nhận dữ liệu mới và backfill 13 tháng; phần cũ hơn xuất thẳng từ bảng cũ sang kho lưu trữ, rồi bỏ bảng cũ.</li>
+<li>Bảng có partition trong MySQL không hỗ trợ foreign key: nếu <code>ledger</code> đang có, phải bỏ và kiểm tra ở tầng ứng dụng hoặc bằng đối soát.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai và kiểm chứng thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
 <pre><code>CREATE TABLE ledger (
   id          BIGINT NOT NULL AUTO_INCREMENT,
   created_at  DATETIME NOT NULL,
@@ -578,158 +624,213 @@ PARTITION BY RANGE COLUMNS (created_at) (
   PARTITION pmax     VALUES LESS THAN (MAXVALUE)
 );
 -- job hằng tháng: REORGANIZE PARTITION pmax thành tháng mới + pmax; xuất rồi DROP partition cũ nhất</code></pre>
-<p>Lưu ý: bảng có partition trong MySQL không hỗ trợ foreign key. Nếu <code>ledger</code> đang có foreign key, phải bỏ và kiểm tra ràng buộc ở tầng ứng dụng hoặc bằng đối soát.</p>
-<h4 class="ah">6. Rủi ro và cách kiểm chứng</h4>
 <ul>
 <li>Đo kích thước thật sau một tuần (<code>information_schema</code>), thay giả định 300 byte và hệ số 2.</li>
-<li><code>EXPLAIN</code> câu lịch sử: cột <code>partitions</code> chỉ liệt kê 1–2 partition.</li>
-<li>Theo dõi <code>Innodb_buffer_pool_reads</code> và p99 của màn hình lịch sử ở giờ đỉnh.</li>
-<li>Diễn tập job lưu trữ trên bản sao: xuất, đối soát số row và tổng <code>delta</code>, khôi phục thử một tháng.</li>
-<li>Chuyển sang bảng có partition phải làm online (bảng mới, ghi kép hoặc công cụ như gh-ost, rồi đổi tên). Đây là chủ đề Month 4 (migration online).</li>
-</ul>
-<h4 class="ah">7. Lỗi hay gặp với bài này</h4>
-<ul>
-<li>Thấy QPS nhỏ rồi kết luận "một MySQL là đủ", quên dung lượng.</li>
-<li>Tính dung lượng chỉ từ kích thước row, quên index.</li>
-<li>Muốn cả 5 năm nằm trong buffer pool.</li>
-<li>Xoá dữ liệu cũ bằng <code>DELETE … WHERE created_at &lt; …</code> trên bảng vài TB.</li>
-<li>Nhảy ngay vào sharding khi partition và lưu trữ đã đủ.</li>
+<li><code>EXPLAIN</code> câu lịch sử: cột <code>partitions</code> chỉ có 1–2 partition.</li>
+<li>Theo dõi <code>Innodb_buffer_pool_reads</code> và p99 màn hình lịch sử ở giờ đỉnh.</li>
+<li>Diễn tập job lưu trữ trên bản sao: xuất, đối soát số row và tổng <code>delta</code>, khôi phục thử một tháng. Một bản lưu trữ chưa từng khôi phục thử là chưa có bản lưu trữ.</li>
+<li>Cảnh báo khi job tạo partition tháng mới thất bại; nếu quên, mọi row mới rơi vào <code>pmax</code> và việc dọn tháng sau sẽ khó.</li>
 </ul>
 </details>
 </div>
 
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Làm rõ</td><td>Hỏi số người dùng</td><td>Hỏi "giữ" khác "truy vấn được" thế nào</td></tr>
+<tr><td>Ước lượng</td><td>Chỉ tính QPS</td><td>QPS, dung lượng kể cả index, working set; chỉ ra chỗ nghẽn thật</td></tr>
+<tr><td>Lưu trữ</td><td>Mua disk hoặc shard ngay</td><td>Partition, bảng nóng có trần, kho lưu trữ; shard khi có ngưỡng</td></tr>
+<tr><td>Đọc</td><td>"Tăng RAM"</td><td>Tính số page mỗi lần xem; đánh đổi khoá chính theo ví</td></tr>
+<tr><td>Vận hành</td><td><code>ALTER</code> trực tiếp</td><td>Chuyển online; diễn tập khôi phục lưu trữ</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> thấy QPS nhỏ rồi kết luận "một MySQL là đủ"; tính dung lượng quên index; muốn cả 5 năm nằm trong buffer pool; xoá dữ liệu cũ bằng <code>DELETE</code> trên bảng vài TB.</p>
+</details>
+</div>
+
+<!-- C14 -->
 <div class="case" id="c14">
 <h3>C14. Black Friday: tải gấp 8 lần trong 2 giờ</h3>
 <p class="src">Dựa trên: phần 02 của trang này (Little, hàng đợi); <a href="../idempotency-retries/index.html">Idempotency và retry</a> (C6).</p>
-<dl>
-<dt>Bối cảnh</dt><dd><p>Service checkout hiện ở giờ cao điểm bình thường:</p>
-<ul>
-<li>600 request mỗi giây, p50 40 ms, p99 120 ms.</li>
-<li>10 pod, mỗi pod 2 vCPU; CPU trung bình 40%.</li>
-<li>Mỗi request giữ connection MySQL khoảng 12 ms; pool 25 mỗi pod.</li>
-<li>MySQL primary: CPU 35%, <code>Threads_running</code> trung bình khoảng 8, <code>max_connections</code> 600.</li>
-<li>Gọi service thanh toán bên ngoài: p99 300 ms, giới hạn hợp đồng 3.000 request mỗi giây.</li>
-</ul>
-<p>Marketing dự báo Black Friday: tải gấp 8 lần trong 2 giờ, tức khoảng 4.800 request mỗi giây. HPA cho phép tới 80 pod.</p></dd>
-<dt>Yêu cầu</dt><dd>p99 checkout dưới 500 ms trong suốt 2 giờ. Không mất đơn.</dd>
-<dt>Ràng buộc</dt><dd>Còn 3 tuần. Có thể tăng cấu hình MySQL một bậc (gấp đôi CPU) với một lần chuyển đổi ngắn.</dd>
-<dt>Nhiệm vụ</dt><dd>Tìm chỗ sẽ vỡ đầu tiên, theo thứ tự. Đề xuất kế hoạch, và nói cần đo gì để biết kế hoạch đúng.</dd>
-</dl>
-<details class="hint"><summary>Gợi ý</summary><ul>
-<li>Nhân mọi con số "đang dùng" lên 8, rồi so với từng giới hạn.</li>
-<li>Ở 80 pod, pool 25 thì tổng connection là bao nhiêu?</li>
-<li>Có giới hạn nào không tăng được bằng cách thêm máy?</li>
-</ul></details>
-<details class="answer"><summary>Xem lời giải</summary>
-<h4 class="ah">1. Làm rõ đề bài</h4>
-<ul>
-<li>8 lần là tổng traffic hay chỉ checkout? Giả định chỉ checkout; các trang xem sản phẩm tăng nhiều hơn nữa nhưng có cache.</li>
-<li>Mọi request checkout đều gọi thanh toán? Giả định chỉ bước cuối, khoảng 1/3 số request.</li>
-<li>Tải có tăng dần hay dồn vào giây đầu (mở bán lúc 0:00)? Giả định có đỉnh nhọn ở phút đầu, gấp 1,5 lần mức 2 giờ.</li>
-</ul>
-<h4 class="ah">2. Ước lượng</h4>
+<blockquote class="q">"Marketing dự báo Black Friday tải checkout gấp 8 lần trong 2 giờ. Còn 3 tuần. HPA đã cho phép tới 80 pod. Chúng tôi có ổn không?"</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>Tải và độ trễ hiện tại ở giờ cao điểm?</td><td>600 request mỗi giây, p50 40 ms, p99 120 ms. Mục tiêu Black Friday: p99 dưới 500 ms, không mất đơn.</td><td>Mốc để nhân lên.</td></tr>
+<tr><td>Service chạy trên gì?</td><td>10 pod, mỗi pod 2 vCPU; CPU trung bình 40%.</td><td>Trần CPU của app.</td></tr>
+<tr><td>Kết nối database?</td><td>Mỗi request giữ connection khoảng 12 ms; pool 25 mỗi pod.</td><td>Little's law cho số connection bận.</td></tr>
+<tr><td>MySQL đang thế nào?</td><td>Primary CPU 35%, <code>Threads_running</code> khoảng 8, <code>max_connections</code> 600. Có thể tăng cấu hình một bậc (gấp đôi CPU) với một lần chuyển đổi ngắn.</td><td>Trần không tăng được bằng cách thêm pod.</td></tr>
+<tr><td>Phụ thuộc bên ngoài?</td><td>Service thanh toán: p99 300 ms, giới hạn hợp đồng 3.000 request mỗi giây. Chỉ bước cuối, khoảng 1/3 request, gọi tới nó.</td><td>Giới hạn của bên thứ ba.</td></tr>
+<tr><td>Hình dạng của tải?</td><td>Mở bán 0:00; đỉnh nhọn ở phút đầu khoảng gấp 1,5 mức 2 giờ.</td><td>Thiết kế cho đỉnh nhọn, không cho trung bình.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> liệt kê mọi tài nguyên có giới hạn (CPU pod, connection, CPU database, bên thứ ba) và hỏi số "đang dùng" của từng cái. HPA chỉ tăng một trong số đó.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Chỗ nào vỡ đầu tiên? Theo thứ tự.</p>
+<details class="answer"><summary>Đáp án</summary>
 <div class="tablewrap"><table>
 <thead><tr><th>Tài nguyên</th><th>Hiện tại</th><th>× 8</th><th>Giới hạn</th><th>Kết luận</th></tr></thead>
 <tbody>
-<tr><td>CPU pod</td><td>10 pod × 40%</td><td>tương đương 32 pod ở 100%</td><td>80 pod</td><td>Cần khoảng 50–60 pod để ở dưới 60%: được</td></tr>
-<tr><td>Connection bận (Little)</td><td>600 × 0,012 ≈ 7</td><td>4.800 × 0,012 ≈ 58</td><td>—</td><td>Nhỏ; khớp <code>Threads_running</code> 8 hiện tại</td></tr>
-<tr><td>Tổng pool</td><td>10 × 25 = 250</td><td>80 × 25 = 2.000</td><td><code>max_connections</code> 600</td><td><strong>Vỡ</strong> khi vượt 24 pod</td></tr>
-<tr><td>MySQL CPU</td><td>35%</td><td>gần 280% nếu tuyến tính</td><td>100%</td><td><strong>Vỡ</strong>; nâng cấu hình gấp đôi vẫn khoảng 140%</td></tr>
+<tr><td>CPU pod</td><td>10 pod × 40%</td><td>tương đương 32 pod ở 100%</td><td>80 pod</td><td>Cần khoảng 50–60 pod để dưới 60%: được</td></tr>
+<tr><td>Connection bận (Little)</td><td>600 × 0,012 ≈ 7</td><td>4.800 × 0,012 ≈ 58</td><td>–</td><td>Nhỏ; khớp <code>Threads_running</code> 8</td></tr>
+<tr><td>Tổng pool</td><td>10 × 25 = 250</td><td>80 × 25 = 2.000</td><td><code>max_connections</code> 600</td><td>Vỡ khi vượt 24 pod</td></tr>
+<tr><td>CPU MySQL</td><td>35%</td><td>gần 280% nếu tuyến tính</td><td>100%</td><td>Vỡ; gấp đôi cấu hình vẫn khoảng 140%</td></tr>
 <tr><td>Thanh toán ngoài</td><td>khoảng 200 req/s</td><td>khoảng 1.600, đỉnh nhọn 2.400</td><td>3.000</td><td>Được, nhưng sát (80%)</td></tr>
 </tbody></table></div>
-<p>Thứ tự vỡ: tổng connection (khi HPA vượt 24 pod), rồi CPU MySQL. Pod và thanh toán chịu được.</p>
-<h4 class="ah">3. Các phương án</h4>
+<p><strong>Thứ tự vỡ:</strong> tổng connection (ngay khi HPA vượt 24 pod, nghĩa là chính HPA gây ra sự cố), rồi CPU MySQL. Pod và thanh toán chịu được.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> Vậy tăng <code>max_connections</code> lên 2.000 là xong phần connection?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p><strong>Không.</strong> Little's law nói chỉ khoảng 58 connection bận cùng lúc. 2.000 connection mở mà gần hết nhàn rỗi tốn RAM ở server, và khi có sự cố (một câu chậm), cả 2.000 cùng bận, làm tranh chấp bên trong MySQL tệ hơn. Tăng giới hạn chỉ dời chỗ vỡ.</p>
+<p><strong>Làm ngược lại:</strong> pool nhỏ theo Little. 58 bận × 2–3 lần dư ≈ 150 tổng, tức khoảng 2–3 mỗi pod ở 80 pod. Chọn 3 mỗi pod, tổng 240, dưới 600. Thêm metric thời gian chờ pool: pool nhỏ ở một pod nóng thì request chờ, và đó là tín hiệu cần biết.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> CPU MySQL sẽ khoảng 280%. Gấp đôi cấu hình chỉ còn 140%. Bạn làm gì?</p>
+<details class="answer"><summary>Đáp án</summary>
 <div class="tablewrap"><table>
 <thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
 <tbody>
-<tr><td>A. Chỉ tăng <code>max_connections</code></td><td>Một dòng cấu hình</td><td>Connection nhàn rỗi tốn RAM ở server; không sửa CPU MySQL</td></tr>
-<tr><td>B. Pool nhỏ lại theo Little</td><td>58 connection bận × 2–3 lần dư ≈ 150 tổng, khoảng 2 mỗi pod ở 80 pod</td><td>Pool quá nhỏ ở một pod nóng thì request chờ; cần metric chờ pool</td></tr>
-<tr><td>C. Giảm việc mỗi checkout trên MySQL</td><td>Tác động thẳng lên CPU</td><td>Cần profiling: câu nào tốn nhất</td></tr>
-<tr><td>D. Nâng cấu hình MySQL gấp đôi</td><td>Chắc chắn có thêm CPU</td><td>Một mình không đủ (khoảng 140%)</td></tr>
-<tr><td>E. Đưa đọc sang replica (giỏ hàng, giá, tồn kho để hiển thị)</td><td>Giảm tải primary</td><td>Đọc có độ trễ replica; phần cần đúng (trừ tồn kho) vẫn ở primary</td></tr>
-<tr><td>F. Hàng chờ ảo ở cửa vào (waiting room)</td><td>Giới hạn tải vào bằng mức đã kiểm chứng</td><td>Khách phải chờ; ảnh hưởng doanh thu nếu chờ lâu</td></tr>
+<tr><td>C. Giảm việc mỗi checkout trên MySQL</td><td>Tác động thẳng lên CPU</td><td>Cần profiling</td></tr>
+<tr><td>D. Nâng cấu hình gấp đôi</td><td>Chắc chắn thêm CPU</td><td>Một mình không đủ</td></tr>
+<tr><td>E. Đọc chỉ để hiển thị sang replica</td><td>Giảm tải primary</td><td>Đọc có độ trễ; phần cần đúng vẫn ở primary</td></tr>
+<tr><td>F. Hàng chờ ảo ở cửa vào</td><td>Giới hạn tải vào ở mức đã kiểm chứng</td><td>Khách phải chờ; mất doanh thu nếu chờ lâu</td></tr>
 </tbody></table></div>
-<h4 class="ah">4. Đánh đổi và quyết định</h4>
-<ol class="list">
-<li><strong>B ngay:</strong> pool 3 mỗi pod, giới hạn HPA 80 pod, tổng 240 connection. Thêm metric thời gian chờ pool.</li>
-<li><strong>C:</strong> lấy top câu lệnh theo tổng thời gian từ <code>performance_schema.events_statements_summary_by_digest</code>. Một câu đọc giỏ hàng 3 lần trong một request, hay một <code>SELECT</code> thiếu index, thường giảm được 30–50% CPU. Đây là phỏng đoán, phải đo.</li>
-<li><strong>E</strong> cho phần đọc chỉ để hiển thị, kèm cách đọc lại từ primary sau khi vừa ghi (xem trang replication).</li>
+<ul>
+<li><strong>C trước:</strong> top câu lệnh theo tổng thời gian từ <code>events_statements_summary_by_digest</code>. Một câu đọc giỏ hàng 3 lần trong một request, hay một <code>SELECT</code> thiếu index, thường giảm được 30–50% CPU. Đây là phỏng đoán, phải đo.</li>
+<li><strong>E</strong> cho trang chỉ đọc, kèm read-your-writes sau khi vừa ghi (trang replication).</li>
 <li><strong>D</strong> nếu sau C và E, phép tính vẫn cho trên 60% CPU ở đỉnh.</li>
-<li><strong>F</strong> làm lưới an toàn: chỉ bật khi p99 vượt ngưỡng, giới hạn ở mức đã kiểm chứng bằng test tải.</li>
-</ol>
-<p>A bị loại: tăng giới hạn chỉ dời chỗ vỡ sang bộ nhớ và tranh chấp bên trong MySQL.</p>
-<h4 class="ah">5. Triển khai</h4>
-<ul>
-<li>Tuần 1: B, profiling cho C, sửa 3 câu tốn nhất.</li>
-<li>Tuần 2: E cho các trang chỉ đọc; test tải 1 ở 5.000 request mỗi giây với dữ liệu giống thật, gửi tải theo tốc độ cố định (open-loop).</li>
-<li>Tuần 3: D nếu cần; test tải 2 ở 7.200 request mỗi giây (đỉnh nhọn); diễn tập bật F; đóng băng deploy.</li>
-<li>Báo trước cho nhà cung cấp thanh toán về mức 2.400 request mỗi giây; hỏi họ có tạm nâng giới hạn được không.</li>
+<li><strong>F</strong> làm lưới an toàn: chỉ bật khi p99 vượt ngưỡng, giới hạn ở mức đã kiểm chứng.</li>
 </ul>
-<h4 class="ah">6. Rủi ro và cách kiểm chứng</h4>
+<p>Điểm senior: "CPU MySQL tăng tuyến tính" là giả định có thể sai cả hai chiều (tranh chấp khoá làm tệ hơn, cache làm đỡ hơn). Chỉ test tải mới trả lời được, nên kế hoạch phải có test tải sớm.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> Test tải thế nào để tin được kết quả?</p>
+<details class="answer"><summary>Đáp án</summary>
 <ul>
-<li>Ước lượng "CPU MySQL tăng tuyến tính" có thể sai cả hai chiều: tranh chấp khoá làm tệ hơn, cache tốt hơn làm đỡ hơn. Chỉ test tải mới trả lời được.</li>
-<li>Dashboard cho ngày diễn ra: request rate, p99, thời gian chờ pool, <code>Threads_running</code>, CPU MySQL, tỉ lệ lỗi thanh toán, lag của replica.</li>
-<li>Kế hoạch lùi: F với ngưỡng đã thử; tắt các tính năng không thiết yếu (gợi ý sản phẩm) bằng feature flag.</li>
-</ul>
-<h4 class="ah">7. Lỗi hay gặp với bài này</h4>
-<ul>
-<li>Chỉ nhìn CPU pod và tin rằng HPA giải quyết mọi thứ.</li>
-<li>Quên rằng thêm pod làm tăng tổng connection.</li>
-<li>Test tải kiểu "nhiều nhất có thể" (closed-loop), không thấy đường cong độ trễ thật.</li>
-<li>Không tính giới hạn của bên thứ ba.</li>
+<li><strong>Open-loop:</strong> gửi tải theo tốc độ cố định (ví dụ 5.000 request mỗi giây), không phụ thuộc phản hồi. Closed-loop ("N user ảo, gửi request tiếp khi nhận trả lời") tự giảm tải khi hệ thống chậm, nên che mất đường cong độ trễ thật.</li>
+<li>Dữ liệu giống thật: kích thước bảng, phân bố sản phẩm, tỉ lệ giỏ hàng; không phải database rỗng.</li>
+<li>Đo đỉnh nhọn: 7.200 request mỗi giây trong vài phút, không chỉ mức 2 giờ.</li>
+<li>Giả lập bên thứ ba ở đúng độ trễ (p99 300 ms) và giới hạn (3.000).</li>
+<li>Đạt khi: p99 dưới 500 ms, thời gian chờ pool thấp, CPU MySQL dưới 60%, 0 lỗi mất đơn.</li>
 </ul>
 </details>
 </div>
 
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Kế hoạch 3 tuần và ngày diễn ra?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li><strong>Tuần 1:</strong> pool 3 mỗi pod, HPA tối đa 80; profiling, sửa 3 câu tốn nhất.</li>
+<li><strong>Tuần 2:</strong> đọc hiển thị sang replica; test tải 1 ở 5.000 request mỗi giây.</li>
+<li><strong>Tuần 3:</strong> nâng cấu hình MySQL nếu cần; test tải 2 ở 7.200 request mỗi giây; diễn tập bật hàng chờ ảo; đóng băng deploy.</li>
+<li>Báo trước nhà cung cấp thanh toán về 2.400 request mỗi giây; hỏi tạm nâng giới hạn.</li>
+<li><strong>Ngày diễn ra:</strong> dashboard request rate, p99, thời gian chờ pool, <code>Threads_running</code>, CPU MySQL, lỗi thanh toán, độ trễ replica. Kế hoạch lùi: hàng chờ ảo với ngưỡng đã thử; tắt tính năng không thiết yếu (gợi ý sản phẩm) bằng feature flag.</li>
+</ul>
+</details>
+</div>
+
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Phân tích</td><td>"HPA lo được"</td><td>Bảng tài nguyên × 8 so với từng giới hạn; thứ tự vỡ</td></tr>
+<tr><td>Connection</td><td>Tăng <code>max_connections</code></td><td>Little's law, pool nhỏ, thấy HPA gây vỡ</td></tr>
+<tr><td>Database</td><td>Nâng cấu hình</td><td>Profiling, replica, nâng cấu hình khi phép tính đòi; nghi ngờ giả định tuyến tính</td></tr>
+<tr><td>Test</td><td>"Chạy load test"</td><td>Open-loop, dữ liệu thật, đỉnh nhọn, tiêu chí đạt</td></tr>
+<tr><td>Ngày diễn ra</td><td>Không nhắc</td><td>Dashboard, hàng chờ ảo, feature flag, đóng băng deploy</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> chỉ nhìn CPU pod; quên rằng thêm pod làm tăng tổng connection; test closed-loop; không tính giới hạn của bên thứ ba.</p>
+</details>
+</div>
+
+<!-- C15 -->
 <div class="case" id="c15">
-<h3>C15. Đếm lượt xem: tổng tải nhỏ, nhưng một bài viral làm sập</h3>
+<h3>C15. Đếm lượt xem: tổng tải nhỏ, một bài viral làm sập</h3>
 <p class="src">Dựa trên: phần 03 của trang này; <a href="../concurrency-control-strategies/index.html">Kiểm soát ghi đồng thời</a> (row nóng); <a href="../transactional-outbox/index.html">Transactional outbox</a>.</p>
-<dl>
-<dt>Bối cảnh</dt><dd><p>Trang tin tức có 1,5 triệu lượt xem bài mỗi ngày. Mỗi lượt xem chạy <code>UPDATE articles SET views = views + 1 WHERE id = ?</code>. Bình thường khoảng 17 lượt mỗi giây, không ai để ý. Một bài viral nhận 3.000 lượt xem mỗi giây trong 40 phút. Kết quả: request vào bài đó timeout; lỗi lan sang các trang khác; <code>Innodb_row_lock_waits</code> tăng vọt.</p></dd>
-<dt>Yêu cầu</dt><dd>Hiển thị lượt xem, được phép trễ tới 1 phút và sai vài phần trăm. Không làm chậm trang khi có bài viral. Cuối ngày cần số chính xác cho báo cáo doanh thu quảng cáo.</dd>
-<dt>Ràng buộc</dt><dd>MySQL 8.4 và Redis có sẵn. Không thêm hệ thống mới.</dd>
-<dt>Nhiệm vụ</dt><dd>Giải thích bằng con số vì sao "tổng tải nhỏ" vẫn sập. Thiết kế lại cách đếm.</dd>
-</dl>
-<details class="hint"><summary>Gợi ý</summary><ul>
-<li>Một row chịu được bao nhiêu <code>UPDATE</code> mỗi giây, nếu mỗi lần giữ khoá khoảng 1 ms?</li>
-<li>"Trễ 1 phút" và "cuối ngày phải chính xác" là hai yêu cầu khác nhau; có thể dùng hai cơ chế.</li>
-<li>Redis <code>INCR</code> có idempotent không?</li>
-</ul></details>
-<details class="answer"><summary>Xem lời giải</summary>
-<h4 class="ah">1. Làm rõ đề bài</h4>
-<p>Tải tính theo tổng (17 lượt mỗi giây) che mất tải trên một key. Mọi lượt xem bài viral đều ghi vào cùng một row, và InnoDB chỉ cho một transaction giữ khoá X trên row đó tại một thời điểm.</p>
+<blockquote class="q">"Trang tin của chúng tôi chỉ có khoảng 17 lượt xem bài mỗi giây. Vậy mà hôm qua một bài viral làm sập cả site. Giải thích, và thiết kế lại cách đếm lượt xem."</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>Mỗi lượt xem làm gì với database?</td><td><code>UPDATE articles SET views = views + 1 WHERE id = ?</code>.</td><td>Mọi lượt xem một bài ghi vào một row.</td></tr>
+<tr><td>Bài viral nhận bao nhiêu?</td><td>3.000 lượt xem mỗi giây trong 40 phút.</td><td>Tải trên một key, không phải tổng tải.</td></tr>
+<tr><td>Triệu chứng?</td><td>Request vào bài đó timeout; lỗi lan sang trang khác; <code>Innodb_row_lock_waits</code> tăng vọt.</td><td>Lan sang trang khác nghĩa là tài nguyên chung bị giữ.</td></tr>
+<tr><td>Số lượt xem dùng để làm gì?</td><td>Hiển thị (được trễ tới 1 phút, sai vài phần trăm) và báo cáo doanh thu quảng cáo cuối ngày (phải chính xác).</td><td>Hai yêu cầu khác nhau.</td></tr>
+<tr><td>Có cần đếm người duy nhất? Chống bot?</td><td>Không; chỉ đếm lượt. Chống bot là bài khác.</td><td>Giữ phạm vi.</td></tr>
+<tr><td>Hạ tầng?</td><td>MySQL 8.4 và Redis; không thêm hệ thống mới. Có access log của web server.</td><td>Nguồn dữ liệu sẵn cho báo cáo.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> hỏi số lượt xem dùng cho ai. "Hiển thị" và "tính tiền" có yêu cầu nhất quán khác nhau, và thường cần hai cơ chế khác nhau.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Giải thích bằng con số vì sao 17 lượt mỗi giây vẫn sập.</p>
+<details class="answer"><summary>Đáp án</summary>
 <ul>
-<li>"Chính xác cho báo cáo" nghĩa là không mất và không đếm trùng lượt xem đã ghi nhận? Giả định có; còn chống bot là bài toán khác.</li>
-<li>Có cần đếm người xem duy nhất không? Giả định không, chỉ đếm lượt.</li>
+<li>Tổng tải che mất tải trên một key. Mọi lượt xem bài viral ghi vào cùng một row; InnoDB chỉ cho một transaction giữ khoá X trên row đó tại một thời điểm.</li>
+<li>Một <code>UPDATE</code> autocommit giữ khoá khoảng bằng thời gian commit, giả sử 1 ms: trần khoảng 1.000 lần mỗi giây trên một row.</li>
+<li>3.000 lần mỗi giây gấp 3 lần trần. Hàng chờ khoá tăng thêm khoảng 2.000 request mỗi giây; sau 30 giây đã có hàng chục nghìn request chờ, vượt <code>innodb_lock_wait_timeout</code>, giữ hết connection trong pool.</li>
+<li>Các trang khác dùng chung pool nên chết theo. Đây là lý do một bài làm sập cả site.</li>
 </ul>
-<h4 class="ah">2. Ước lượng</h4>
-<ul>
-<li>Một <code>UPDATE</code> autocommit giữ khoá khoảng bằng thời gian commit, giả sử 1 ms (xem câu hỏi 21 trên trang kiểm soát ghi đồng thời). Trần khoảng 1.000 lần mỗi giây trên một row.</li>
-<li>3.000 lần mỗi giây gấp 3 lần trần. Hàng chờ khoá tăng thêm khoảng 2.000 request mỗi giây; sau 30 giây đã có hàng chục nghìn request chờ, vượt <code>innodb_lock_wait_timeout</code>, và giữ hết connection trong pool. Các trang khác dùng chung pool nên cũng chết theo.</li>
-<li>Gom vào Redis: <code>INCR</code> cỡ dưới 1 ms và Redis xử lý cỡ 100.000 lệnh đơn giản mỗi giây trên một luồng (ước lượng). 3.000 lần mỗi giây là 3%.</li>
-<li>Đẩy về MySQL mỗi 30 giây: một câu cập nhật cho mỗi bài có lượt xem mới, tức vài trăm câu mỗi 30 giây.</li>
-</ul>
-<h4 class="ah">3. Các phương án</h4>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> Tăng cấu hình MySQL có giúp không? Các phương án khác?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p>Không. Trần của một row đến từ việc các commit trên nó phải đi lần lượt, không từ CPU.</p>
 <div class="tablewrap"><table>
 <thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
 <tbody>
-<tr><td>A. Giữ nguyên, tăng cấu hình MySQL</td><td>Không đổi code</td><td>Trần của một row không tăng theo CPU</td></tr>
-<tr><td>B. Chia bộ đếm thành 16 row, chọn ngẫu nhiên</td><td>Trần gấp 16 lần; vẫn chính xác</td><td>Đọc phải cộng 16 row; bài viral lớn hơn nữa thì lại thiếu</td></tr>
-<tr><td>C. Redis <code>INCR</code>, flush định kỳ về MySQL</td><td>Không còn row nóng; trễ tối đa 30 giây</td><td>Redis mất dữ liệu thì mất lượt chưa flush; flush phải không cộng trùng</td></tr>
-<tr><td>D. Ghi log mỗi lượt xem (append-only), tổng hợp theo lô</td><td>Chính xác, kiểm toán được</td><td>Nhiều row; tổng hợp tốn công</td></tr>
-<tr><td>E. Đếm ở CDN, lấy log về</td><td>Không chạm hệ thống</td><td>Phụ thuộc CDN; trễ vài phút</td></tr>
+<tr><td>A. Tăng cấu hình MySQL</td><td>Không đổi code</td><td>Trần của một row không tăng theo CPU</td></tr>
+<tr><td>B. Chia bộ đếm thành 16 row</td><td>Trần gấp 16 lần; vẫn chính xác</td><td>Đọc cộng 16 row; bài lớn hơn nữa lại thiếu</td></tr>
+<tr><td>C. Redis <code>INCR</code>, flush định kỳ về MySQL</td><td>Không còn row nóng; trễ tối đa 30 giây</td><td>Redis mất dữ liệu thì mất lượt chưa flush; flush không được cộng trùng</td></tr>
+<tr><td>D. Ghi log mỗi lượt xem, tổng hợp theo lô</td><td>Chính xác, kiểm toán được</td><td>Nhiều row; tổng hợp tốn công</td></tr>
+<tr><td>E. Đếm ở CDN</td><td>Không chạm hệ thống</td><td>Phụ thuộc CDN; trễ vài phút</td></tr>
 </tbody></table></div>
-<h4 class="ah">4. Đánh đổi và quyết định</h4>
-<p>Hai yêu cầu, hai cơ chế:</p>
+<p><strong>Hai yêu cầu, hai cơ chế:</strong> hiển thị dùng C (Redis xử lý cỡ 100.000 lệnh đơn giản mỗi giây trên một luồng, 3.000 là 3%; ước lượng). Báo cáo dùng D theo lô từ access log có sẵn: không thêm ghi trên đường xử lý request.</p>
+<p><strong>Khi nào đổi ý:</strong> không có access log đáng tin (app di động gửi sự kiện riêng) thì ghi sự kiện vào hàng đợi và tổng hợp theo lô; không ghi MySQL từng lượt.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> Flush từ Redis về MySQL thế nào để không mất lượt xem đến giữa chừng, và không cộng trùng khi job chết?</p>
+<details class="answer"><summary>Đáp án</summary>
 <ul>
-<li><strong>Hiển thị (trễ 1 phút, sai vài %):</strong> C. Đủ nhanh, đủ rẻ.</li>
-<li><strong>Báo cáo (chính xác cuối ngày):</strong> D, theo lô. Lượt xem đã có trong access log của web server; một job cuối ngày tổng hợp log thành bảng <code>daily_views</code>. Không cần thêm ghi trên đường xử lý request.</li>
+<li><strong>Không mất:</strong> <code>GET</code> rồi <code>SET 0</code> mất các lượt đến giữa hai lệnh. Đổi tên key (<code>RENAMENX views:pending views:flush:&lt;ts&gt;</code>) để lấy trọn một mẻ không còn bị ghi thêm; lượt mới đi vào key <code>views:pending</code> mới.</li>
+<li><strong>Không cộng trùng:</strong> job chết sau khi ghi MySQL và trước khi <code>DEL</code> thì mẻ cũ vẫn nằm trong Redis. Ghi tên mẻ vào bảng <code>view_batches</code> (khoá chính) trong cùng transaction với câu cộng; gặp lại tên đã có thì chỉ xoá key. Đúng mẫu "dấu đã xử lý" ở trang idempotency.</li>
+<li><strong>Mẻ sót:</strong> mỗi lần chạy, xử lý trước các key <code>views:flush:*</code> còn sót (tìm bằng <code>SCAN</code>, không dùng <code>KEYS</code>).</li>
 </ul>
-<p>Khi nào đổi ý: nếu không có access log đáng tin (ví dụ app di động gửi sự kiện riêng), ghi sự kiện vào hàng đợi và tổng hợp theo lô. Không ghi vào MySQL từng lượt một.</p>
-<h4 class="ah">5. Triển khai</h4>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> Ngoài bộ đếm, bạn sửa gì để lần sau một điểm nóng không làm chết cả site?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Tách bảng đếm (<code>article_views</code>) khỏi <code>articles</code>, để cập nhật đếm không tranh khoá với việc sửa bài.</li>
+<li>Không để một loại việc giữ hết pool chung: pool riêng hoặc giới hạn số connection cho các thao tác không thiết yếu (bulkhead).</li>
+<li><code>innodb_lock_wait_timeout</code> ngắn cho các thao tác không thiết yếu (đặt theo session), để chúng thất bại nhanh thay vì giữ connection 50 giây.</li>
+<li>Theo dõi <code>Innodb_row_lock_waits</code> và thời gian chờ pool, cảnh báo sớm khi một key nóng lên.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai và kiểm chứng thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
 <pre><code>// mỗi lượt xem: một lệnh Redis, không chạm MySQL
 await redis.hincrby('views:pending', articleId, 1);
-
 // mỗi 30 giây: đổi tên key để lấy trọn một "mẻ" không bị ghi thêm vào
 const batch = `views:flush:${Date.now()}`;
 const moved = await redis.renamenx('views:pending', batch).catch(() =&gt; 0); // key chưa có thì bỏ qua
@@ -742,24 +843,25 @@ if (moved) {
   await redis.del(batch);
 }</code></pre>
 <ul>
-<li>Bảng <code>article_views</code> tách khỏi <code>articles</code>, để cập nhật đếm không tranh khoá với việc sửa bài.</li>
-<li>Rủi ro cộng trùng: job chết sau khi ghi MySQL và trước <code>DEL</code>, mẻ cũ vẫn nằm trong Redis. Mỗi lần chạy, job xử lý trước các key <code>views:flush:*</code> còn sót (tìm bằng <code>SCAN</code>). Để không cộng một mẻ hai lần, ghi tên mẻ vào bảng <code>view_batches</code> (khoá chính) trong cùng transaction với câu cộng; gặp lại tên mẻ đã có thì chỉ xoá key. Đây là đúng mẫu "dấu đã xử lý" ở trang idempotency.</li>
-<li>Code dùng alias cho row mới (<code>AS new</code>), vì cú pháp <code>VALUES(col)</code> trong <code>ON DUPLICATE KEY UPDATE</code> đã deprecated từ MySQL 8.0.20.</li>
-</ul>
-<h4 class="ah">6. Rủi ro và cách kiểm chứng</h4>
-<ul>
-<li>Redis khởi động lại mất tối đa 30 giây lượt xem: chấp nhận được cho hiển thị; báo cáo lấy từ access log nên không ảnh hưởng.</li>
+<li>Code dùng alias cho row mới (<code>AS new</code>), vì <code>VALUES(col)</code> trong <code>ON DUPLICATE KEY UPDATE</code> đã deprecated từ MySQL 8.0.20. (Đoạn trên lược bớt bảng <code>view_batches</code> ở Follow-up 3 cho gọn.)</li>
 <li>Test tải: 5.000 lượt mỗi giây vào một bài; <code>Innodb_row_lock_waits</code> không đổi, p99 các trang khác không đổi.</li>
-<li>Đối soát: tổng <code>article_views</code> trong ngày so với <code>daily_views</code> từ log. Lệch vài phần trăm là chấp nhận được; lệch lớn là dấu hiệu job flush có lỗi.</li>
+<li>Redis khởi động lại mất tối đa 30 giây lượt xem: chấp nhận cho hiển thị; báo cáo lấy từ access log nên không ảnh hưởng.</li>
+<li>Đối soát: tổng <code>article_views</code> trong ngày so với <code>daily_views</code> từ log. Lệch vài phần trăm là chấp nhận; lệch lớn là dấu hiệu job flush có lỗi.</li>
 </ul>
-<h4 class="ah">7. Lỗi hay gặp với bài này</h4>
-<ul>
-<li>Nhìn tổng QPS thấp và kết luận không có vấn đề.</li>
-<li>Tăng cấu hình MySQL cho một vấn đề của một row.</li>
-<li>Dùng chung một pool cho mọi trang, để một bài nóng làm chết cả site.</li>
-<li>Flush từ Redis về MySQL bằng <code>GET</code> rồi <code>SET 0</code>: mất các lượt xem đến giữa hai lệnh.</li>
-<li>Bắt một cơ chế đáp ứng cả hiển thị nhanh lẫn báo cáo chính xác.</li>
-</ul>
+</details>
+</div>
+
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Chẩn đoán</td><td>"Database chậm"</td><td>Tải trên một key; trần khoảng 1.000 lần mỗi giây một row; pool chung lan lỗi</td></tr>
+<tr><td>Yêu cầu</td><td>Một cơ chế cho mọi thứ</td><td>Tách hiển thị và báo cáo</td></tr>
+<tr><td>Bộ đếm</td><td>Redis <code>INCR</code></td><td>Redis với flush không mất, không cộng trùng</td></tr>
+<tr><td>Cô lập</td><td>Không nhắc</td><td>Tách bảng, pool riêng, timeout ngắn cho việc không thiết yếu</td></tr>
+<tr><td>Kiểm chứng</td><td>Không có</td><td>Test tải một bài, đối soát với log</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> nhìn tổng QPS thấp rồi kết luận không có vấn đề; tăng cấu hình MySQL cho vấn đề của một row; flush bằng <code>GET</code> rồi <code>SET 0</code>.</p>
 </details>
 </div>
 </section>
