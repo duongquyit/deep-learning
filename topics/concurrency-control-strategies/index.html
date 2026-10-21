@@ -177,6 +177,10 @@ details.answer summary{font-weight:500;color:var(--struct)}
 .case{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:0 var(--r-m) var(--r-m) 0;padding:16px 20px;margin:22px 0;max-width:720px}
 .case>h3{margin:0 0 6px;font-size:1.15rem}
 .case .src{font-size:13.5px;color:var(--ink-2);margin:0 0 12px}
+.case .ctx{background:var(--paper);border:1px solid var(--rule);border-radius:var(--r-m);padding:10px 14px;margin:8px 0 0;font-size:15px}
+.case .ctx-h{margin:0 0 4px;font-weight:600;color:var(--struct)}
+.case .ctx ul{margin:0;padding-left:20px}
+.case .ctx li{margin:2px 0}
 .case .q{margin:10px 0 4px;padding:8px 0 8px 14px;border-left:3px solid var(--key);font-size:1.06rem;font-weight:500;color:var(--ink);max-width:none}
 .case details{max-width:none;margin:12px 0 0}
 .case details.answer[open]{background:var(--surface)}
@@ -560,7 +564,7 @@ Rows matched: 0  Changed: 0  Warnings: 0
 <div class="prose">
 <p>Mỗi bài là một vòng phỏng vấn system design cấp senior, khoảng 30–45 phút. Cách dùng:</p>
 <ol class="list">
-<li>Đọc câu hỏi của interviewer. Viết ra những gì bạn sẽ hỏi lại trước khi thiết kế, rồi mới mở "Hỏi lại interviewer" để xem câu hỏi nên hỏi và câu trả lời của interviewer. Các con số ở đó dùng cho những câu sau.</li>
+<li>Đọc bối cảnh và câu hỏi của interviewer. Bối cảnh là những gì interviewer nói lúc đầu: hệ thống, cách đang làm, quy mô, chuyện đã xảy ra. Viết ra những gì bạn sẽ hỏi thêm trước khi thiết kế, rồi mới mở "Hỏi lại interviewer" để xem câu hỏi nên hỏi và câu trả lời của interviewer: con số chính xác, yêu cầu, ràng buộc. Các con số ở đó dùng cho những câu sau.</li>
 <li>Với mỗi follow-up, tự trả lời (nói to hoặc viết ra) trong vài phút, rồi mới mở đáp án. Follow-up cuối luôn là triển khai và kiểm chứng: thiết kế đã chọn được làm ra sao, test gì, theo dõi gì, lùi lại thế nào.</li>
 <li>Cuối bài, dùng rubric để tự chấm: câu trả lời của bạn giống cột "mid" hay cột "senior", và có rơi vào red flag nào không.</li>
 </ol>
@@ -571,7 +575,8 @@ Rows matched: 0  Changed: 0  Warnings: 0
 <div class="case" id="c1">
 <h3>C1. Flash sale 500 suất bị bán thành 537</h3>
 <p class="src">Dựa trên: phần 01–02 của trang này; <a href="../innodb-locking-deadlock/index.html">Locking và deadlock</a>.</p>
-<blockquote class="q">"Lần flash sale trước, chúng tôi bán 500 nồi chiên nhưng ra 537 đơn. Hai tuần nữa có sale tiếp. Bạn sửa thế nào?"</blockquote>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> Sàn thương mại điện tử, NestJS và một MySQL 8.4 primary, có Redis. 6 instance app.</li><li><strong>Đang làm:</strong> Mỗi lượt bấm "Mua" chạy một transaction: <code>SELECT stock</code>, nếu còn thì <code>UPDATE stock = stock - 1</code>, rồi chèn đơn. Mỗi khách được mua tối đa 2 cái.</li><li><strong>Quy mô:</strong> 500 nồi chiên giá 99.000 đồng mở bán lúc 12:00; khoảng 30.000 người bấm trong phút đầu.</li><li><strong>Đã xảy ra:</strong> 537 đơn cho 500 suất, tồn kho cuối là −37, vài khách mua được 5 cái. Trang web chậm hẳn trong lúc sale.</li></ul></div>
+<blockquote class="q">"Hai tuần nữa có đợt sale tiếp theo. Bạn sửa luồng giữ suất thế nào?"</blockquote>
 
 <details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
 <div class="tablewrap"><table>
@@ -688,7 +693,8 @@ CREATE TABLE reservations (id BIGINT PRIMARY KEY, sale_id BIGINT, user_id BIGINT
 <div class="case" id="c2">
 <h3>C2. Chuyển tiền trong ví: 50 deadlock mỗi ngày</h3>
 <p class="src">Dựa trên: phần 02–03 của trang này; <a href="../innodb-locking-deadlock/index.html">Locking và deadlock</a>.</p>
-<blockquote class="q">"Hệ thống ví của chúng tôi có khoảng 50 deadlock mỗi ngày ở luồng chuyển tiền. Team đưa ra ba đề xuất: chuyển sang SERIALIZABLE, dùng cột version, hoặc gặp deadlock thì thử lại 3 lần. Bạn chọn cái nào?"</blockquote>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> Ví điện tử 3 triệu người dùng, MySQL 8.4. Chuyển tiền giữa hai ví là một transaction: khoá ví gửi bằng <code>FOR UPDATE</code>, kiểm tra số dư, trừ ví gửi, cộng ví nhận, ghi hai dòng ledger.</li><li><strong>Quy mô:</strong> Đỉnh 400 lần chuyển mỗi giây; vài ví shop nhận khoảng 30 lần mỗi giây.</li><li><strong>Đã xảy ra:</strong> Khoảng 50 lỗi deadlock (1213) mỗi ngày. App trả 500 và người dùng bấm lại.</li></ul></div>
+<blockquote class="q">"Team đưa ra ba đề xuất: chuyển sang SERIALIZABLE, dùng cột version, hoặc gặp deadlock thì thử lại 3 lần. Bạn chọn cái nào, hay làm khác?"</blockquote>
 
 <details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
 <div class="tablewrap"><table>
@@ -808,7 +814,8 @@ async function transfer(t: { id: string; from: number; to: number; amount: numbe
 <div class="case" id="c3">
 <h3>C3. Hồ sơ khách hàng bị ghi đè sau khi bấm lưu</h3>
 <p class="src">Dựa trên: phần 02–03 của trang này (cột version).</p>
-<blockquote class="q">"Trong CRM nội bộ, hạn mức tín dụng của khách thỉnh thoảng bị trả về giá trị cũ, và ghi chú của nhân viên này bị mất khi nhân viên khác lưu. Bạn sẽ điều tra và sửa thế nào?"</blockquote>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> CRM nội bộ cho 200 nhân viên chăm sóc khách hàng. Hồ sơ khách gồm địa chỉ, số điện thoại, ghi chú, hạn mức tín dụng.</li><li><strong>Đang làm:</strong> Nhân viên mở form, gọi khách 5–10 phút, rồi bấm lưu; API <code>PUT /customers/:id</code> gửi cả object. Một job chấm điểm tín dụng chạy mỗi giờ, cập nhật hạn mức cho 2 triệu khách.</li><li><strong>Đã xảy ra:</strong> Hạn mức thỉnh thoảng bị trả về giá trị cũ ngay sau khi nhân viên lưu; hai nhân viên cùng sửa một khách thì ghi chú của một người biến mất.</li></ul></div>
+<blockquote class="q">"Bạn điều tra nguyên nhân thế nào, và sửa ra sao?"</blockquote>
 
 <details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
 <div class="tablewrap"><table>

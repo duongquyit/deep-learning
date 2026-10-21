@@ -173,6 +173,10 @@ details.answer summary{font-weight:500;color:var(--struct)}
 .case{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:0 var(--r-m) var(--r-m) 0;padding:16px 20px;margin:22px 0;max-width:720px}
 .case>h3{margin:0 0 6px;font-size:1.15rem}
 .case .src{font-size:13.5px;color:var(--ink-2);margin:0 0 12px}
+.case .ctx{background:var(--paper);border:1px solid var(--rule);border-radius:var(--r-m);padding:10px 14px;margin:8px 0 0;font-size:15px}
+.case .ctx-h{margin:0 0 4px;font-weight:600;color:var(--struct)}
+.case .ctx ul{margin:0;padding-left:20px}
+.case .ctx li{margin:2px 0}
 .case .q{margin:10px 0 4px;padding:8px 0 8px 14px;border-left:3px solid var(--key);font-size:1.06rem;font-weight:500;color:var(--ink);max-width:none}
 .case details{max-width:none;margin:12px 0 0}
 .case details.answer[open]{background:var(--surface)}
@@ -518,7 +522,7 @@ await queue.add('import', { importId }, {
 <div class="prose">
 <p>Mỗi bài là một vòng phỏng vấn system design cấp senior, khoảng 30–45 phút. Cách dùng:</p>
 <ol class="list">
-<li>Đọc câu hỏi của interviewer. Viết ra những gì bạn sẽ hỏi lại trước khi thiết kế, rồi mới mở "Hỏi lại interviewer" để xem câu hỏi nên hỏi và câu trả lời của interviewer. Các con số ở đó dùng cho những câu sau.</li>
+<li>Đọc bối cảnh và câu hỏi của interviewer. Bối cảnh là những gì interviewer nói lúc đầu: hệ thống, cách đang làm, quy mô, chuyện đã xảy ra. Viết ra những gì bạn sẽ hỏi thêm trước khi thiết kế, rồi mới mở "Hỏi lại interviewer" để xem câu hỏi nên hỏi và câu trả lời của interviewer: con số chính xác, yêu cầu, ràng buộc. Các con số ở đó dùng cho những câu sau.</li>
 <li>Với mỗi follow-up, tự trả lời (nói to hoặc viết ra) trong vài phút, rồi mới mở đáp án. Follow-up cuối luôn là triển khai và kiểm chứng: thiết kế đã chọn được làm ra sao, test gì, theo dõi gì, lùi lại thế nào.</li>
 <li>Cuối bài, dùng rubric để tự chấm: câu trả lời của bạn giống cột "mid" hay cột "senior", và có rơi vào red flag nào không.</li>
 </ol>
@@ -529,7 +533,8 @@ await queue.add('import', { importId }, {
 <div class="case" id="c10">
 <h3>C10. Đối soát 2 triệu dòng mỗi đêm không kịp giờ</h3>
 <p class="src">Dựa trên: phần 02 của trang này (stalled, checkpoint); <a href="../concurrency-control-strategies/index.html">Kiểm soát ghi đồng thời</a>.</p>
-<blockquote class="q">"Job đối soát sao kê ngân hàng chạy mỗi đêm mất hơn 3 giờ, thỉnh thoảng chạy lại từ đầu và có lần ghi kết quả hai lần. Kế toán cần kết quả trước 6 giờ sáng. Bạn thiết kế lại thế nào?"</blockquote>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> Fintech nhận file sao kê từ 3 ngân hàng lúc 01:00 mỗi đêm, khoảng 2 triệu dòng (CSV 600 MB). MySQL 8.4, BullMQ, 4 pod worker.</li><li><strong>Đang làm:</strong> Một job BullMQ duy nhất đọc file; với mỗi dòng: tìm giao dịch nội bộ theo mã tham chiếu, ghi kết quả đối soát, cập nhật trạng thái giao dịch. Mỗi câu autocommit.</li><li><strong>Đã xảy ra:</strong> Job mất 3 giờ 10 phút. Một lần deploy giết worker, job chạy lại từ đầu, xong lúc 07:40. Một lần job bị báo stalled và chạy ở hai pod; 40.000 giao dịch bị ghi kết quả hai lần.</li></ul></div>
+<blockquote class="q">"Kế toán cần kết quả trước 6 giờ sáng. Bạn thiết kế lại job thế nào?"</blockquote>
 
 <details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
 <div class="tablewrap"><table>
@@ -647,7 +652,8 @@ UPDATE transactions t JOIN reconciliation_results r ON r.transaction_id = t.id
 <div class="case" id="c11">
 <h3>C11. Gửi email cho 500.000 người, nhà cung cấp giới hạn 100 email mỗi giây</h3>
 <p class="src">Dựa trên: phần 02 và 06 của trang này; <a href="../idempotency-retries/index.html">Idempotency và retry</a> (C5).</p>
-<blockquote class="q">"Marketing gửi newsletter cho 500.000 người. Chúng tôi tạo một job BullMQ cho mỗi người. Giờ thì nhà cung cấp trả 429 liên tục, vài người nhận 2 email, và có người đã huỷ đăng ký vẫn nhận. Thiết kế lại."</blockquote>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> Marketing gửi newsletter qua một nhà cung cấp email giới hạn 100 email mỗi giây. BullMQ trên Redis 2 GB dùng chung với cache; worker chạy trên 4 pod.</li><li><strong>Đang làm:</strong> Một script tạo một job BullMQ cho mỗi người nhận; worker <code>concurrency: 50</code> mỗi pod gửi từng email.</li><li><strong>Quy mô:</strong> 500.000 người nhận mỗi chiến dịch.</li><li><strong>Đã xảy ra:</strong> Thêm job mất 20 phút, Redis tăng khoảng 1,2 GB; nhà cung cấp trả 429 liên tục; vài người nhận 2 email; một người huỷ đăng ký lúc 10:05 vẫn nhận email lúc 10:30.</li></ul></div>
+<blockquote class="q">"Hãy thiết kế lại cách gửi chiến dịch."</blockquote>
 
 <details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
 <div class="tablewrap"><table>
@@ -759,7 +765,8 @@ UPDATE transactions t JOIN reconciliation_results r ON r.transaction_id = t.id
 <div class="case" id="c12">
 <h3>C12. Thêm bước tạo PDF, khách nhận hai email và điểm cộng hai lần</h3>
 <p class="src">Dựa trên: phần 02 và 06 của trang này (event loop, stalled, concurrency).</p>
-<blockquote class="q">"Tuần này team thêm bước tạo PDF hoá đơn vào worker xử lý sau thanh toán. Từ đó khách nhận hai email hoá đơn, điểm thưởng bị cộng hai lần, và job chờ tới 20 phút. Chuyện gì đang xảy ra?"</blockquote>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> Queue BullMQ <code>orders-post-process</code> chạy sau khi đơn được thanh toán: cộng điểm thưởng, rồi gửi email hoá đơn. 3 pod, mỗi pod 2 vCPU, <code>concurrency: 10</code>.</li><li><strong>Thay đổi tuần này:</strong> Thêm bước tạo PDF hoá đơn bằng một thư viện đồng bộ (3–8 giây CPU mỗi PDF), đặt trong cùng processor, trước bước gửi email.</li><li><strong>Quy mô:</strong> Đỉnh 6 đơn mỗi giây trong khoảng 30 phút.</li><li><strong>Đã xảy ra:</strong> Nhiều job bị báo stalled; khoảng 4% khách nhận 2 email hoá đơn; điểm thưởng bị cộng hai lần; giờ cao điểm job chờ tới 20 phút.</li></ul></div>
+<blockquote class="q">"Chuyện gì đang xảy ra, và bạn sửa thế nào?"</blockquote>
 
 <details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
 <div class="tablewrap"><table>

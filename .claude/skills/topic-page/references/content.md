@@ -130,11 +130,14 @@ The section opens with the standard paragraph on how to use it (answer each
 part before opening it, the last follow-up is always implementation, grade
 yourself with the rubric) and the date the cases were written.
 
-**Shown:** a short title, the pages the case draws on (`p.src`), and the
-interviewer's question in `blockquote.q`: one or two sentences in the
-interviewer's voice, open-ended, with the minimum context an interviewer
-gives. Numbers, code and constraints are not in the question; the reader must
-ask for them.
+**Shown:** a short title, the pages the case draws on (`p.src`), the context
+the interviewer gives at the start (`div.ctx` headed `Bối cảnh`: three or four
+bullets with bold labels such as Hệ thống, Đang làm, Quy mô, Đã xảy ra: what
+the system is, how it works today, its rough scale, and the incident or plan
+that prompts the question), then the interviewer's question in
+`blockquote.q`: one or two sentences in the interviewer's voice, open-ended.
+Requirements, constraints and the exact numbers the design depends on stay
+out of the shown part; the reader must ask for them.
 
 **Hidden, in this order:**
 

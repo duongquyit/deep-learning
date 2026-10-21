@@ -181,6 +181,10 @@ details.answer summary{font-weight:500;color:var(--struct)}
 .case{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:0 var(--r-m) var(--r-m) 0;padding:16px 20px;margin:22px 0;max-width:720px}
 .case>h3{margin:0 0 6px;font-size:1.15rem}
 .case .src{font-size:13.5px;color:var(--ink-2);margin:0 0 12px}
+.case .ctx{background:var(--paper);border:1px solid var(--rule);border-radius:var(--r-m);padding:10px 14px;margin:8px 0 0;font-size:15px}
+.case .ctx-h{margin:0 0 4px;font-weight:600;color:var(--struct)}
+.case .ctx ul{margin:0;padding-left:20px}
+.case .ctx li{margin:2px 0}
 .case .q{margin:10px 0 4px;padding:8px 0 8px 14px;border-left:3px solid var(--key);font-size:1.06rem;font-weight:500;color:var(--ink);max-width:none}
 .case details{max-width:none;margin:12px 0 0}
 .case details.answer[open]{background:var(--surface)}
@@ -566,7 +570,7 @@ await queue.add('import-row', data, {
 <div class="prose">
 <p>Mỗi bài là một vòng phỏng vấn system design cấp senior, khoảng 30–45 phút. Cách dùng:</p>
 <ol class="list">
-<li>Đọc câu hỏi của interviewer. Viết ra những gì bạn sẽ hỏi lại trước khi thiết kế, rồi mới mở "Hỏi lại interviewer" để xem câu hỏi nên hỏi và câu trả lời của interviewer. Các con số ở đó dùng cho những câu sau.</li>
+<li>Đọc bối cảnh và câu hỏi của interviewer. Bối cảnh là những gì interviewer nói lúc đầu: hệ thống, cách đang làm, quy mô, chuyện đã xảy ra. Viết ra những gì bạn sẽ hỏi thêm trước khi thiết kế, rồi mới mở "Hỏi lại interviewer" để xem câu hỏi nên hỏi và câu trả lời của interviewer: con số chính xác, yêu cầu, ràng buộc. Các con số ở đó dùng cho những câu sau.</li>
 <li>Với mỗi follow-up, tự trả lời (nói to hoặc viết ra) trong vài phút, rồi mới mở đáp án. Follow-up cuối luôn là triển khai và kiểm chứng: thiết kế đã chọn được làm ra sao, test gì, theo dõi gì, lùi lại thế nào.</li>
 <li>Cuối bài, dùng rubric để tự chấm: câu trả lời của bạn giống cột "mid" hay cột "senior", và có rơi vào red flag nào không.</li>
 </ol>
@@ -577,7 +581,8 @@ await queue.add('import-row', data, {
 <div class="case" id="c4">
 <h3>C4. Cổng thanh toán: trừ tiền hai lần, webhook sai thứ tự</h3>
 <p class="src">Dựa trên: phần 02–03 của trang này; <a href="../concurrency-control-strategies/index.html">Kiểm soát ghi đồng thời</a> (câu ghi có điều kiện).</p>
-<blockquote class="q">"Shop của chúng tôi tích hợp một cổng thanh toán. Tháng này có khách bị trừ tiền hai lần, có đơn đã trả tiền lại hiện 'thất bại', và một số đơn kẹt mãi ở 'đang chờ thanh toán'. Hãy thiết kế lại phần tích hợp."</blockquote>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> Shop online, MySQL 8.4, khoảng 2.000 đơn mỗi giờ lúc cao điểm, tích hợp một cổng thanh toán bên ngoài.</li><li><strong>Đang làm:</strong> Khách bấm "Thanh toán": server gọi cổng tạo giao dịch, nhận link, chuyển khách sang trang của cổng. Kết quả cuối báo về qua webhook <code>succeeded</code> hoặc <code>failed</code>; đơn đổi trạng thái theo webhook vừa tới.</li><li><strong>Đã xảy ra:</strong> Trong tháng: khách bấm hai lần bị trừ tiền hai lần; một đơn đã trả tiền lại bị chuyển sang "thất bại"; khoảng 0,3% đơn kẹt mãi ở "đang chờ thanh toán".</li></ul></div>
+<blockquote class="q">"Hãy thiết kế lại phần tích hợp thanh toán."</blockquote>
 
 <details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
 <div class="tablewrap"><table>
@@ -690,7 +695,8 @@ CREATE TABLE payment_events (event_id VARCHAR(64) PRIMARY KEY, attempt_id CHAR(3
 <div class="case" id="c5">
 <h3>C5. SMS gửi trùng 3%, nhà cung cấp không có idempotency key</h3>
 <p class="src">Dựa trên: phần 02 của trang này (dấu "đã xử lý", thử lại).</p>
-<blockquote class="q">"Đợt khuyến mãi tuần trước, 3% khách nhận 2–3 tin SMS giống nhau. Team đề xuất ghi dấu 'đã gửi' vào database trước khi gọi API nhà cung cấp. Bạn có đồng ý không?"</blockquote>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> Service thông báo đọc message từ hàng đợi (at-least-once) rồi gọi API của nhà cung cấp SMS, 800 đồng mỗi tin. Hai loại tin: OTP đăng nhập và tin khuyến mãi.</li><li><strong>Quy mô:</strong> Mỗi đợt khuyến mãi khoảng 2 triệu tin; nhà cung cấp giới hạn 300 tin mỗi giây.</li><li><strong>Đã xảy ra:</strong> Đợt tuần trước, 3% khách nhận 2–3 tin giống nhau. API nhà cung cấp thỉnh thoảng timeout dù tin vẫn được gửi, và không có idempotency key.</li></ul></div>
+<blockquote class="q">"Team đề xuất ghi dấu "đã gửi" vào database trước khi gọi API nhà cung cấp. Bạn có đồng ý không?"</blockquote>
 
 <details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
 <div class="tablewrap"><table>
@@ -805,7 +811,8 @@ CREATE TABLE payment_events (event_id VARCHAR(64) PRIMARY KEY, attempt_id CHAR(3
 <div class="case" id="c6">
 <h3>C6. Database failover 90 giây, service sập 25 phút</h3>
 <p class="src">Dựa trên: phần 02–03 và 06 của trang này (backoff, jitter, retry budget).</p>
-<blockquote class="q">"Database của service payment failover mất 90 giây. Database lên lại rồi, nhưng service payment vẫn quá tải thêm 25 phút. Vì sao, và lần sau làm sao để không lặp lại?"</blockquote>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> Service checkout (40 pod) gọi service payment nội bộ qua API gateway. Bình thường 300 request mỗi giây; payment phục vụ được khoảng 600.</li><li><strong>Đang làm:</strong> SDK HTTP trong checkout, API gateway và code checkout đều tự thử lại khi gặp lỗi.</li><li><strong>Đã xảy ra:</strong> Lúc 20:00, database của payment failover mất 90 giây. Database lên lại, nhưng payment quá tải thêm 25 phút (CPU 100%, request gấp khoảng 30 lần bình thường), và nhiều khách bị tạo hai lệnh thanh toán.</li></ul></div>
+<blockquote class="q">"Vì sao database lên rồi mà service vẫn sập 25 phút, và lần sau làm sao để không lặp lại?"</blockquote>
 
 <details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
 <div class="tablewrap"><table>

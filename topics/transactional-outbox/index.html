@@ -174,6 +174,10 @@ details.answer summary{font-weight:500;color:var(--struct)}
 .case{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:0 var(--r-m) var(--r-m) 0;padding:16px 20px;margin:22px 0;max-width:720px}
 .case>h3{margin:0 0 6px;font-size:1.15rem}
 .case .src{font-size:13.5px;color:var(--ink-2);margin:0 0 12px}
+.case .ctx{background:var(--paper);border:1px solid var(--rule);border-radius:var(--r-m);padding:10px 14px;margin:8px 0 0;font-size:15px}
+.case .ctx-h{margin:0 0 4px;font-weight:600;color:var(--struct)}
+.case .ctx ul{margin:0;padding-left:20px}
+.case .ctx li{margin:2px 0}
 .case .q{margin:10px 0 4px;padding:8px 0 8px 14px;border-left:3px solid var(--key);font-size:1.06rem;font-weight:500;color:var(--ink);max-width:none}
 .case details{max-width:none;margin:12px 0 0}
 .case details.answer[open]{background:var(--surface)}
@@ -507,7 +511,7 @@ SHOW BINARY LOG STATUS;                    -- 8.4: thay cho SHOW MASTER STATUS
 <div class="prose">
 <p>Mỗi bài là một vòng phỏng vấn system design cấp senior, khoảng 30–45 phút. Cách dùng:</p>
 <ol class="list">
-<li>Đọc câu hỏi của interviewer. Viết ra những gì bạn sẽ hỏi lại trước khi thiết kế, rồi mới mở "Hỏi lại interviewer" để xem câu hỏi nên hỏi và câu trả lời của interviewer. Các con số ở đó dùng cho những câu sau.</li>
+<li>Đọc bối cảnh và câu hỏi của interviewer. Bối cảnh là những gì interviewer nói lúc đầu: hệ thống, cách đang làm, quy mô, chuyện đã xảy ra. Viết ra những gì bạn sẽ hỏi thêm trước khi thiết kế, rồi mới mở "Hỏi lại interviewer" để xem câu hỏi nên hỏi và câu trả lời của interviewer: con số chính xác, yêu cầu, ràng buộc. Các con số ở đó dùng cho những câu sau.</li>
 <li>Với mỗi follow-up, tự trả lời (nói to hoặc viết ra) trong vài phút, rồi mới mở đáp án. Follow-up cuối luôn là triển khai và kiểm chứng: thiết kế đã chọn được làm ra sao, test gì, theo dõi gì, lùi lại thế nào.</li>
 <li>Cuối bài, dùng rubric để tự chấm: câu trả lời của bạn giống cột "mid" hay cột "senior", và có rơi vào red flag nào không.</li>
 </ol>
@@ -518,7 +522,8 @@ SHOW BINARY LOG STATUS;                    -- 8.4: thay cho SHOW MASTER STATUS
 <div class="case" id="c7">
 <h3>C7. 0,1% đơn không có email xác nhận</h3>
 <p class="src">Dựa trên: phần 01–02 của trang này; <a href="../idempotency-retries/index.html">Idempotency và retry</a>.</p>
-<blockquote class="q">"Khoảng 0,1% đơn hàng không có email xác nhận và không được giữ hàng ở kho. Team đề xuất bọc lời gửi event lên Kafka trong vòng thử lại 3 lần. Bạn nghĩ sao?"</blockquote>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> Service đơn hàng NestJS, MySQL 8.4, Kafka. Ba consumer nghe topic <code>orders</code>: email, kho, analytics. Team 3 người.</li><li><strong>Đang làm:</strong> Sau khi commit đơn, code gọi <code>producer.send('orders', OrderCreated)</code>. Luồng tạo đơn từ trang admin gửi event trước khi commit.</li><li><strong>Quy mô:</strong> Khoảng 200 đơn mỗi giây lúc sale.</li><li><strong>Đã xảy ra:</strong> 0,1% đơn không có email xác nhận và không được giữ hàng; vài lần mỗi tuần kho giữ hàng cho đơn không tồn tại; thỉnh thoảng kho nhận "huỷ" trước "tạo" của cùng một đơn.</li></ul></div>
+<blockquote class="q">"Team đề xuất bọc lời gửi event trong vòng thử lại 3 lần. Bạn nghĩ sao, và bạn sẽ làm gì?"</blockquote>
 
 <details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
 <div class="tablewrap"><table>
@@ -621,7 +626,8 @@ SHOW BINARY LOG STATUS;                    -- 8.4: thay cho SHOW MASTER STATUS
 <div class="case" id="c8">
 <h3>C8. Relay outbox chậm dần sau 8 tháng</h3>
 <p class="src">Dựa trên: phần 02, 04 và 06 của trang này; <a href="../innodb-locking-deadlock/index.html">Locking và deadlock</a>.</p>
-<blockquote class="q">"Outbox của chúng tôi chạy ổn 8 tháng. Giờ vào giờ cao điểm, event trễ tới 15 phút và CPU MySQL lên 70%. Bạn chẩn đoán thế nào?"</blockquote>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> Transactional outbox kiểu polling trên MySQL 8.4, chạy 8 tháng. Ba relay song song, mỗi relay lấy 500 row chưa gửi bằng <code>FOR UPDATE SKIP LOCKED</code>, gửi từng event lên broker, rồi đánh dấu đã gửi.</li><li><strong>Quy mô:</strong> Đỉnh khoảng 300 event mỗi giây. Bảng outbox chưa từng được dọn.</li><li><strong>Đã xảy ra:</strong> Giờ cao điểm event trễ tới 15 phút, CPU MySQL 70%, và API tạo đơn thỉnh thoảng bị lỗi lock wait timeout (1205) khi ghi vào outbox.</li></ul></div>
+<blockquote class="q">"Bạn chẩn đoán thế nào, và sửa ra sao mà không downtime?"</blockquote>
 
 <details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
 <div class="tablewrap"><table>
@@ -751,7 +757,8 @@ UPDATE outbox_v2 SET sent_at = NOW(3) WHERE claimed_by = :me AND sent_at IS NULL
 <div class="case" id="c9">
 <h3>C9. Combo vé máy bay và khách sạn: trừ tiền mà không có vé</h3>
 <p class="src">Dựa trên: phần 02–03 của trang này (saga); <a href="../idempotency-retries/index.html">Idempotency và retry</a>.</p>
-<blockquote class="q">"App du lịch của chúng tôi bán combo vé máy bay và khách sạn. Có khách bị trừ tiền mà không có vé, và có lúc chúng tôi mất phí huỷ vé vì khách sạn hết phòng. Thiết kế lại luồng đặt combo."</blockquote>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> App du lịch bán combo vé máy bay và khách sạn, gọi API của thẻ, hãng bay và khách sạn.</li><li><strong>Đang làm:</strong> Mọi thứ chạy trong một request HTTP: trừ tiền thẻ ngay, gọi hãng bay xuất vé (5–40 giây), gọi khách sạn đặt phòng; lỗi ở đâu thì khối <code>catch</code> hoàn tiền.</li><li><strong>Đã xảy ra:</strong> Request bị cắt sau 60 giây khi đang chờ hãng bay: khách bị trừ tiền, không có vé, không được hoàn. Lần khác vé đã xuất nhưng khách sạn hết phòng: hoàn toàn bộ tiền và mất 500.000 đồng phí huỷ mỗi vé.</li></ul></div>
+<blockquote class="q">"Hãy thiết kế lại luồng đặt combo."</blockquote>
 
 <details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
 <div class="tablewrap"><table>

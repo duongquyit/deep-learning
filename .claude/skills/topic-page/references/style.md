@@ -181,6 +181,10 @@ after the base CSS, as it is. Pages without section 9 do not need it.
 .case{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:0 var(--r-m) var(--r-m) 0;padding:16px 20px;margin:22px 0;max-width:720px}
 .case>h3{margin:0 0 6px;font-size:1.15rem}
 .case .src{font-size:13.5px;color:var(--ink-2);margin:0 0 12px}
+.case .ctx{background:var(--paper);border:1px solid var(--rule);border-radius:var(--r-m);padding:10px 14px;margin:8px 0 0;font-size:15px}
+.case .ctx-h{margin:0 0 4px;font-weight:600;color:var(--struct)}
+.case .ctx ul{margin:0;padding-left:20px}
+.case .ctx li{margin:2px 0}
 .case .q{margin:10px 0 4px;padding:8px 0 8px 14px;border-left:3px solid var(--key);font-size:1.06rem;font-weight:500;color:var(--ink);max-width:none}
 .case details{max-width:none;margin:12px 0 0}
 .case details.answer[open]{background:var(--surface)}
@@ -196,7 +200,7 @@ after the base CSS, as it is. Pages without section 9 do not need it.
 ## Markup that goes with it
 
 - Hero: `<div class="hero"><h1>…</h1><p class="lede">…</p><div class="brief">…</div></div>` at the top of `<main>`. The brief has three blocks, each `<div><h4>Mục tiêu</h4><ul>…</ul></div>`, then Cần biết trước, then Trạng thái. Section order and headings are in `content.md`.
-- Real-world case (section 9): `<div class="case" id="c1"><h3>C1. Short title</h3><p class="src">Dựa trên: …</p><blockquote class="q">"Interviewer question"</blockquote><details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary><div class="tablewrap"><table>…</table></div><p><strong>Senior thường làm gì ở bước này:</strong> …</p></details><div class="fu"><p class="fq"><b>Follow-up 1.</b> Question</p><details class="answer"><summary>Đáp án</summary>…</details></div>…<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>…</details></div>`. Follow-up labels are inline bold text, not an uppercase eyebrow.
+- Real-world case (section 9): `<div class="case" id="c1"><h3>C1. Short title</h3><p class="src">Dựa trên: …</p><div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> …</li>…</ul></div><blockquote class="q">"Interviewer question"</blockquote><details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary><div class="tablewrap"><table>…</table></div><p><strong>Senior thường làm gì ở bước này:</strong> …</p></details><div class="fu"><p class="fq"><b>Follow-up 1.</b> Question</p><details class="answer"><summary>Đáp án</summary>…</details></div>…<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>…</details></div>`. Follow-up labels are inline bold text, not an uppercase eyebrow.
 - Recall question: `<details><summary><span class="tag">Dự đoán</span>Short title</summary><p>Question</p><details class="answer"><summary>Xem đáp án</summary><p>…</p></details></details>`.
 - Section: `<section id="sN"><header><span class="num">0N</span><h2>…</h2></header> … </section>`.
 - Mistake callout: `<div class="note"><strong>Lỗi hay gặp:</strong> …</div>`.
