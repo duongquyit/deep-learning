@@ -1,7 +1,7 @@
 # Content conventions
 
 Every topic page follows one fixed document structure, agreed with the author
-on 2026-10-19 and extended with section 9 (Bài toán thực tế) on 2026-10-20. The sections, their order and their headings are the same on
+on 2026-10-19, extended with section 9 (Bài toán thực tế) on 2026-10-20, with section 9 switched to the interview format on 2026-10-21. The sections, their order and their headings are the same on
 every page, so a reader always knows where to look, and so recall, open
 questions and experiments can be tracked across topics.
 
@@ -22,7 +22,7 @@ in the heading.
 | 6 | Ảnh hưởng khi chạy production | When to use and not, what it costs, how to detect it in production, a review checklist |
 | 7 | Hiểu lầm thường gặp | Summary of misconceptions |
 | 8 | Câu hỏi ôn tập | Recall questions with hidden answers |
-| 9 | Bài toán thực tế | Real-world cases: the problem is shown, the senior answer is hidden |
+| 9 | Bài toán thực tế | Real-world cases as senior interview questions: the question is shown, clarifications, follow-up answers and a rubric are hidden |
 | 10 | Câu hỏi còn mở | Open questions with status |
 | 11 | Tài liệu tham khảo | Sources, and how far each claim has been verified |
 
@@ -122,35 +122,45 @@ section; monthly checkpoints draw spaced-review questions from here.
 
 ### 9. Bài toán thực tế
 
-Practice in the shape of real work, so the reader rehearses decisions rather
-than recall. Three cases per page, numbered globally like recall questions
-(`C1`, `C2`, …; the log tracks the next free number). Each case is a
-`.case` block (markup in `style.md`) with two parts.
+Practice in the shape of a senior system-design interview, so the reader
+rehearses decisions and their defence rather than recall. Three cases per
+page, numbered globally like recall questions (`C1`, `C2`, …; the log tracks
+the next free number). Each case is a `.case` block (markup in `style.md`).
+The section opens with the standard paragraph on how to use it (answer each
+part before opening it, the last follow-up is always implementation, grade
+yourself with the rubric) and the date the cases were written.
 
-**Shown:** Bối cảnh (a concrete system with numbers: traffic, sizes, the
-current code or incident), Yêu cầu (what must hold), Ràng buộc (limits the
-reader cannot change), and Nhiệm vụ (exactly what the reader should produce:
-a design, a diagnosis, a choice). Write it so it can be solved with the page's
-content plus earlier pages; say which earlier pages it draws on.
+**Shown:** a short title, the pages the case draws on (`p.src`), and the
+interviewer's question in `blockquote.q`: one or two sentences in the
+interviewer's voice, open-ended, with the minimum context an interviewer
+gives. Numbers, code and constraints are not in the question; the reader must
+ask for them.
 
-**Hidden:** an optional `Gợi ý` (one to three nudges, in its own `<details>`),
-then the answer in `<details class="answer"><summary>Xem lời giải</summary>`.
-The answer follows how a senior engineer reasons, in this order, each part
-under a small heading (`h4.ah`):
+**Hidden, in this order:**
 
-1. **Làm rõ đề bài**: questions a senior would ask first, and the assumptions
-   taken when the case does not say.
-2. **Ước lượng**: the numbers that decide the design (rates, sizes, hold
-   times), worked out step by step. Label estimates as estimates.
-3. **Các phương án**: at least three real options, in a table with columns
-   for how it works, ưu điểm, nhược điểm. Include the tempting wrong one.
-4. **Đánh đổi và quyết định**: the choice, why it wins for these numbers, and
-   the conditions under which a different option would win.
-5. **Triển khai**: the concrete design: schema, statements, order of steps,
-   code sketch when it helps.
-6. **Rủi ro và cách kiểm chứng**: what can still go wrong, which metric or
-   test shows it, and how to roll back.
-7. **Lỗi hay gặp với bài này**: the mistakes a mid-level answer makes.
+1. **Hỏi lại interviewer** (`details.answer.clar`, summary `Hỏi lại
+   interviewer: nên hỏi gì, và interviewer trả lời gì`): a table with columns
+   câu nên hỏi, interviewer trả lời, vì sao câu này quan trọng; five to seven
+   rows. This is where every number, constraint, current code and incident
+   detail lives; the follow-ups rely on it. Close with one paragraph,
+   `Senior thường làm gì ở bước này`.
+2. **Four or five follow-ups** (`div.fu`, each `p.fq` with `<b>Follow-up N.</b>`
+   then the question, then `details.answer` with summary `Đáp án`). They dig
+   in the order an interviewer would: the diagnosis, the tempting proposal
+   (often a colleague's) and why it fails, the estimate that decides the
+   design, the failure mode or edge case, scale or team concerns. Where there
+   is a choice, the answer has an options table (at least three options,
+   including the tempting wrong one, with ưu điểm and nhược điểm), the
+   decision, and when a different option would win. Numbers are worked out
+   step by step and labelled as estimates.
+3. **The last follow-up is always implementation and verification**
+   ("Bạn triển khai và kiểm chứng … thế nào?"): schema, statements or code,
+   order of steps, the tests that prove it, the metrics to watch, and how to
+   roll back.
+4. **Rubric** (`details.answer.rubric`, summary `Rubric: mid, senior, red
+   flag`): a table with columns tiêu chí, câu trả lời mức mid, câu trả lời
+   mức senior (four to six rows), then a `Red flag` paragraph listing the
+   answers that fail the interview.
 
 Case answers are reasoning written from reading, not measurements. A number in
 them is an estimate unless it cites an experiment that was run.

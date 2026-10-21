@@ -173,20 +173,20 @@ details.answer summary{font-weight:500;color:var(--struct)}
 .log{font:12.5px/1.6 var(--mono);background:var(--paper);border-radius:var(--r-s);padding:8px 12px;margin:10px 0 0;min-height:60px;list-style:none}
 .log li{margin:0}
 .stat b.bad{color:var(--miss)} .stat b.good{color:var(--row)}
-/* bài toán thực tế */
+/* bài toán thực tế: dạng phỏng vấn */
 .case{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:0 var(--r-m) var(--r-m) 0;padding:16px 20px;margin:22px 0;max-width:720px}
 .case>h3{margin:0 0 6px;font-size:1.15rem}
 .case .src{font-size:13.5px;color:var(--ink-2);margin:0 0 12px}
-.case dl{margin:0;display:grid;grid-template-columns:104px minmax(0,1fr);gap:8px 16px}
-.case dt{font-weight:600;color:var(--struct);font-size:15px}
-.case dd{margin:0}
-.case dd p:last-child,.case dd ul:last-child{margin-bottom:0}
+.case .q{margin:10px 0 4px;padding:8px 0 8px 14px;border-left:3px solid var(--key);font-size:1.06rem;font-weight:500;color:var(--ink);max-width:none}
 .case details{max-width:none;margin:12px 0 0}
-.case details.hint{background:var(--paper)}
 .case details.answer[open]{background:var(--surface)}
+.case details.clar>summary,.case details.rubric>summary{color:var(--key)}
+.case .fu{margin:18px 0 0;padding-top:14px;border-top:1px solid var(--rule)}
+.case .fq{margin:0;font-weight:500}
+.case .fq b{color:var(--struct);margin-right:4px}
 .ah{font-size:15.5px;color:var(--struct);margin:20px 0 6px}
 .answer .tablewrap{max-width:none}
-@media (max-width:900px){.case{padding:14px}.case dl{grid-template-columns:minmax(0,1fr);gap:2px}.case dd{margin-bottom:8px}}
+@media (max-width:900px){.case{padding:14px}}
 </style>
 </head>
 <body>
@@ -557,65 +557,98 @@ Rows matched: 0  Changed: 0  Warnings: 0
 <!-- 9 -->
 <section id="s9">
 <header><span class="num">09</span><h2>Bài toán thực tế</h2></header>
-<div class="prose"><p>Ba tình huống giống việc thật. Đọc đề, tự viết lời giải ra giấy (phương án, con số, đánh đổi), rồi mới mở lời giải. Gợi ý chỉ mở khi bí. Lời giải là lập luận từ tài liệu, không phải số đo; con số trong đó là ước lượng. Viết ngày 2026-10-20.</p></div>
+<div class="prose">
+<p>Mỗi bài là một vòng phỏng vấn system design cấp senior, khoảng 30–45 phút. Cách dùng:</p>
+<ol class="list">
+<li>Đọc câu hỏi của interviewer. Viết ra những gì bạn sẽ hỏi lại trước khi thiết kế, rồi mới mở "Hỏi lại interviewer" để xem câu hỏi nên hỏi và câu trả lời của interviewer. Các con số ở đó dùng cho những câu sau.</li>
+<li>Với mỗi follow-up, tự trả lời (nói to hoặc viết ra) trong vài phút, rồi mới mở đáp án. Follow-up cuối luôn là triển khai và kiểm chứng: thiết kế đã chọn được làm ra sao, test gì, theo dõi gì, lùi lại thế nào.</li>
+<li>Cuối bài, dùng rubric để tự chấm: câu trả lời của bạn giống cột "mid" hay cột "senior", và có rơi vào red flag nào không.</li>
+</ol>
+<p>Đáp án là lập luận từ tài liệu, không phải số đo; con số trong đó là ước lượng. Viết ngày 2026-10-21.</p>
+</div>
 
+<!-- C1 -->
 <div class="case" id="c1">
 <h3>C1. Flash sale 500 suất bị bán thành 537</h3>
-<p class="src">Dựa trên: phần 01–02 của trang này; <a href="../innodb-locking-deadlock/index.html">Locking và deadlock</a>.</p>
-<dl>
-<dt>Bối cảnh</dt><dd><p>Sàn thương mại điện tử bán 500 nồi chiên giá 99.000 đồng lúc 12:00. Lần trước có khoảng 30.000 người bấm "Mua" trong 60 giây đầu, đỉnh khoảng 2.000 request mỗi giây trong 10 giây đầu. Code hiện tại (NestJS, MySQL 8.4) chạy trong một transaction:</p>
+<p class="src">Dựa trên: phần 01–02 của trang này; <a href="../locking-deadlock/index.html">Locking và deadlock</a>.</p>
+<blockquote class="q">"Lần flash sale trước, chúng tôi bán 500 nồi chiên nhưng ra 537 đơn. Hai tuần nữa có sale tiếp. Bạn sửa thế nào?"</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>Cho tôi xem code giữ suất hiện tại?</td><td>Một transaction trên MySQL 8.4 (code bên dưới).</td><td>Lỗi bán quá gần như luôn nằm ở thứ tự đọc và ghi.</td></tr>
+<tr><td>Có triệu chứng nào khác?</td><td>Stock cuối là −37. Vài khách mua 5 cái dù quy định tối đa 2 cái mỗi người.</td><td>Hai bất biến cùng hỏng: có thể cùng một nguyên nhân.</td></tr>
+<tr><td>Tải lần trước?</td><td>Khoảng 30.000 người bấm "Mua" trong 60 giây đầu; đỉnh khoảng 2.000 request mỗi giây trong 10 giây đầu.</td><td>500 suất, 30.000 người: phần lớn request là người sẽ không mua được.</td></tr>
+<tr><td>Đơn có được giữ suất để thanh toán không?</td><td>Giữ 10 phút; quá hạn thì suất quay lại bán tiếp.</td><td>Thêm một luồng ghi nữa vào tồn kho, và một cuộc đua với thanh toán.</td></tr>
+<tr><td>Yêu cầu độ trễ?</td><td>Người mua được: p99 dưới 500 ms. Người không mua được: biết "hết hàng" nhanh.</td><td>Loại bỏ các phương án trả kết quả sau.</td></tr>
+<tr><td>Hạ tầng và giới hạn?</td><td>Một MySQL 8.4 primary 16 vCPU; 6 instance app, pool 50 connection mỗi instance; có Redis. Không đổi database. Hai tuần để làm.</td><td>300 connection là trần của toàn bộ hệ thống, không chỉ của sale.</td></tr>
+<tr><td>Có cần công bằng theo thứ tự bấm?</td><td>Không. Chỉ cần không bán quá và không quá 2 cái mỗi người.</td><td>Không cần hàng đợi tuần tự.</td></tr>
+</tbody></table></div>
 <pre><code>SELECT stock FROM flash_items WHERE id = 7;
 -- nếu stock &lt;= 0 thì báo hết hàng
 UPDATE flash_items SET stock = stock - 1 WHERE id = 7;
 INSERT INTO orders (user_id, item_id, ...) VALUES (...);</code></pre>
-<p>Kết quả lần trước: 537 đơn cho 500 suất, <code>stock</code> cuối là −37. Vài khách mua 5 cái dù quy định tối đa 2 cái mỗi người.</p></dd>
-<dt>Yêu cầu</dt><dd><ul><li>Không bán quá 500.</li><li>Mỗi khách tối đa 2 cái.</li><li>Đơn được giữ suất 10 phút để thanh toán; quá hạn thì suất quay lại để bán tiếp.</li><li>Người mua được: p99 dưới 500 ms. Người không mua được: nhận "hết hàng" nhanh.</li></ul></dd>
-<dt>Ràng buộc</dt><dd>Một MySQL 8.4 primary, 16 vCPU, pool 50 connection mỗi instance app, 6 instance. Có sẵn Redis. Hai tuần để làm. Không đổi sang database khác.</dd>
-<dt>Nhiệm vụ</dt><dd>Giải thích vì sao ra 537. Thiết kế lại luồng giữ suất. Ước lượng row tồn kho chịu được bao nhiêu. Xử lý giới hạn 2 cái mỗi khách và việc hết hạn giữ suất.</dd>
-</dl>
-<details class="hint"><summary>Gợi ý</summary><ul>
-<li>Có hai bất biến. Mỗi bất biến nằm trên bao nhiêu row?</li>
-<li>Trong transaction, câu nào giữ khoá row tồn kho, và giữ trong bao lâu?</li>
-<li>30.000 người mà chỉ có 500 suất. Phần lớn request nên dừng lại ở đâu?</li>
-</ul></details>
-<details class="answer"><summary>Xem lời giải</summary>
-<h4 class="ah">1. Làm rõ đề bài</h4>
-<p>Vì sao ra 537: đây là lỗi "kiểm tra rồi mới làm". <code>SELECT</code> thường không khoá, nên hàng trăm request cùng đọc thấy <code>stock = 3</code> và cùng đi tiếp. <code>UPDATE</code> sau đó không có điều kiện, nên cứ trừ, và <code>stock</code> xuống −37. Giới hạn 2 cái mỗi khách hỏng theo đúng cách đó: đếm đơn của khách, rồi mới chèn.</p>
-<p>Những câu senior sẽ hỏi trước khi thiết kế, và giả định khi đề không nói:</p>
+<p><strong>Senior thường làm gì ở bước này:</strong> gọi tên hai bất biến ("tổng bán không quá 500", "mỗi người không quá 2") và hỏi mỗi bất biến nằm trên bao nhiêu row. Bất biến thứ nhất nằm trên một row duy nhất: row đó sẽ là điểm nóng của cả thiết kế.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Vì sao ra 537 đơn và stock −37? Vì sao giới hạn 2 cái cũng hỏng?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p>Đây là lỗi "kiểm tra rồi mới làm". <code>SELECT</code> thường không khoá, nên hàng trăm request cùng đọc thấy stock = 3 và cùng đi tiếp. <code>UPDATE</code> sau đó không có điều kiện nên cứ trừ, và stock xuống −37. Giới hạn 2 cái hỏng theo đúng cách đó: đếm đơn của khách, rồi mới chèn; hai request của cùng khách cùng đếm được 1.</p>
+<p>Chỗ senior nói thêm: lỗi không nằm ở mức isolation. Ở <code>REPEATABLE READ</code> hay <code>SERIALIZABLE</code>, chừng nào việc kiểm tra và việc ghi còn là hai câu tách rời mà câu ghi không mang điều kiện, bất biến vẫn có thể vỡ (ở <code>SERIALIZABLE</code> thì thay bằng deadlock).</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> Đồng nghiệp đề xuất thêm <code>FOR UPDATE</code> vào câu <code>SELECT</code>. Bạn nghĩ sao? Cho con số.</p>
+<details class="answer"><summary>Đáp án</summary>
+<p><strong>Đúng, nhưng sẽ sập vì hàng chờ.</strong> Mọi lần mua đều ghi vào một row (<code>flash_items</code> id 7).</p>
 <ul>
-<li>Suất hết hạn có bán lại không? Giả định có.</li>
-<li>Giới hạn tính theo tài khoản hay theo thiết bị? Giả định theo <code>user_id</code>, người dùng đã đăng nhập.</li>
-<li>Có cần công bằng theo thứ tự bấm không? Giả định không; chỉ cần không bán quá và không quá 2 cái mỗi người.</li>
-<li>Thanh toán thành công đúng lúc suất vừa hết hạn thì sao? Phải có câu trả lời rõ, xem phần Triển khai.</li>
+<li><code>FOR UPDATE</code>: khoá giữ qua ba vòng gọi cộng thời gian tính trong app, giả sử 5–8 ms. Trần khoảng 150 lần mỗi giây. 500 suất mất 3–4 giây, trong lúc 2.000 request mỗi giây dồn vào hàng chờ; nhiều request gặp lỗi 1205 (lock wait timeout).</li>
+<li>Câu ghi có điều kiện <code>UPDATE … SET stock = stock - ? WHERE id = 7 AND stock &gt;= ?</code>, autocommit: khoá giữ khoảng bằng thời gian commit, giả sử 1 ms. Trần khoảng 1.000 lần mỗi giây; 500 suất hết trong khoảng nửa giây.</li>
 </ul>
-<h4 class="ah">2. Ước lượng</h4>
-<ul>
-<li>Mọi lần mua đều ghi vào một row: <code>flash_items</code> id 7. Đây là row nóng.</li>
-<li>UPDATE có điều kiện, autocommit, giữ khoá khoảng bằng thời gian commit, giả sử 1 ms. Trần khoảng 1.000 lần trừ thành công mỗi giây. 500 suất sẽ hết trong khoảng nửa giây nếu chỉ tính phần thành công.</li>
-<li>Vấn đề thật nằm ở 29.500 request không mua được. Nếu chúng cũng đi xuống MySQL, mỗi câu vẫn phải xếp hàng lấy khoá X trên row id 7 chỉ để thấy <code>stock = 0</code>. 2.000 request mỗi giây trong 10 giây là 20.000 câu xếp hàng trên một row. Giả sử mỗi câu giữ khoá 0,2 ms, hàng chờ kéo dài khoảng 4 giây. 300 connection (6 × 50) bị giữ hết, và cả trang web chậm theo.</li>
-<li>Nếu dùng <code>FOR UPDATE</code>: khoá giữ qua 3 vòng gọi cộng thời gian tính trong app, khoảng 5–8 ms, trần khoảng 150 lần mỗi giây. 500 suất mất 3–4 giây, trong lúc 2.000 request mỗi giây dồn vào hàng chờ, nhiều request sẽ gặp lỗi 1205.</li>
-<li>Redis xử lý cỡ 100.000 lệnh đơn giản mỗi giây trên một luồng: dư sức làm cổng chặn.</li>
-</ul>
-<h4 class="ah">3. Các phương án</h4>
+<p>Nhưng ngay cả câu ghi có điều kiện cũng chưa đủ: 29.500 request không mua được vẫn phải xếp hàng lấy khoá trên row id 7 chỉ để thấy stock = 0. 2.000 request mỗi giây trong 10 giây là 20.000 câu; giả sử mỗi câu giữ khoá 0,2 ms, hàng chờ kéo dài khoảng 4 giây, đủ để giữ hết 300 connection, và cả trang web chậm theo. Tất cả là ước lượng; phải đo bằng test tải.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> Vậy làm sao để 29.500 người không mua được không làm sập MySQL?</p>
+<details class="answer"><summary>Đáp án</summary>
 <div class="tablewrap"><table>
 <thead><tr><th>Phương án</th><th>Cách làm</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
 <tbody>
-<tr><td>A. Thêm FOR UPDATE</td><td>Khoá row tồn kho trước khi đọc</td><td>Đúng; sửa ít code</td><td>Khoá giữ lâu nhất; hàng chờ dài, 1205, p99 vỡ</td></tr>
-<tr><td>B. UPDATE có điều kiện</td><td><code>stock = stock - ? WHERE id = 7 AND stock &gt;= ?</code>, xem số row</td><td>Đúng, đơn giản, khoá ngắn nhất</td><td>Mọi request vẫn chạm row nóng, kể cả khi đã hết hàng; cạn pool</td></tr>
-<tr><td>C. B cộng cổng chặn sớm</td><td>Redis giữ một bộ đếm vé vào cửa và cờ "hết hàng"; chỉ request có vé mới xuống MySQL; MySQL vẫn quyết định</td><td>Phần lớn request bị từ chối trong khoảng 1 ms; MySQL chỉ nhận vài trăm câu ghi</td><td>Hai bộ đếm có thể lệch; phải trả vé khi MySQL từ chối hoặc suất hết hạn</td></tr>
-<tr><td>D. Chia tồn kho thành nhiều ô</td><td>10 row, mỗi row 50 suất; chọn ngẫu nhiên một ô</td><td>Giảm tranh chấp trên một row</td><td>Ô hết thì thử ô khác; phức tạp; chỉ đáng khi số suất rất lớn</td></tr>
-<tr><td>E. Xếp hàng qua queue</td><td>Đẩy yêu cầu vào BullMQ, một worker xử lý tuần tự, trả kết quả sau</td><td>Công bằng theo thứ tự; không tranh khoá</td><td>Người dùng phải chờ kết quả; thêm thành phần; khó đạt p99 500 ms</td></tr>
-<tr><td>F. Redis là nguồn sự thật</td><td>Lua script trừ tồn kho và quota trong Redis, ghi đơn vào MySQL sau</td><td>Nhanh nhất</td><td>Redis bền kém MySQL; đồng bộ về MySQL là ghi đôi; cần đối soát</td></tr>
+<tr><td>A. <code>FOR UPDATE</code></td><td>Khoá row tồn kho trước khi đọc</td><td>Đúng; sửa ít code</td><td>Khoá giữ lâu nhất; hàng chờ dài, 1205</td></tr>
+<tr><td>B. Câu ghi có điều kiện</td><td>Xem số row bị ảnh hưởng</td><td>Đúng, đơn giản, khoá ngắn nhất</td><td>Mọi request vẫn chạm row nóng; cạn pool</td></tr>
+<tr><td>C. B cộng cổng chặn sớm</td><td>Redis giữ bộ đếm "vé vào cửa" và cờ hết hàng; chỉ request có vé mới xuống MySQL; MySQL vẫn quyết định</td><td>Phần lớn request bị từ chối trong khoảng 1 ms</td><td>Hai bộ đếm có thể lệch; phải trả vé khi MySQL từ chối</td></tr>
+<tr><td>D. Chia tồn kho thành nhiều ô</td><td>10 row, mỗi row 50 suất</td><td>Giảm tranh chấp trên một row</td><td>Ô hết thì thử ô khác; chỉ đáng khi số suất rất lớn</td></tr>
+<tr><td>E. Xếp hàng qua queue</td><td>Một worker xử lý tuần tự, trả kết quả sau</td><td>Công bằng theo thứ tự; không tranh khoá</td><td>Người dùng phải chờ; khó đạt p99 500 ms</td></tr>
+<tr><td>F. Redis là nguồn sự thật</td><td>Lua script trừ tồn kho trong Redis, ghi đơn vào MySQL sau</td><td>Nhanh nhất</td><td>Redis bền kém MySQL; ghi đôi; cần đối soát</td></tr>
 </tbody></table></div>
-<h4 class="ah">4. Đánh đổi và quyết định</h4>
-<p>Chọn C: MySQL là nguồn sự thật với UPDATE có điều kiện, Redis chỉ là cổng chặn lạc quan phía trước.</p>
+<p><strong>Chọn C.</strong> MySQL là nguồn sự thật với câu ghi có điều kiện; Redis chỉ là cổng chặn lạc quan phía trước.</p>
 <ul>
-<li>500 suất là ít. Phần thành công chỉ cần vài trăm câu ghi; B làm được.</li>
-<li>Vấn đề là 29.500 request thừa. Chặn chúng trước khi chạm MySQL giải quyết cả p99 lẫn cạn pool.</li>
-<li>Redis chỉ có thể làm sai theo hướng <em>từ chối nhầm</em> (bán thiếu), vì MySQL vẫn quyết định cuối cùng. Bán thiếu sửa được bằng cách mở lại cổng; bán quá thì không sửa được.</li>
+<li>500 suất là ít; phần thành công chỉ cần vài trăm câu ghi, B làm được.</li>
+<li>Vấn đề là 29.500 request thừa. Chặn chúng trước MySQL giải quyết cả p99 lẫn cạn pool.</li>
+<li>Redis chỉ có thể sai theo hướng từ chối nhầm (bán thiếu), vì MySQL quyết định cuối cùng. Bán thiếu sửa được bằng cách mở lại cổng; bán quá thì không sửa được. Đây là lý do C an toàn hơn F.</li>
 </ul>
-<p>Khi nào đổi ý: số suất lên vài chục nghìn và cần bán nhanh hơn khoảng 500 suất mỗi giây thì thêm D. Cần công bằng tuyệt đối theo thứ tự bấm thì chọn E và chấp nhận trả kết quả bất đồng bộ.</p>
-<h4 class="ah">5. Triển khai</h4>
+<p><strong>Khi nào đổi ý:</strong> số suất lên vài chục nghìn và cần bán nhanh hơn khoảng 500 suất mỗi giây thì thêm D. Cần công bằng tuyệt đối theo thứ tự bấm thì E, và chấp nhận trả kết quả bất đồng bộ.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> Đơn giữ suất 10 phút. Suất hết hạn quay lại kho thế nào? Và nếu thanh toán thành công đúng lúc suất vừa hết hạn?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li><strong>Hết hạn:</strong> một job mỗi 30 giây lấy reservation hết hạn bằng <code>FOR UPDATE SKIP LOCKED</code> (nhiều job chạy song song không giẫm nhau). Trong một transaction: <code>UPDATE reservations SET status = 'expired' WHERE id = ? AND status = 'held'</code>; được 1 row thì trừ qty ở quota trước, rồi mới cộng lại stock. Sau commit: trả vé vào Redis, xoá cờ hết hàng.</li>
+<li><strong>Thứ tự khoá:</strong> quota trước, tồn kho sau, giống hệt luồng mua. Đảo lại thì job hết hạn và một lần mua của cùng khách có thể deadlock. Lấy khoá row nóng muộn nhất cũng làm nó được giữ ngắn nhất.</li>
+<li><strong>Cuộc đua thanh toán và hết hạn:</strong> thanh toán thành công chạy <code>UPDATE reservations SET status = 'paid' WHERE id = ? AND status = 'held'</code>. 0 row nghĩa là suất đã hết hạn, đã trả lại kho, có thể đã bán cho người khác: hoàn tiền tự động. Câu ghi có điều kiện này là trọng tài duy nhất; không cần khoá thêm.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai và kiểm chứng thiết kế này thế nào trước ngày sale?</p>
+<details class="answer"><summary>Đáp án</summary>
 <pre><code>CREATE TABLE flash_items  (id BIGINT PRIMARY KEY, stock INT NOT NULL, CHECK (stock &gt;= 0));
 CREATE TABLE flash_quota  (sale_id BIGINT, user_id BIGINT, qty INT NOT NULL DEFAULT 0,
                            PRIMARY KEY (sale_id, user_id), CHECK (qty BETWEEN 0 AND 2));
@@ -623,41 +656,51 @@ CREATE TABLE reservations (id BIGINT PRIMARY KEY, sale_id BIGINT, user_id BIGINT
                            status ENUM('held','paid','expired'), expires_at DATETIME,
                            KEY idx_exp (status, expires_at));</code></pre>
 <ol class="list">
-<li><strong>Cổng:</strong> nếu Redis có cờ <code>soldout:7</code> thì trả "hết hàng" ngay. Nếu không, <code>DECRBY gate:7 qty</code>; kết quả âm thì <code>INCRBY</code> trả lại, đặt cờ, trả "hết hàng". <code>gate:7</code> khởi tạo bằng 500.</li>
-<li><strong>Transaction MySQL</strong>, thứ tự cố định:
-<ul>
-<li>Quota trước (row ít tranh chấp): <code>INSERT IGNORE INTO flash_quota (sale_id, user_id) VALUES (7, ?)</code>, rồi <code>UPDATE flash_quota SET qty = qty + ? WHERE sale_id = 7 AND user_id = ? AND qty + ? &lt;= 2</code>. 0 row nghĩa là vượt giới hạn.</li>
-<li>Tồn kho sau cùng (row nóng): <code>UPDATE flash_items SET stock = stock - ? WHERE id = 7 AND stock &gt;= ?</code>. 0 row nghĩa là hết hàng.</li>
-<li>Chèn <code>reservations</code> với <code>expires_at = NOW() + INTERVAL 10 MINUTE</code>, rồi <code>COMMIT</code>.</li>
-</ul></li>
-<li><strong>MySQL từ chối</strong> (0 row ở bất kỳ bước nào): rollback, <code>INCRBY gate:7 qty</code> để trả vé.</li>
-<li><strong>Hết hạn:</strong> một job mỗi 30 giây lấy reservation hết hạn bằng <code>FOR UPDATE SKIP LOCKED</code>. Trong một transaction: <code>UPDATE reservations SET status = 'expired' WHERE id = ? AND status = 'held'</code>; nếu được 1 row thì trừ <code>qty</code> ở quota trước, rồi mới cộng lại <code>stock</code>. Thứ tự quota trước, tồn kho sau phải giống hệt luồng mua. Đảo lại thì job hết hạn và một lần mua của cùng khách có thể deadlock. Sau commit: trả vé vào Redis, xoá cờ hết hàng.</li>
-<li><strong>Thanh toán thành công:</strong> <code>UPDATE reservations SET status = 'paid' WHERE id = ? AND status = 'held'</code>. 0 row nghĩa là suất đã hết hạn và đã được trả lại kho, có thể đã bán cho người khác: hoàn tiền tự động. Câu ghi có điều kiện này giải quyết cuộc đua giữa thanh toán và hết hạn.</li>
+<li>Cổng: có cờ <code>soldout:7</code> thì trả "hết hàng" ngay. Không thì <code>DECRBY gate:7 qty</code>; kết quả âm thì <code>INCRBY</code> trả lại, đặt cờ, trả "hết hàng". <code>gate:7</code> khởi tạo bằng 500.</li>
+<li>Transaction MySQL: <code>INSERT IGNORE INTO flash_quota (sale_id, user_id) VALUES (7, ?)</code>, rồi <code>UPDATE flash_quota SET qty = qty + ? WHERE sale_id = 7 AND user_id = ? AND qty + ? &lt;= 2</code> (0 row: vượt giới hạn); rồi câu trừ tồn kho có điều kiện (0 row: hết hàng); chèn reservation với <code>expires_at = NOW() + INTERVAL 10 MINUTE</code>; commit.</li>
+<li>MySQL từ chối ở bất kỳ bước nào: rollback, <code>INCRBY gate:7 qty</code> trả vé.</li>
 </ol>
-<p>Vì sao quota trước, tồn kho sau: khoá trên row nóng được lấy muộn nhất, nên giữ ngắn nhất (chỉ còn một INSERT và COMMIT). Mọi transaction đi cùng thứ tự, nên hai bảng không deadlock với nhau.</p>
-<h4 class="ah">6. Rủi ro và cách kiểm chứng</h4>
+<p><strong>Kiểm chứng:</strong></p>
 <ul>
-<li><strong>Redis lệch MySQL</strong> (Redis khởi động lại, app chết sau khi lấy vé): chỉ gây bán thiếu, vì MySQL vẫn quyết định cuối cùng. Một job mỗi 5 giây đặt lại <code>gate:7</code> bằng <code>stock</code> trong MySQL. Lúc đặt lại, các request đang giữ vé mà chưa commit được tính hai lần, nên cổng mở rộng hơn thực tế một chút. Việc này chỉ thêm tải cho MySQL, không gây bán quá.</li>
-<li><strong>Đối soát sau sale:</strong> <code>stock</code> cộng tổng <code>qty</code> của reservation <code>held</code> và <code>paid</code> phải bằng 500; tổng <code>qty</code> theo người không vượt 2.</li>
-<li><strong>Test tải trước ngày sale:</strong> 30.000 user ảo, đỉnh 2.000 request mỗi giây; kiểm tra 0 bán quá, p99, thời gian chờ pool, <code>Innodb_row_lock_waits</code>.</li>
-<li><strong>Đường lui:</strong> một feature flag tắt cổng Redis, quay về B. Vẫn đúng, chỉ chậm hơn.</li>
-</ul>
-<h4 class="ah">7. Lỗi hay gặp với bài này</h4>
-<ul>
-<li>Chỉ thêm <code>FOR UPDATE</code> và coi là xong: đúng nhưng sập vì hàng chờ.</li>
-<li>Dùng Redis <code>DECR</code> làm nguồn sự thật mà không có đối soát với MySQL.</li>
-<li>Kiểm tra quota bằng <code>COUNT(*)</code> đơn rồi mới chèn: lại là "kiểm tra rồi mới làm".</li>
-<li>Khoá row nóng ở đầu transaction rồi mới làm các việc khác.</li>
-<li>Quên cuộc đua giữa thanh toán thành công và suất hết hạn.</li>
+<li>Test tải: 30.000 user ảo, đỉnh 2.000 request mỗi giây. Đạt khi: 0 bán quá, 0 khách quá 2 cái, p99 người mua dưới 500 ms, thời gian chờ pool, <code>Innodb_row_lock_waits</code>.</li>
+<li>Redis lệch MySQL (Redis khởi động lại, app chết sau khi lấy vé) chỉ gây bán thiếu. Một job mỗi 5 giây đặt lại <code>gate:7</code> bằng stock trong MySQL; lúc đặt lại, request đang giữ vé có thể được tính hai lần, nên cổng mở rộng hơn thực tế một chút: chỉ thêm tải cho MySQL, không gây bán quá.</li>
+<li>Đối soát sau sale: stock cộng tổng qty của reservation <code>held</code> và <code>paid</code> bằng 500; tổng qty theo người không vượt 2.</li>
+<li>Đường lui: feature flag tắt cổng Redis, quay về B. Vẫn đúng, chỉ chậm hơn.</li>
 </ul>
 </details>
 </div>
 
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Chẩn đoán</td><td>"Race condition"</td><td>Chỉ đúng câu đọc không khoá và câu ghi không điều kiện; thấy quota hỏng cùng cơ chế</td></tr>
+<tr><td>Sửa tính đúng</td><td>Thêm <code>FOR UPDATE</code></td><td>Câu ghi có điều kiện; có con số so sánh thời gian giữ khoá</td></tr>
+<tr><td>Tải</td><td>Không nhắc tới người không mua được</td><td>Nhận ra 29.500 request thừa mới là vấn đề; cổng chặn mà MySQL vẫn quyết định</td></tr>
+<tr><td>Giữ suất</td><td>Job xoá đơn hết hạn</td><td>Thứ tự khoá giống luồng mua; cuộc đua thanh toán và hết hạn giải bằng câu ghi có điều kiện</td></tr>
+<tr><td>Kiểm chứng</td><td>"Test kỹ"</td><td>Test tải có tiêu chí đạt, đối soát sau sale, cờ tắt cổng</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> dùng Redis <code>DECR</code> làm nguồn sự thật mà không đối soát; kiểm tra quota bằng <code>COUNT(*)</code> rồi mới chèn; khoá row nóng ở đầu transaction; quên cuộc đua giữa thanh toán và hết hạn.</p>
+</details>
+</div>
+
+<!-- C2 -->
 <div class="case" id="c2">
 <h3>C2. Chuyển tiền trong ví: 50 deadlock mỗi ngày</h3>
-<p class="src">Dựa trên: phần 02–03 của trang này; <a href="../innodb-locking-deadlock/index.html">Locking và deadlock</a>.</p>
-<dl>
-<dt>Bối cảnh</dt><dd><p>Ví điện tử 3 triệu người dùng, đỉnh 400 lần chuyển tiền giữa hai ví mỗi giây. Một vài ví của shop nhận khoảng 30 lần mỗi giây lúc cao điểm. Code hiện tại:</p>
+<p class="src">Dựa trên: phần 02–03 của trang này; <a href="../locking-deadlock/index.html">Locking và deadlock</a>.</p>
+<blockquote class="q">"Hệ thống ví của chúng tôi có khoảng 50 deadlock mỗi ngày ở luồng chuyển tiền. Team đưa ra ba đề xuất: chuyển sang SERIALIZABLE, dùng cột version, hoặc gặp deadlock thì thử lại 3 lần. Bạn chọn cái nào?"</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>Cho tôi xem transaction chuyển tiền?</td><td>Code bên dưới; MySQL 8.4, <code>REPEATABLE READ</code>.</td><td>Deadlock là chuyện thứ tự khoá; phải thấy thứ tự.</td></tr>
+<tr><td>Có log deadlock không?</td><td>Có, lỗi 1213 trong log app. Chưa ai đọc <code>LATEST DETECTED DEADLOCK</code>.</td><td>Chẩn đoán trước, chọn giải pháp sau.</td></tr>
+<tr><td>Tải?</td><td>3 triệu người dùng; đỉnh 400 lần chuyển mỗi giây. Vài ví shop nhận khoảng 30 lần mỗi giây lúc cao điểm.</td><td>Ví shop là row có thể nóng.</td></tr>
+<tr><td>Gặp deadlock thì người dùng thấy gì?</td><td>App trả 500, người dùng bấm lại.</td><td>Bấm lại có an toàn không phụ thuộc vào lỗi xảy ra trước hay sau commit.</td></tr>
+<tr><td>Có idempotency key không?</td><td>Chưa.</td><td>Không có thì bấm lại sau timeout có thể trừ hai lần.</td></tr>
+<tr><td>Giới hạn?</td><td>Không đổi mô hình dữ liệu lớn trong quý này. Ledger phải đủ cho kiểm toán.</td><td>Loại bỏ phương án sổ cái chỉ thêm cho mọi ví.</td></tr>
+</tbody></table></div>
 <pre><code>START TRANSACTION;
 SELECT balance FROM wallets WHERE id = :from FOR UPDATE;
 -- nếu balance &lt; amount thì ROLLBACK, báo không đủ tiền
@@ -665,46 +708,62 @@ UPDATE wallets SET balance = balance - :amount WHERE id = :from;
 UPDATE wallets SET balance = balance + :amount WHERE id = :to;
 INSERT INTO ledger (...) VALUES (...), (...);   -- hai dòng: nợ và có
 COMMIT;</code></pre>
-<p>Log có khoảng 50 lỗi 1213 mỗi ngày. App trả 500, người dùng bấm lại. Team đưa ra ba đề xuất: chuyển sang SERIALIZABLE; chuyển sang cột version; hoặc thử lại ngay 3 lần khi gặp 1213.</p></dd>
-<dt>Yêu cầu</dt><dd>Không sai tiền. Người dùng gần như không bao giờ thấy lỗi do deadlock. Bấm lại không bị trừ hai lần. Ledger vẫn đủ cho kiểm toán.</dd>
-<dt>Ràng buộc</dt><dd>MySQL 8.4, REPEATABLE READ. Không đổi mô hình dữ liệu lớn trong quý này.</dd>
-<dt>Nhiệm vụ</dt><dd>Tìm nguyên nhân deadlock. Đánh giá từng đề xuất của team. Đưa ra thiết kế, và nói ví của shop có cần xử lý riêng không.</dd>
-</dl>
-<details class="hint"><summary>Gợi ý</summary><ul>
-<li>Hai lần chuyển ngược chiều nhau khoá hai ví theo thứ tự nào?</li>
-<li>"Bấm lại" và "thử lại khi 1213" khác nhau ở chỗ nào về rủi ro trừ hai lần?</li>
-<li>Cộng tiền vào ví có cần đọc số dư trước không?</li>
-</ul></details>
-<details class="answer"><summary>Xem lời giải</summary>
-<h4 class="ah">1. Làm rõ đề bài</h4>
-<p>Nguyên nhân gần như chắc chắn là khoá theo thứ tự "ví gửi rồi ví nhận". A chuyển cho B khoá A rồi B; cùng lúc B chuyển cho A khoá B rồi A. Hai bên chờ nhau. Xác nhận bằng <code>LATEST DETECTED DEADLOCK</code> hoặc bật <code>innodb_print_all_deadlocks</code>: hai transaction, mỗi bên giữ X trên một id của <code>wallets</code> và chờ id còn lại.</p>
-<p>Câu hỏi cần hỏi: app có gửi idempotency key không? Khi app trả 500 sau deadlock, transaction đã rollback nên bấm lại là an toàn. Nhưng khi app trả 500 vì timeout sau commit, bấm lại sẽ trừ hai lần. Giả định hiện chưa có key.</p>
-<h4 class="ah">2. Ước lượng</h4>
-<ul>
-<li>Đỉnh là 400 lần mỗi giây. Giả sử trung bình cả ngày 100 lần mỗi giây, tức khoảng 8,6 triệu lần mỗi ngày; 50 deadlock là khoảng 0,0006%. Hiếm, nhưng mỗi lần là một lỗi người dùng thấy.</li>
-<li>Ví shop: 30 lần cộng mỗi giây. Nếu mỗi transaction giữ khoá ví shop khoảng 3 ms (vài vòng gọi cộng commit), mức tải khoảng 9%. Chưa nóng. Ngưỡng cần lo là khi tải vượt khoảng 50%, tức khoảng 150 lần mỗi giây với cùng thời gian giữ khoá.</li>
-</ul>
-<h4 class="ah">3. Các phương án</h4>
+<p><strong>Senior thường làm gì ở bước này:</strong> từ chối chọn trong ba đề xuất trước khi biết nguyên nhân. Câu hỏi đúng là "hai transaction nào đang chờ nhau, trên row nào", và câu trả lời có sẵn trong <code>SHOW ENGINE INNODB STATUS</code>.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Nhìn code này, deadlock đến từ đâu? Bạn xác nhận bằng gì?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p>Gần như chắc chắn là khoá theo thứ tự "ví gửi rồi ví nhận". A chuyển cho B khoá A rồi B; cùng lúc B chuyển cho A khoá B rồi A. Hai bên chờ nhau.</p>
+<p>Xác nhận: <code>LATEST DETECTED DEADLOCK</code> trong <code>SHOW ENGINE INNODB STATUS</code>, hoặc bật <code>innodb_print_all_deadlocks</code> để có mọi lần. Dấu hiệu: hai transaction, mỗi bên giữ khoá X trên một <code>id</code> của <code>wallets</code> và chờ <code>id</code> còn lại.</p>
+<p>Đặt con số: giả sử trung bình 100 lần chuyển mỗi giây, khoảng 8,6 triệu lần mỗi ngày; 50 deadlock là khoảng 0,0006%. Hiếm, nhưng mỗi lần là một lỗi người dùng thấy, và hiện đang trả 500.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> Đánh giá từng đề xuất của team. Bạn chọn gì?</p>
+<details class="answer"><summary>Đáp án</summary>
 <div class="tablewrap"><table>
 <thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
 <tbody>
-<tr><td>A. SERIALIZABLE</td><td>Không phải sửa code</td><td>Không sửa thứ tự khoá; thêm khoá đọc cho mọi <code>SELECT</code> khác, nên thêm deadlock</td></tr>
-<tr><td>B. Cột version</td><td>Không giữ khoá lúc đọc</td><td>Ví shop nhận 30 lần mỗi giây sẽ xung đột liên tục; cần vòng thử lại; vẫn phải ghi hai row nguyên tử</td></tr>
-<tr><td>C. Thử lại ngay 3 lần</td><td>Che được lỗi trước người dùng</td><td>Không sửa nguyên nhân; thử ngay có thể đụng lại; chỉ an toàn khi thử lại cả transaction</td></tr>
-<tr><td>D. Khoá theo thứ tự id</td><td>Loại hẳn deadlock chéo; sửa ít</td><td>Code phải biết sắp xếp; mọi đường ghi ví đều phải theo</td></tr>
-<tr><td>E. Hai câu ghi có điều kiện</td><td>Bỏ <code>SELECT … FOR UPDATE</code>, giảm một vòng gọi khi giữ khoá</td><td>Báo lỗi "thiếu bao nhiêu" cần đọc thêm</td></tr>
-<tr><td>F. Sổ cái chỉ thêm cho ví nóng</td><td>Tiền vào không chạm row nóng</td><td>Số dư phải tính gộp; thay đổi mô hình, ngoài phạm vi quý này</td></tr>
+<tr><td>A. <code>SERIALIZABLE</code></td><td>Không sửa code</td><td>Không sửa thứ tự khoá; thêm khoá đọc cho mọi <code>SELECT</code> khác, nên thêm deadlock</td></tr>
+<tr><td>B. Cột version</td><td>Không giữ khoá lúc đọc</td><td>Ví shop nhận 30 lần mỗi giây sẽ xung đột liên tục; vẫn phải ghi hai row nguyên tử</td></tr>
+<tr><td>C. Thử lại 3 lần</td><td>Che lỗi trước người dùng</td><td>Không sửa nguyên nhân; chỉ an toàn khi thử lại cả transaction</td></tr>
+<tr><td>D. Khoá theo thứ tự id</td><td>Loại hẳn deadlock chéo; sửa ít</td><td>Mọi đường ghi ví đều phải theo</td></tr>
+<tr><td>E. Hai câu ghi có điều kiện</td><td>Bỏ <code>SELECT … FOR UPDATE</code>, bớt một vòng gọi khi giữ khoá</td><td>Báo "thiếu bao nhiêu" cần đọc thêm</td></tr>
 </tbody></table></div>
-<h4 class="ah">4. Đánh đổi và quyết định</h4>
-<p>Chọn D cộng E, thêm C làm lưới an toàn, thêm idempotency key cho lần bấm lại.</p>
+<p><strong>Chọn D cộng E, giữ C làm lưới an toàn.</strong></p>
 <ul>
 <li>D sửa đúng nguyên nhân. E làm khoá ngắn hơn, nên cả deadlock lẫn chờ khoá đều hiếm hơn.</li>
-<li>C vẫn cần, vì deadlock có thể đến từ đường khác (hoàn tiền, phí). Nhưng thử lại phải là cả transaction, có jitter, tối đa 3 lần.</li>
-<li>Idempotency key giải quyết vấn đề khác: người dùng bấm lại sau timeout. Không có nó, sửa deadlock xong vẫn còn rủi ro trừ hai lần.</li>
-<li>A sai hướng. B tệ nhất cho ví shop, vì tiền vào không cần đọc trước.</li>
-<li>Ví shop: chưa cần F ở mức 30 lần mỗi giây. Đặt metric thời gian chờ khoá theo ví; vượt ngưỡng mới xem xét F.</li>
+<li>C vẫn cần, vì deadlock có thể đến từ đường khác (hoàn tiền, phí). Nhưng thử lại là cả transaction, có jitter, tối đa 3 lần.</li>
+<li>A sai hướng. B tệ nhất cho ví shop, vì tiền vào không cần đọc số dư trước.</li>
 </ul>
-<h4 class="ah">5. Triển khai</h4>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> Người dùng hay bấm lại khi thấy lỗi. Sau khi sửa deadlock, còn rủi ro trừ tiền hai lần không?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p>Còn. Hai loại lỗi rất khác nhau:</p>
+<ul>
+<li>Lỗi deadlock: transaction đã rollback, bấm lại an toàn.</li>
+<li>Lỗi timeout sau commit (mạng chậm, app chết sau khi MySQL commit): tiền đã chuyển, app vẫn trả lỗi. Bấm lại là chuyển hai lần.</li>
+</ul>
+<p>Sửa deadlock không chạm tới loại thứ hai. Cần idempotency key: client sinh <code>transfer_id</code> một lần cho mỗi ý định chuyển, gửi lại cùng id khi bấm lại; server chèn vào bảng <code>transfers</code> có <code>PRIMARY KEY</code> trong cùng transaction. Lỗi 1062 nghĩa là lần trước đã thành công: đọc lại và trả đúng kết quả cũ. Cũng vì thế mà vòng thử lại tự động ở C an toàn: nó dùng cùng <code>transfer_id</code>.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> Ví của một shop lớn nhận 30 lần mỗi giây. Có cần xử lý riêng không? Khi nào thì cần?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p>Chưa cần. Nếu mỗi transaction giữ khoá ví shop khoảng 3 ms (sau khi áp dụng E), mức tải trên row đó khoảng 30 × 3 ms = 9%. Thời gian chờ khoá bắt đầu tăng nhanh khi mức tải vượt khoảng 50%, tức khoảng 150 lần mỗi giây với cùng thời gian giữ khoá (ước lượng theo mô hình hàng đợi; phải đo).</p>
+<p>Khi cần, phương án là sổ cái chỉ thêm cho ví nóng: tiền vào ghi thành dòng mới trong một bảng riêng, không chạm row số dư; số dư khả dụng tính bằng số dư cộng các dòng chưa gộp, một job gộp định kỳ. Cái giá: thay đổi mô hình dữ liệu (ngoài phạm vi quý này) và đọc số dư đắt hơn. Vì vậy đặt metric thời gian chờ khoá theo ví ngay bây giờ, và chỉ làm khi số đo đòi hỏi.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai và kiểm chứng thay đổi này thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
 <pre><code>// transfers.id là idempotency key do client gửi; PRIMARY KEY chặn chạy hai lần
 async function transfer(t: { id: string; from: number; to: number; amount: number }) {
   return withRetry(() =&gt; inTx(async (conn) =&gt; {
@@ -722,94 +781,125 @@ async function transfer(t: { id: string; from: number; to: number; amount: numbe
                        [t.id, t.from, -t.amount, t.id, t.to, t.amount]);
   }), isDeadlockOrLockWait, { attempts: 3, base: 20, cap: 200 });
 }</code></pre>
-<p>Lỗi 1062 trên <code>transfers</code> nghĩa là lần bấm trước đã thành công: đọc lại và trả đúng kết quả cũ, không báo lỗi.</p>
-<h4 class="ah">6. Rủi ro và cách kiểm chứng</h4>
 <ul>
-<li>Đường ghi khác (hoàn tiền, phí, admin) không theo thứ tự id: liệt kê mọi câu <code>UPDATE wallets</code> trong code, đưa về một hàm chung.</li>
-<li>Kiểm chứng: script tạo cặp chuyển ngược chiều liên tục giữa 20 ví, chạy bản cũ và bản mới, đếm 1213 (bản mới phải bằng 0 với đúng kịch bản này).</li>
-<li>Theo dõi: <code>lock_deadlocks</code> trong <code>INNODB_METRICS</code>, số lần thử lại, tỉ lệ 1062 trên <code>transfers</code>.</li>
-<li>Đối soát hằng ngày: tổng <code>balance</code> thay đổi bằng tổng <code>delta</code> trong ledger.</li>
-</ul>
-<h4 class="ah">7. Lỗi hay gặp với bài này</h4>
-<ul>
-<li>Tin rằng SERIALIZABLE làm hết deadlock.</li>
-<li>Thử lại chỉ câu lệnh cuối cùng thay vì cả transaction.</li>
-<li>Thử lại mà không có idempotency key, rồi trừ hai lần khi lỗi là timeout sau commit.</li>
-<li>Sắp xếp theo "gửi trước, nhận sau" thay vì theo id.</li>
+<li>Tìm mọi câu <code>UPDATE wallets</code> trong code (hoàn tiền, phí, admin) và đưa về một hàm chung; một đường ghi không theo thứ tự id là đủ để deadlock quay lại.</li>
+<li>Test: script tạo cặp chuyển ngược chiều liên tục giữa 20 ví, chạy bản cũ và bản mới; bản mới phải có 0 lỗi 1213 với đúng kịch bản này.</li>
+<li>Theo dõi: <code>lock_deadlocks</code> trong <code>INNODB_METRICS</code>, số lần thử lại, tỉ lệ 1062 trên <code>transfers</code>, thời gian chờ khoá theo ví.</li>
+<li>Đối soát hằng ngày: tổng thay đổi số dư bằng tổng <code>delta</code> trong ledger.</li>
 </ul>
 </details>
 </div>
 
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Chẩn đoán</td><td>Chọn ngay một trong ba đề xuất</td><td>Chỉ ra thứ tự khoá chéo, xác nhận bằng log deadlock</td></tr>
+<tr><td>Đánh giá đề xuất</td><td>"SERIALIZABLE an toàn nhất"</td><td>Nói được vì sao A thêm deadlock, B tệ cho ví nóng, C chỉ che triệu chứng</td></tr>
+<tr><td>Bấm lại</td><td>Không phân biệt hai loại lỗi</td><td>Tách lỗi trước và sau commit; idempotency key</td></tr>
+<tr><td>Ví nóng</td><td>"Dùng Redis" hoặc bỏ qua</td><td>Tính mức tải trên row, có ngưỡng, có metric để biết khi nào làm</td></tr>
+<tr><td>Kiểm chứng</td><td>Không có</td><td>Test tái hiện deadlock, metric, đối soát với ledger</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> tin <code>SERIALIZABLE</code> làm hết deadlock; thử lại chỉ câu lệnh cuối thay vì cả transaction; thử lại không có idempotency key; sắp xếp theo "gửi trước, nhận sau" thay vì theo id.</p>
+</details>
+</div>
+
+<!-- C3 -->
 <div class="case" id="c3">
-<h3>C3. Hồ sơ khách hàng bị ghi đè sau khi nhân viên bấm lưu</h3>
+<h3>C3. Hồ sơ khách hàng bị ghi đè sau khi bấm lưu</h3>
 <p class="src">Dựa trên: phần 02–03 của trang này (cột version).</p>
-<dl>
-<dt>Bối cảnh</dt><dd><p>CRM nội bộ với 200 nhân viên chăm sóc khách hàng. Màn hình hồ sơ có địa chỉ, số điện thoại, ghi chú và hạn mức tín dụng. Nhân viên mở form, gọi cho khách 5–10 phút, rồi bấm lưu. API là <code>PUT /customers/:id</code> gửi cả object.</p>
-<p>Song song, một job chấm điểm tín dụng chạy mỗi giờ, cập nhật <code>credit_limit</code> và <code>risk_tier</code> cho 2 triệu khách, theo lô 1.000.</p>
-<p>Báo cáo: hạn mức tín dụng bị trả về giá trị cũ sau khi nhân viên lưu. Hai nhân viên cùng sửa một khách thì ghi chú của người này mất.</p></dd>
-<dt>Yêu cầu</dt><dd>Không mất thay đổi của ai. Nhân viên biết khi có xung đột và không mất phần đã gõ. Job không bị chặn bởi form đang mở, và không làm nhân viên gặp xung đột liên tục.</dd>
-<dt>Ràng buộc</dt><dd>Không được khoá bản ghi trong lúc form đang mở. Client cũ vẫn gọi <code>PUT</code> trong một thời gian.</dd>
-<dt>Nhiệm vụ</dt><dd>Nguyên nhân. Thiết kế cơ chế kiểm soát cho xung đột giữa người với người và giữa người với job. Mô tả trải nghiệm khi có xung đột.</dd>
-</dl>
-<details class="hint"><summary>Gợi ý</summary><ul>
-<li>Form gửi lại những field nào, kể cả field nhân viên không sửa?</li>
-<li>Một version cho cả row thì job sẽ gây ra bao nhiêu xung đột giả?</li>
-<li>Ghi chú có nhất thiết phải là một field bị sửa đè không?</li>
-</ul></details>
-<details class="answer"><summary>Xem lời giải</summary>
-<h4 class="ah">1. Làm rõ đề bài</h4>
-<p>Nguyên nhân: <code>PUT</code> gửi cả object, gồm cả <code>credit_limit</code> đọc lúc mở form. Job cập nhật hạn mức trong 10 phút đó, rồi nhân viên lưu và ghi đè lại giá trị cũ. Đây là mất thay đổi ở tầng ứng dụng. Ghi chú bị mất cũng theo đúng cơ chế đó, giữa hai nhân viên.</p>
-<p>Câu hỏi cần hỏi:</p>
+<blockquote class="q">"Trong CRM nội bộ, hạn mức tín dụng của khách thỉnh thoảng bị trả về giá trị cũ, và ghi chú của nhân viên này bị mất khi nhân viên khác lưu. Bạn sẽ điều tra và sửa thế nào?"</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>Màn hình lưu bằng API nào, gửi những gì?</td><td><code>PUT /customers/:id</code> gửi cả object: địa chỉ, số điện thoại, ghi chú, hạn mức tín dụng.</td><td>Gửi cả object là nghi phạm số một.</td></tr>
+<tr><td>Ai khác ghi vào hồ sơ?</td><td>Một job chấm điểm tín dụng mỗi giờ, cập nhật <code>credit_limit</code> và <code>risk_tier</code> cho 2 triệu khách theo lô 1.000.</td><td>Một nguồn ghi tự động, chạy đều đặn.</td></tr>
+<tr><td>Nhân viên mở form bao lâu?</td><td>5–10 phút: mở form, gọi khách, rồi bấm lưu.</td><td>Cửa sổ đọc rồi ghi rất dài.</td></tr>
+<tr><td>Có bao nhiêu nhân viên?</td><td>200, làm 8 giờ một ngày.</td><td>Để ước lượng số lần lưu và số xung đột.</td></tr>
+<tr><td>Nhân viên có được sửa hạn mức không?</td><td>Không; hạn mức do job và quản lý quyết định qua luồng khác.</td><td>Field đó không nên có trong form gửi lên.</td></tr>
+<tr><td>Giới hạn?</td><td>Không khoá bản ghi lúc form mở. Client cũ vẫn gọi <code>PUT</code> một thời gian.</td><td>Loại bỏ khoá bi quan; cần đường chuyển tiếp.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> hỏi "ai khác ghi vào row này". Mất thay đổi luôn cần hai người ghi; tìm ra người ghi thứ hai (ở đây là job) thường là nửa lời giải.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Nguyên nhân của cả hai triệu chứng là gì?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p>Mất thay đổi ở tầng ứng dụng. <code>PUT</code> gửi cả object, gồm cả <code>credit_limit</code> đọc lúc mở form. Job cập nhật hạn mức trong 10 phút đó, rồi nhân viên bấm lưu và ghi đè lại giá trị cũ. Ghi chú mất theo đúng cơ chế đó, giữa hai nhân viên. Database không làm gì sai: mỗi câu <code>UPDATE</code> đều nguyên tử; vấn đề là giá trị đem đi ghi đã cũ.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> Thêm một cột version cho cả row là đủ chưa? Cho con số.</p>
+<details class="answer"><summary>Đáp án</summary>
+<p><strong>Đúng nhưng không dùng được.</strong> Job chạm mọi khách mỗi giờ, nên mỗi lần chạy làm tăng version của mọi row.</p>
 <ul>
-<li>Nhân viên có được sửa hạn mức không? Giả định không; hạn mức do job và quản lý quyết định qua luồng khác.</li>
-<li>Ghi chú là sửa một khối văn bản, hay thêm một dòng mới? Đề xuất đổi thành thêm dòng.</li>
-<li>Hai nhân viên cùng sửa một khách có hay xảy ra không? Giả định hiếm.</li>
+<li>Form mở trung bình 7,5 phút, nên có khoảng 7,5 / 60 ≈ 12% khả năng bị job cập nhật trong lúc mở.</li>
+<li>Mỗi nhân viên khoảng 6 form mỗi giờ; 200 × 8 × 6 ≈ 9.600 lần lưu mỗi ngày. Khoảng 1.200 lần sẽ báo xung đột, gần như tất cả là xung đột giả (job sửa field nhân viên không động tới).</li>
 </ul>
-<h4 class="ah">2. Ước lượng</h4>
-<ul>
-<li>Job chạm mọi khách mỗi giờ. Form mở trung bình 7,5 phút, nên có khoảng 7,5/60, tức khoảng 12%, khả năng bị job cập nhật trong lúc mở.</li>
-<li>Mỗi nhân viên xử lý khoảng 6 form mỗi giờ (6 × 7,5 phút đã là 45 phút). 200 nhân viên × 8 giờ × 6 form là khoảng 9.600 lần lưu mỗi ngày. Nếu dùng một version cho cả row, khoảng 1.200 lần lưu mỗi ngày sẽ báo xung đột, gần như tất cả là xung đột giả. Nhân viên sẽ ghét tính năng này và tìm cách lách.</li>
-</ul>
-<h4 class="ah">3. Các phương án</h4>
+<p>Nhân viên sẽ ghét tính năng này và tìm cách lách (bấm lưu lại cho tới khi được). Một cơ chế kiểm soát đúng nhưng báo động giả 12% là cơ chế sẽ bị vô hiệu hoá.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> Vậy bạn thiết kế thế nào để bắt được xung đột thật mà không có xung đột giả?</p>
+<details class="answer"><summary>Đáp án</summary>
 <div class="tablewrap"><table>
 <thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
 <tbody>
-<tr><td>A. Một version cho cả row</td><td>Bắt mọi mất thay đổi; dễ làm</td><td>Job tăng version, gây khoảng 12% xung đột giả</td></tr>
+<tr><td>A. Một version cho cả row</td><td>Bắt mọi mất thay đổi; dễ làm</td><td>Khoảng 12% xung đột giả</td></tr>
 <tr><td>B. Khoá mềm "đang được X sửa", có hạn</td><td>Tránh hai người cùng sửa</td><td>Khoá treo khi đóng tab; không giải quyết job</td></tr>
-<tr><td>C. PATCH chỉ field đã đổi, kèm giá trị gốc</td><td>Xung đột chỉ khi cùng field</td><td>Câu ghi phức tạp; so sánh giá trị gốc với text dài, NULL</td></tr>
-<tr><td>D. Tách nhóm field theo người sở hữu</td><td>Job và nhân viên không đụng nhau; mỗi nhóm có version riêng</td><td>Đổi schema và API</td></tr>
+<tr><td>C. <code>PATCH</code> chỉ field đã đổi, kèm giá trị gốc</td><td>Xung đột chỉ khi cùng field</td><td>So sánh giá trị gốc với text dài, NULL phức tạp</td></tr>
+<tr><td>D. Tách nhóm field theo người sở hữu, mỗi nhóm một version</td><td>Job và nhân viên không đụng nhau</td><td>Đổi schema và API</td></tr>
 <tr><td>E. Ghi chú chỉ thêm</td><td>Không bao giờ xung đột</td><td>Đổi cách dùng; cần hiển thị lịch sử</td></tr>
-<tr><td>F. Ai lưu sau thắng (hiện tại)</td><td>Không làm gì</td><td>Chính là lỗi đang gặp</td></tr>
 </tbody></table></div>
-<h4 class="ah">4. Đánh đổi và quyết định</h4>
-<p>Chọn D cộng A trong từng nhóm, cộng E cho ghi chú.</p>
+<p><strong>Chọn D cộng A trong từng nhóm, cộng E cho ghi chú.</strong></p>
 <ul>
-<li>Nhóm hồ sơ (địa chỉ, số điện thoại) do nhân viên sở hữu, có version riêng. Xung đột thật giữa hai nhân viên hiếm, nên kiểm tra sau là hợp.</li>
-<li>Nhóm tín dụng (<code>credit_limit</code>, <code>risk_tier</code>) tách sang bảng riêng. Job ghi bằng câu ghi trực tiếp, không chạm version của hồ sơ. Form hiển thị hạn mức ở dạng chỉ đọc và không gửi nó lên.</li>
-<li>Ghi chú thành bảng <code>customer_notes</code> chỉ thêm: không còn gì để xung đột.</li>
+<li>Nhóm hồ sơ (địa chỉ, số điện thoại) do nhân viên sở hữu, có version riêng. Xung đột thật giữa hai nhân viên hiếm, nên kiểm tra sau khi ghi là hợp.</li>
+<li>Nhóm tín dụng tách sang bảng riêng; job ghi trực tiếp, không chạm version hồ sơ. Form hiển thị hạn mức chỉ đọc và không gửi nó lên.</li>
+<li>Ghi chú thành bảng chỉ thêm: không còn gì để xung đột.</li>
 </ul>
-<p>Khi nào đổi ý: nếu một nhóm nhân viên thường cùng sửa một khách (tổng đài xử lý theo ca), thêm B như một gợi ý mềm trên giao diện, không phải khoá thật. Nếu không thể tách bảng trong quý này, C là bước tạm chấp nhận được.</p>
-<h4 class="ah">5. Triển khai</h4>
+<p><strong>Khi nào đổi ý:</strong> nếu không thể tách bảng trong quý này, C là bước tạm chấp nhận được. Nếu một nhóm nhân viên thường cùng sửa một khách, thêm B như gợi ý mềm trên giao diện, không phải khoá thật.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> Khi có xung đột thật, nhân viên thấy gì?</p>
+<details class="answer"><summary>Đáp án</summary>
 <ul>
-<li><strong>Schema:</strong> <code>customer_profile (id, address, phone, version)</code>, <code>customer_credit (customer_id, credit_limit, risk_tier, updated_at)</code>, <code>customer_notes (id, customer_id, author_id, body, created_at)</code>.</li>
-<li><strong>Đọc:</strong> <code>GET /customers/:id</code> trả header <code>ETag: "v12"</code> theo version của hồ sơ.</li>
-<li><strong>Ghi:</strong> <code>PATCH /customers/:id/profile</code> với <code>If-Match: "v12"</code>. Server chạy <code>UPDATE customer_profile SET … , version = version + 1 WHERE id = ? AND version = 12</code>. 0 row thì trả <code>412 Precondition Failed</code> kèm bản hiện tại.</li>
-<li><strong>Trải nghiệm khi xung đột:</strong> giữ nguyên phần nhân viên đã gõ. Hiện từng field khác nhau: "của bạn" bên cạnh "mới nhất". Cho chọn giữ hoặc lấy bản mới, rồi lưu lại với version mới.</li>
-<li><strong>Client cũ:</strong> trong giai đoạn chuyển, request không có <code>If-Match</code> nhận <code>428 Precondition Required</code>, kèm thông báo cập nhật app. Nếu chưa thể chặn ngay, server bỏ qua <code>credit_limit</code> trong body của <code>PUT</code> cũ.</li>
+<li>Server trả <code>412 Precondition Failed</code> kèm bản hiện tại.</li>
+<li>Giao diện giữ nguyên phần nhân viên đã gõ. Hiện từng field khác nhau: "của bạn" bên cạnh "mới nhất". Cho chọn giữ hoặc lấy bản mới, rồi lưu lại với version mới.</li>
+<li>Không bao giờ: báo "lỗi, vui lòng thử lại" rồi tải lại form và xoá phần đã gõ sau 10 phút gọi điện. Đó là cách nhanh nhất để nhân viên tìm cách lách cơ chế.</li>
 </ul>
-<h4 class="ah">6. Rủi ro và cách kiểm chứng</h4>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai và kiểm chứng thế nào, khi client cũ vẫn gọi <code>PUT</code>?</p>
+<details class="answer"><summary>Đáp án</summary>
 <ul>
-<li>Theo dõi tỉ lệ 412 trên số lần lưu. Kỳ vọng dưới 1%; cao hơn nghĩa là còn nguồn ghi nào khác đang tăng version.</li>
-<li>Test: hai tab cùng sửa một khách; một tab và job cùng chạy. Kiểm tra không mất gì và 412 chỉ xuất hiện ở trường hợp đầu.</li>
-<li>Đối chiếu log của job với giá trị hạn mức sau một tuần: không còn giá trị bị trả về cũ.</li>
+<li>Schema: <code>customer_profile (id, address, phone, version)</code>, <code>customer_credit (customer_id, credit_limit, risk_tier, updated_at)</code>, <code>customer_notes (id, customer_id, author_id, body, created_at)</code>.</li>
+<li>Đọc: <code>GET /customers/:id</code> trả header <code>ETag: "v12"</code> theo version hồ sơ.</li>
+<li>Ghi: <code>PATCH /customers/:id/profile</code> với <code>If-Match: "v12"</code>; server chạy <code>UPDATE customer_profile SET …, version = version + 1 WHERE id = ? AND version = 12</code>. 0 row thì 412.</li>
+<li>Client cũ: trước hết server bỏ qua <code>credit_limit</code> trong body của <code>PUT</code> (sửa ngay lỗi nặng nhất). Sau đó request không có <code>If-Match</code> nhận <code>428 Precondition Required</code> kèm thông báo cập nhật app.</li>
+<li>Kiểm chứng: test hai tab cùng sửa một khách, và một tab cùng job; 412 chỉ được xuất hiện ở trường hợp đầu. Theo dõi tỉ lệ 412 trên số lần lưu, kỳ vọng dưới 1%; cao hơn nghĩa là còn nguồn ghi nào khác đang tăng version. Sau một tuần, đối chiếu log của job với hạn mức hiện tại: không còn giá trị bị trả về cũ.</li>
 </ul>
-<h4 class="ah">7. Lỗi hay gặp với bài này</h4>
-<ul>
-<li>Dùng một version cho cả row, để job làm tăng version.</li>
-<li>Giữ <code>FOR UPDATE</code> suốt lúc form mở.</li>
-<li>Báo "lỗi, vui lòng thử lại" rồi xoá phần nhân viên đã gõ.</li>
-<li>So sánh <code>updated_at</code> độ phân giải giây thay cho version, nên bỏ sót hai lần ghi trong cùng một giây.</li>
-</ul>
+</details>
+</div>
+
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Chẩn đoán</td><td>"Hai người cùng lưu"</td><td>Tìm ra job là người ghi thứ hai; <code>PUT</code> cả object mang giá trị cũ</td></tr>
+<tr><td>Cơ chế</td><td>Một version cho cả row</td><td>Tính được tỉ lệ xung đột giả; tách field theo người sở hữu</td></tr>
+<tr><td>Ghi chú</td><td>Kiểm tra version cho ghi chú</td><td>Đổi mô hình: chỉ thêm, không còn xung đột</td></tr>
+<tr><td>Trải nghiệm</td><td>Báo lỗi, tải lại</td><td>Giữ phần đã gõ, so sánh từng field</td></tr>
+<tr><td>Chuyển tiếp</td><td>Không nghĩ tới client cũ</td><td>Bỏ qua field nguy hiểm ngay, rồi 428 có lộ trình</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> giữ <code>FOR UPDATE</code> suốt lúc form mở; so sánh <code>updated_at</code> độ phân giải giây thay cho version; để job làm tăng version của nhóm field nhân viên sửa.</p>
 </details>
 </div>
 </section>
