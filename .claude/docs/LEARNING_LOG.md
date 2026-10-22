@@ -96,6 +96,9 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 | NestJS request lifecycle: middleware, guard, interceptor, pipe, handler, exception filter; pipes inside the interceptor chain; global/controller/route order | 2 (prov.) | [nestjs-request-lifecycle](../topics/nestjs-request-lifecycle/index.html) §01–§02 | 2026-10-22 | Exercise E46: trace the six cases and match the widget; then place every concern of one module at work in the right layer |
 | Exception filters: selection (route, controller, global, first match wins), default filter behaviour for `HttpException` vs unknown errors | 2 (prov.) | same, §02, §04 | 2026-10-22 | Write the domain filter and the catch-all filter for the Month 2 lab service, with a test per error type |
 | NestJS DI: scopes (default, request, transient), scope bubbling, durable providers, module exports and boundaries; `AsyncLocalStorage` for per-request data | 2 (prov.) | same, §02–§04 | 2026-10-22 | Exercise E47: cost of a request-scoped chain vs `AsyncLocalStorage` |
+| Where an invariant is enforced (controller, service read-then-check, locked check, conditional SQL, `CHECK` constraint) and which write paths bypass each; defense in depth | 2 (prov.) | [layering-business-invariants](../topics/layering-business-invariants/index.html) §01, §03 | 2026-10-22 | Exercise E48; then write the invariant table (rule, where blocked, where detected, which test) for the Month 2 lab service |
+| Layering: controller, service (use case and transaction boundary), domain, repository; dependency direction; module boundaries that do not export repositories | 2 (prov.) | same, §02, §04 | 2026-10-22 | Build the Month 2 lab service this way, then review one module at work against the page's checklist (Month 2 deliverable) |
+| Money as integer minor units: ISO 4217 exponents, allocation of remainders, fee rounding, float pitfalls; mysql2 types for `BIGINT`, `DECIMAL`, `SUM` | 2 (prov.) | same, §02, §04 | 2026-10-22 | Exercise E49 on 8.4; then property tests for allocation and fee functions in the lab service |
 
 "(prov.)" = provisional. Every row above rests on one artifact I wrote myself, with no measurement behind it. Week 1 of Month 1 includes a baseline assessment (TECHNICAL_GROWTH.md Section 11) that should confirm or cut these.
 
@@ -139,6 +142,8 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 36. How much read and write latency do `BEFORE` and `AFTER` of `group_replication_consistency` add over `EVENTUAL` on the lab, with and without 20 ms of delay to one member? E45.
 37. With NestJS 12 on Express, what status and body does a malformed JSON body produce, and does a global `@Catch()` filter see it? The default filter has a branch for `http-errors`-shaped errors; whether body-parser errors reach a custom filter is unchecked. E46.
 38. On Node 22, how many microseconds and how much GC does a chain of 10 request-scoped providers cost per request, and from what request rate does it become the bottleneck? E47.
+39. Keep a separate balance column (I3) or compute `SUM` over ledger entries on each read? From how many entries per account does `SUM` over `(account_id, id)` become too slow for an API, and how much does a daily balance snapshot help? Variant of E48.
+40. Where is it cleanest to turn MySQL `BIGINT` into JavaScript `BigInt` with mysql2: a per-column `typeCast`, `bigNumberStrings` plus conversion in the repository, or strings all the way to JSON? What does each cost for 10,000 rows? E49.
 
 ## Pending verification (from the session's own exercise list)
 
@@ -214,8 +219,40 @@ These are written in the page as exercises; none have been run yet.
 - **E47** — Singleton vs `Scope.REQUEST` vs `AsyncLocalStorage` tenant context at 500, 2,000, 5,000 req/s: max throughput, p50/p99, constructor calls, GC time.
 - **Q89–Q94** — The six recall questions in section 08 of the NestJS request lifecycle page.
 - **C25–C27** — The three real-world cases in section 09 of the NestJS request lifecycle page (cross-tenant invoice leak, p99 tripled by a request-scoped tenant context, a timeout interceptor that let transfers commit twice). Solve in writing before opening the answers.
+- **E48** — Five enforcement points × five write paths for "balance never negative": how many negative balances, what the client receives, whether reconciliation catches every damaged account. *(Close to the Month 2 exit criterion: tests catch a deliberately introduced invariant violation.)*
+- **E49** — On 8.4: result types of `SUM`/`AVG` on `BIGINT` and `DOUBLE`, `ROUND` on exact vs approximate values; mysql2 values and `typeof` for `BIGINT` around 2^53 and for `SUM` under three configs.
+- **Q95–Q100** — The six recall questions in section 08 of the layering and invariants page.
+- **C28–C30** — The three real-world cases in section 09 of the layering and invariants page (negative wallet balances from a job that bypassed the service, multi-currency fees and installments off by a few units, an orders module writing the payments table before a service split). Solve in writing before opening the answers.
 - **Q11–Q16** — The six recall questions in section 08 of the composite-index page (answers are on the page, hidden).
 - **Q1–Q5** — The five check questions at the end of the page (leftmost prefix, `COUNT(*)` and the visibility map, full scan polluting the cache, TOAST, a `sessions` table updated 5,000×/sec). Answer in writing before looking anything up, then verify.
+
+---
+
+## 2026-10-22 — Layering and business invariants
+
+**Topic and objective.** Month 2 topic, written ahead as documentation only (Phase 2 of the documentation plan, 2 of 5): where each business rule should live, which write paths bypass each place, where the transaction boundary belongs, and how to store and compute money without losing units.
+
+**Output.** [topics/layering-business-invariants/index.html](../topics/layering-business-invariants/index.html) — 11 sections, including section 09 with cases C28–C30. Widgets: an enforcement matrix (five places to check "balance never negative" × five write paths, with what the client sees); a static figure of the four layers and their dependency direction; a transfer stepper comparing one service-owned transaction with repositories that commit on their own, including a crash before commit; a money calculator (float vs minor units for splitting and fees, three currencies, three rounding modes). Prediction templates for E48–E49.
+
+**What it covers.**
+
+- Four ledger invariants (non-negative balance, entries sum to zero, balance equals sum of entries, integer minor units per currency) and which ones a single-row `CHECK` can express.
+- Run in Claude's sandbox (MySQL 8.0.46, not the lab): `CHECK` violation is error 3819; the conditional update returns 0 rows; subtracting below zero on `BIGINT UNSIGNED` is error 1690; `SUM(bigint)` has type `DECIMAL(41,0)`; `ROUND(2.5)` = 3 but `ROUND(2.5e0)` = 2.
+- mysql2 3.24.6 source: `BIGINT` returned as `number` by default (imprecise past 2^53), `DECIMAL` as string; `supportBigNumbers` returns a string only when unsafe; `bigNumberStrings` always a string.
+- Float pitfalls checked in Node: `1.005 * 100`, `0.1 + 0.2`; 19.00 USD × 1.5% gives 0.28 with float and 0.29 with half-up on integers.
+- Transaction script vs domain model vs database-first; reconciliation queries for the multi-row invariants.
+
+**Initial understanding.** TODO — what did I believe about layering and invariants before this page? No prior belief was stated in the session.
+
+**Mistakes and misconceptions corrected.** TODO — only I know which. Traps the page writes down: a service check is enough; a database constraint replaces checks in code; repositories should open their own transactions; JavaScript numbers are fine for money if rounded at display; `SUM` of an integer column returns an integer.
+
+**Experiments and results.** None on the lab. The sandbox outputs above are examples, not evidence for a level; E48–E49 need the lab.
+
+**Competency level.** Level 2 provisional on three new matrix rows.
+
+**Remaining questions.** Open questions 39 and 40.
+
+**Next step.** Write the validation and error-contracts page (Phase 2, 3 of 5); E48 belongs with the Month 2 lab service tests.
 
 ---
 

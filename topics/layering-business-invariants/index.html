@@ -1,0 +1,1070 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Phân tầng và bất biến nghiệp vụ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F2F4F6; --surface:#FFFFFF; --ink:#18203A; --ink-2:#56607A; --ink-3:#8A93A8;
+  --rule:#CCD3DD; --rule-strong:#8C96AB;
+  --struct:#3446B8; --struct-bg:#E6E9FA;            /* cấu trúc index, chrome của trang */
+  --row:#16795F;    --row-bg:#DDF2EA;               /* dữ liệu row thật */
+  --hot:#9A5F00;    --hot-bg:#FCEFD2; --hot-line:#E3A21A;  /* bị ghi, bị chạm, bị lọc */
+  --miss:#B5302B;   --miss-bg:#FBE1DF;              /* đọc từ disk, việc thừa, lỗi */
+  --path:#0B7A8A;   --path-bg:#D8F1F3;              /* đường đi hoặc khoảng đang đọc */
+  --key:#A8327A;    --key-bg:#F8E0EE;               /* con trỏ: PK, TID */
+  --ram:#5B4BB0;    --ram-bg:#E7E3FA;               /* hit trong buffer pool */
+  --grid:rgba(52,70,184,.06);
+  --r-s:4px; --r-m:8px;
+  --sans:"Instrument Sans",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --paper:#0F1320; --surface:#171C2B; --ink:#E6E9F2; --ink-2:#A3ABC0; --ink-3:#6E7790;
+  --rule:#2C3448; --rule-strong:#55607A;
+  --struct:#97A3FF; --struct-bg:#232A55;
+  --row:#5FD0AE;    --row-bg:#123A31;
+  --hot:#F2BE5C;    --hot-bg:#3B2C0E; --hot-line:#E3A21A;
+  --miss:#FF8A84;   --miss-bg:#3E1A1A;
+  --path:#5ED3E0;   --path-bg:#113A40;
+  --key:#F28DC4;    --key-bg:#3E1A2E;
+  --ram:#B7A8FF;    --ram-bg:#2A2350;
+  --grid:rgba(151,163,255,.05);
+}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important;animation:none!important}}
+body{margin:0;color:var(--ink);font:400 17px/1.65 var(--sans);
+  background-color:var(--paper);
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:24px 24px}
+a{color:var(--struct)}
+:focus-visible{outline:2px solid var(--struct);outline-offset:2px}
+
+/* layout */
+.shell{display:grid;grid-template-columns:230px minmax(0,1fr);gap:56px;max-width:1180px;margin:0 auto;padding:0 32px}
+nav.toc{position:sticky;top:0;align-self:start;height:100vh;padding:48px 0;overflow:auto}
+nav.toc p{font-weight:600;margin:0 0 12px;font-size:15px}
+nav.toc ol,.mobile-toc ol{list-style:none;margin:0;padding:0;counter-reset:s}
+nav.toc li,.mobile-toc li{counter-increment:s;margin:0}
+nav.toc a,.mobile-toc a{display:grid;grid-template-columns:28px 1fr;padding:5px 0;color:var(--ink-2);text-decoration:none;font-size:14.5px;line-height:1.4}
+nav.toc a::before,.mobile-toc a::before{content:counter(s,decimal-leading-zero);font:500 12px/1.9 var(--mono);color:var(--ink-3)}
+nav.toc a:hover,nav.toc a.on{color:var(--struct)}
+main{min-width:0;padding:56px 0 120px}
+.prose{max-width:720px}
+section{padding-top:72px}
+section>header{display:grid;grid-template-columns:auto 1fr;gap:0 18px;align-items:baseline;max-width:720px;margin-bottom:12px}
+section>header .num{font:500 15px var(--mono);color:var(--struct);border:1.5px solid var(--struct);border-radius:var(--r-s);padding:2px 7px;transform:translateY(-4px)}
+h1,h2,h3,h4{line-height:1.2;letter-spacing:-.015em;margin:0}
+h1{font-size:clamp(2.3rem,5.4vw,3.9rem);font-weight:700;letter-spacing:-.03em;line-height:1.02;max-width:14ch;margin-bottom:20px}
+.lede{font-size:19px;color:var(--ink-2);max-width:56ch;margin-bottom:28px}
+h2{font-size:clamp(1.6rem,3vw,2.1rem);font-weight:650}
+h3{font-size:1.2rem;font-weight:600;margin:36px 0 8px}
+p{margin:0 0 14px}
+ul,ol.list{margin:0 0 16px;padding-left:22px}
+li{margin:4px 0}
+code{font:0.88em var(--mono);background:var(--struct-bg);color:var(--ink);padding:1px 5px;border-radius:3px}
+pre{font:13.5px/1.6 var(--mono);background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:var(--r-s);padding:14px 16px;overflow-x:auto;margin:0 0 18px;max-width:720px}
+pre code{background:none;padding:0}
+.tablewrap{overflow-x:auto;max-width:720px;margin:0 0 20px}
+table{border-collapse:collapse;width:100%;max-width:720px;margin:0 0 20px;font-size:15px;background:var(--surface)}
+.tablewrap table{margin:0;min-width:560px}
+th,td{text-align:left;padding:9px 12px;border:1px solid var(--rule);vertical-align:top}
+th{font-weight:600;background:var(--struct-bg)}
+
+/* widget frame: styled like a page, header strip = page header */
+.frame{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);margin:22px 0 28px;max-width:920px;overflow:hidden}
+.frame>.ph{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:9px 16px;border-bottom:1px solid var(--rule);background:var(--struct-bg);font-size:14px}
+.frame>.ph strong{font-weight:600}
+.frame>.ph .meta{margin-left:auto;font:500 12.5px var(--mono);color:var(--ink-2)}
+.frame .bd{padding:16px;min-width:0}
+.frame svg{display:block;width:100%;height:auto}
+.st-t{font:600 16px var(--sans);margin:0 0 8px}
+.desc{background:var(--paper);border-radius:var(--r-s);padding:12px 14px;margin-top:12px;min-height:84px;font-size:15.5px;color:var(--ink-2)}
+.desc pre{margin:10px 0 0;font-size:12.5px;border-left-color:var(--rule-strong)}
+.nav{display:flex;gap:8px;margin-top:12px;align-items:center}
+button{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 14px;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--struct);color:var(--struct)}
+button:disabled{opacity:.4;cursor:default}
+button.primary,button[aria-pressed="true"]{background:var(--struct);border-color:var(--struct);color:var(--surface)}
+button.primary:hover:not(:disabled),button[aria-pressed="true"]:hover{color:var(--surface);filter:brightness(1.1)}
+input,select{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 10px}
+input[type=number]{width:84px}
+input[type=range],input[type=checkbox]{accent-color:var(--struct)}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-top:12px}
+.stat{background:var(--paper);border-radius:var(--r-s);padding:8px 12px}
+.stat span{display:block;font-size:13px;color:var(--ink-2)}
+.stat b{font:600 20px var(--sans);font-variant-numeric:tabular-nums}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;color:var(--ink-2);margin-top:12px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:14px;height:14px;border-radius:3px;border:2px solid;display:inline-block}
+.fine{font-size:13.5px;color:var(--ink-2);margin:10px 0 0}  /* chú thích nhỏ dưới widget */
+
+/* svg text */
+.tb{font:600 14px var(--sans)} .t{font:400 13px var(--sans)} .ts{font:400 12px var(--sans)} .tm{font:500 12.5px var(--mono)}
+.lbl{fill:var(--ink-2);font:400 12.5px var(--sans)}
+
+/* callouts */
+.note{border-left:3px solid var(--hot-line);background:var(--hot-bg);padding:12px 16px;border-radius:0 var(--r-s) var(--r-s) 0;margin:18px 0;max-width:720px;font-size:16px}
+.note strong{color:var(--hot)}
+.senior{border:1.5px solid var(--struct);border-radius:var(--r-m);padding:14px 18px;margin:22px 0;max-width:720px;background:var(--surface)}
+.senior h4{font-size:16px;margin-bottom:6px;color:var(--struct)}
+.senior p:last-child,.senior ul:last-child{margin-bottom:0}
+details{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-s);padding:10px 14px;margin:10px 0;max-width:720px}
+details summary{cursor:pointer;font-weight:600}
+details[open] summary{margin-bottom:8px}
+details.answer{background:var(--paper);border-style:dashed;margin:10px 0 0}
+details.answer summary{font-weight:500;color:var(--struct)}
+.tag{display:inline-block;font:500 12px var(--sans);color:var(--ink-2);border:1px solid var(--rule-strong);border-radius:999px;padding:0 8px;margin-right:6px;vertical-align:1px}
+
+/* hero brief: mục tiêu, cần biết trước, trạng thái */
+.brief{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px 24px;background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);padding:14px 18px;max-width:920px;margin:0 0 8px;font-size:15px}
+.brief h4{font-size:14px;color:var(--struct);margin:0 0 4px}
+.brief ul{margin:0;padding-left:18px}
+.brief p{margin:0}
+
+.mobile-toc{display:none}
+@media (max-width:900px){
+  .shell{grid-template-columns:1fr;padding:0 16px;gap:0}
+  nav.toc{display:none}
+  .mobile-toc{display:block;margin-top:20px}
+  main{padding-top:32px}
+  .frame .bd{padding:12px}
+  body{font-size:16px}
+}
+
+
+/* ---- page widgets ---- */
+.n rect{fill:var(--surface);stroke:var(--rule-strong);stroke-width:1}
+.n text{fill:var(--ink)}
+.n.struct rect{fill:var(--struct-bg);stroke:var(--struct)} .n.struct text{fill:var(--struct)}
+.n.row rect{fill:var(--row-bg);stroke:var(--row);stroke-width:1.6} .n.row text{fill:var(--row)}
+.n.hot rect{fill:var(--hot-bg);stroke:var(--hot);stroke-width:2} .n.hot text{fill:var(--hot)}
+.n.miss rect{fill:var(--miss-bg);stroke:var(--miss);stroke-width:2} .n.miss text{fill:var(--miss)}
+.n.path rect{fill:var(--path-bg);stroke:var(--path);stroke-width:2.4} .n.path text{fill:var(--path)}
+.n.key rect{fill:var(--key-bg);stroke:var(--key);stroke-width:2} .n.key text{fill:var(--key)}
+.n.dim rect{fill:var(--paper);stroke:var(--rule)} .n.dim text{fill:var(--ink-3)}
+.edge{stroke:var(--rule-strong);stroke-width:1.2;fill:none}
+.edge.on{stroke:var(--path);stroke-width:2.6}
+.lg-path{border-color:var(--path);background:var(--path-bg)} .lg-row{border-color:var(--row);background:var(--row-bg)}
+.lg-miss{border-color:var(--miss);background:var(--miss-bg)} .lg-hot{border-color:var(--hot);background:var(--hot-bg)}
+.calc{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px 14px;margin-bottom:12px}
+.calc label{display:flex;flex-direction:column;gap:4px;font-size:13.5px;color:var(--ink-2)}
+.calc label.chk{flex-direction:row;align-items:center;gap:8px}
+.calc input[type=text]{width:100%}
+.stat b.bad{color:var(--miss)} .stat b.good{color:var(--row)}
+.log{font:12.5px/1.6 var(--mono);background:var(--paper);border-radius:var(--r-s);padding:8px 12px;margin:10px 0 0;min-height:60px;list-style:none}
+.log li{margin:0}
+.btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.chks{display:flex;flex-direction:column;gap:6px;margin:0 0 12px;font-size:14px;color:var(--ink-2)}
+.chks label{display:flex;gap:8px;align-items:flex-start}
+.chks input{margin-top:4px}
+.scen{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 12px}
+.scen label{font-size:13.5px;color:var(--ink-2)}
+.scen select{max-width:100%}
+.mx td{font-size:14.5px}
+.mx tr.ok td:nth-child(2){background:var(--row-bg);color:var(--row);font-weight:600}
+.mx tr.warn td:nth-child(2){background:var(--hot-bg);color:var(--hot);font-weight:600}
+.mx tr.bad td:nth-child(2){background:var(--miss-bg);color:var(--miss);font-weight:600}
+.frame .tablewrap{max-width:none}
+.edge.dash{stroke-dasharray:5 4}
+/* bài toán thực tế: dạng phỏng vấn */
+.case{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:0 var(--r-m) var(--r-m) 0;padding:16px 20px;margin:22px 0;max-width:720px}
+.case>h3{margin:0 0 6px;font-size:1.15rem}
+.case .src{font-size:13.5px;color:var(--ink-2);margin:0 0 12px}
+.case .ctx{background:var(--paper);border:1px solid var(--rule);border-radius:var(--r-m);padding:10px 14px;margin:8px 0 0;font-size:15px}
+.case .ctx-h{margin:0 0 4px;font-weight:600;color:var(--struct)}
+.case .ctx ul{margin:0;padding-left:20px}
+.case .ctx li{margin:2px 0}
+.case .q{margin:10px 0 4px;padding:8px 0 8px 14px;border-left:3px solid var(--key);font-size:1.06rem;font-weight:500;color:var(--ink);max-width:none}
+.case details{max-width:none;margin:12px 0 0}
+.case details.answer[open]{background:var(--surface)}
+.case details.clar>summary,.case details.rubric>summary{color:var(--key)}
+.case .fu{margin:18px 0 0;padding-top:14px;border-top:1px solid var(--rule)}
+.case .fq{margin:0;font-weight:500}
+.case .fq b{color:var(--struct);margin-right:4px}
+.ah{font-size:15.5px;color:var(--struct);margin:20px 0 6px}
+.answer .tablewrap{max-width:none}
+@media (max-width:900px){.case{padding:14px}}
+</style>
+</head>
+<body>
+
+<div class="shell">
+<nav class="toc" aria-label="Mục lục">
+  <p>Phân tầng, bất biến</p>
+  <ol>
+    <li><a href="#s1">Bản chất vấn đề</a></li>
+    <li><a href="#s2">Cơ chế hoạt động</a></li>
+    <li><a href="#s3">Vì sao thiết kế như vậy</a></li>
+    <li><a href="#s4">Ví dụ</a></li>
+    <li><a href="#s5">Thí nghiệm</a></li>
+    <li><a href="#s6">Ảnh hưởng khi chạy production</a></li>
+    <li><a href="#s7">Hiểu lầm thường gặp</a></li>
+    <li><a href="#s8">Câu hỏi ôn tập</a></li>
+    <li><a href="#s9">Bài toán thực tế</a></li>
+    <li><a href="#s10">Câu hỏi còn mở</a></li>
+    <li><a href="#s11">Tài liệu tham khảo</a></li>
+  </ol>
+</nav>
+
+<main>
+<div class="hero">
+<h1>Phân tầng và bất biến nghiệp vụ</h1>
+<p class="lede">"Số dư không bao giờ âm" là một câu dễ viết trong tài liệu và khó giữ trong code. Nó phải đúng với mọi đường ghi vào database: API, job, consumer, script của admin, và hai request tới cùng một lúc. Bài này hỏi một câu cho từng quy tắc: nó nằm ở tầng nào, và đường nào đi vòng qua được nó. Phần sau là tiền: vì sao lưu bằng số nguyên đơn vị nhỏ nhất, và những chỗ Node và MySQL lặng lẽ làm sai con số.</p>
+<div class="brief">
+  <div><h4>Mục tiêu</h4><ul>
+    <li>Đặt được mỗi bất biến vào đúng chỗ (domain, service, câu SQL có điều kiện, ràng buộc của database) và chỉ ra đường nào đi vòng qua được nó.</li>
+    <li>Phân biệt việc của controller, service, domain, repository, và nhận ra một ranh giới đang rò.</li>
+    <li>Giữ ranh giới transaction ở service để một use case commit trọn hoặc không commit gì.</li>
+    <li>Lưu và tính tiền bằng minor units; dự đoán được chỗ float, <code>DOUBLE</code>, <code>BIGINT</code> lớn và <code>SUM</code> làm sai số.</li>
+  </ul></div>
+  <div><h4>Cần biết trước</h4><ul>
+    <li><a href="../concurrency-control-strategies/index.html">Kiểm soát ghi đồng thời</a>: check-then-act, câu UPDATE có điều kiện.</li>
+    <li><a href="../innodb-locking-deadlock/index.html">Khoá và deadlock</a>: <code>FOR UPDATE</code>, thứ tự khoá.</li>
+    <li><a href="../nestjs-request-lifecycle/index.html">Vòng đời request NestJS</a>: controller, service, module.</li>
+  </ul></div>
+  <div><h4>Trạng thái</h4><p>Level 2 (prov.). Hành vi của mysql2 3.24.6 đọc từ mã nguồn; kiểu của <code>SUM</code>, <code>CHECK</code>, <code>ROUND</code> chạy thử trên sandbox của Claude (MySQL 8.0.46), chưa chạy trên lab 8.4 (E48–E49).</p></div>
+</div>
+<details class="mobile-toc"><summary>Mục lục</summary><ol><li><a href="#s1">Bản chất vấn đề</a></li><li><a href="#s2">Cơ chế hoạt động</a></li><li><a href="#s3">Vì sao thiết kế như vậy</a></li><li><a href="#s4">Ví dụ</a></li><li><a href="#s5">Thí nghiệm</a></li><li><a href="#s6">Ảnh hưởng khi chạy production</a></li><li><a href="#s7">Hiểu lầm thường gặp</a></li><li><a href="#s8">Câu hỏi ôn tập</a></li><li><a href="#s9">Bài toán thực tế</a></li><li><a href="#s10">Câu hỏi còn mở</a></li><li><a href="#s11">Tài liệu tham khảo</a></li></ol></details>
+</div>
+
+<!-- 1 -->
+<section id="s1">
+<header><span class="num">01</span><h2>Bản chất vấn đề</h2></header>
+<div class="prose">
+<p>Lab của Month 2 là một sổ cái (ledger): có tài khoản, có bút toán, có số dư. Nó có bốn bất biến, tức là bốn điều phải luôn đúng, sau mọi thao tác:</p>
+<ol class="list">
+<li><strong>I1.</strong> Số dư của một tài khoản không âm.</li>
+<li><strong>I2.</strong> Mỗi giao dịch gồm các bút toán có tổng bằng 0: tiền rời tài khoản A bằng tiền vào tài khoản B.</li>
+<li><strong>I3.</strong> Số dư lưu trong bảng <code>accounts</code> bằng tổng bút toán của tài khoản đó.</li>
+<li><strong>I4.</strong> Tiền là số nguyên theo đơn vị nhỏ nhất của loại tiền, và không cộng hai loại tiền với nhau.</li>
+</ol>
+<p>Viết <code>if (balance &lt; amount) throw …</code> ở đâu đó là chưa đủ. Câu hỏi đúng là: có đường nào ghi vào bảng mà không đi qua dòng <code>if</code> đó không? Hình dung két tiền của một cửa hàng. Quy tắc "không rút quá số tiền trong két" có thể nằm ở lời dặn nhân viên (controller), ở sổ ghi chép của quản lý (service), hay ở chính cái két không mở được khi trống (database). Chỉ cái cuối cùng giữ được với cả người không đọc lời dặn.</p>
+<p>Chọn nơi đặt kiểm tra của I1 và xem đường nào còn làm số dư âm.</p>
+</div>
+<div class="frame" id="where">
+  <div class="ph"><strong>Quy tắc "số dư không âm" nằm ở đâu, ai đi vòng qua được</strong><span class="meta" id="whMeta"></span></div>
+  <div class="bd">
+    <div class="chks" id="whOpts"></div>
+    <div class="tablewrap"><table class="mx" id="whTbl"></table></div>
+    <div class="stats" id="whStats"></div>
+    <div class="desc" aria-live="polite" id="whDesc"></div>
+    <div class="legend"><span><i class="lg-row"></i>giữ được</span><span><i class="lg-miss"></i>số dư có thể âm</span><span><i class="lg-hot"></i>giữ được nhưng client nhận 500</span></div>
+    <p class="fine">Tài khoản có 100.000, mỗi lần rút 70.000. "Song song" là hai request tới cùng lúc dưới REPEATABLE READ. "Job tự viết câu UPDATE" là code không đi qua repository. Mô hình theo cơ chế ở trang <a href="../concurrency-control-strategies/index.html">Kiểm soát ghi đồng thời</a>; chưa đo (E48).</p>
+  </div>
+</div>
+</section>
+
+<!-- 2 -->
+<section id="s2">
+<header><span class="num">02</span><h2>Cơ chế hoạt động</h2></header>
+<div class="prose">
+<h3>Bốn tầng và chiều phụ thuộc</h3>
+<p>Ý chính: mỗi tầng chỉ biết những gì nó cần. Controller biết HTTP, service biết use case và transaction, domain biết quy tắc, repository biết SQL. Phụ thuộc đi vào trong: domain không import gì từ HTTP hay từ driver MySQL.</p>
+<ul>
+<li><strong>Controller</strong> nhận DTO đã validate, gọi một hàm của service, đổi kết quả thành response. Không có <code>if</code> nghiệp vụ.</li>
+<li><strong>Service</strong> (hay use case) điều phối một việc: mở transaction, nạp dữ liệu, gọi domain, lưu, commit. Một hàm service là một đơn vị "làm trọn hoặc không làm".</li>
+<li><strong>Domain</strong> là các class và hàm thuần chứa quy tắc: <code>Money</code>, <code>Account.debit()</code>, <code>Transfer.entries()</code>. Test được mà không cần database.</li>
+<li><strong>Repository</strong> đọc và ghi bảng. Nó nhận connection của transaction hiện tại thay vì tự mở transaction riêng.</li>
+</ul>
+</div>
+<div class="frame" id="layers">
+  <div class="ph"><strong>Ai gọi ai, ai biết gì</strong><span class="meta">tĩnh</span></div>
+  <div class="bd">
+    <svg id="lySvg" viewBox="0 0 680 270" role="img" aria-label="Controller gọi service; service gọi domain và repository; repository phụ thuộc vào kiểu của domain; MySQL nằm sau repository với ràng buộc CHECK, UNIQUE, FK"></svg>
+    <p class="fine">Mũi tên là chiều gọi và chiều import. Domain ở giữa không có mũi tên đi ra ngoài.</p>
+  </div>
+</div>
+<div class="note"><strong>Lỗi hay gặp:</strong> module A inject repository của module B để "đọc nhanh một cột" rồi về sau ghi luôn. Từ đó quy tắc của B có thêm một đường đi vòng mà B không biết. Quy tắc: module chỉ export service; dữ liệu của module khác đi qua hàm của module đó. Đọc thuần để báo cáo thì dùng một view hoặc một hàm đọc riêng, ghi rõ là chỉ đọc.</div>
+
+<div class="prose">
+<h3>Ranh giới transaction nằm ở service</h3>
+<p>Ý chính: một use case là một transaction. Repository không tự <code>COMMIT</code>. Nếu mỗi hàm repository tự commit, chết ở giữa use case sẽ để lại dữ liệu nửa vời và phá I2, I3.</p>
+<p>Chuyển 70.000 từ tài khoản 1 sang tài khoản 2 gồm năm câu ghi. Đi từng bước với hai cách tổ chức, và xem điều gì xảy ra khi process chết sau bước 4.</p>
+</div>
+<div class="frame" id="txn"></div>
+<div class="legend"><span><i class="lg-path"></i>câu đang chạy</span><span><i class="lg-hot"></i>đã ghi, chưa commit</span><span><i class="lg-row"></i>đã commit</span><span><i class="lg-miss"></i>bất biến bị phá</span></div>
+<p class="fine">Khoá hai tài khoản theo thứ tự <code>id</code> tăng dần để hai lần chuyển ngược chiều không deadlock (trang <a href="../innodb-locking-deadlock/index.html">Khoá và deadlock</a>). Mô hình; chưa đo.</p>
+
+<div class="prose">
+<h3>Tiền lưu bằng minor units</h3>
+<p>Ý chính: lưu tiền bằng số nguyên theo đơn vị nhỏ nhất của loại tiền (minor unit), ví dụ cent cho USD, đồng cho VND. Mọi phép tính làm trên số nguyên. Chỉ khi hiển thị mới đổi ra dạng có dấu thập phân.</p>
+<p>Số thực dấu phẩy động (<code>number</code> của JavaScript, <code>DOUBLE</code> của MySQL) lưu số ở hệ nhị phân. 0,1 không biểu diễn đúng được, nên <code>0.1 + 0.2</code> ra <code>0.30000000000000004</code>, và <code>1.005 * 100</code> ra <code>100.49999999999999</code>. Sai một chút ở mỗi phép tính thành lệch vài đồng sau một triệu giao dịch, và một lần làm tròn ra sai cent.</p>
+<p>Số mũ của mỗi loại tiền theo ISO 4217: VND và JPY là 0, USD và EUR là 2, KWD và BHD là 3. Thử chia một khoản tiền và tính phí dưới đây.</p>
+</div>
+<div class="frame" id="money">
+  <div class="ph"><strong>Chia tiền và tính phí: float và minor units</strong><span class="meta" id="mnMeta"></span></div>
+  <div class="bd">
+    <div class="calc">
+      <label>Số tiền<input id="mnA" type="text" value="19.00" inputmode="decimal"></label>
+      <label>Loại tiền<select id="mnC"><option value="USD" selected>USD (2 chữ số)</option><option value="VND">VND (0)</option><option value="KWD">KWD (3)</option></select></label>
+      <label>Chia cho số người<input id="mnN" type="number" min="1" max="12" value="3"></label>
+      <label>Phí (%)<input id="mnF" type="text" value="1.5" inputmode="decimal"></label>
+      <label>Làm tròn phí<select id="mnR"><option value="hu">nửa lên (half up)</option><option value="he">nửa về chẵn (half even)</option><option value="fl">xuống (floor)</option></select></label>
+    </div>
+    <div class="tablewrap"><table id="mnTbl"></table></div>
+    <div class="stats" id="mnStats"></div>
+    <div class="desc" aria-live="polite" id="mnDesc"></div>
+    <p class="fine">Phần float tính bằng <code>number</code> của JavaScript ngay trong trình duyệt. Phần minor units dùng <code>BigInt</code>; phần dư khi chia được cho lần lượt từng người đầu tiên (largest remainder với phần dư bằng nhau).</p>
+  </div>
+</div>
+<div class="note"><strong>Lỗi hay gặp:</strong> dùng <code>DECIMAL(15,2)</code> cho mọi loại tiền. Với KWD nó mất một chữ số; với VND nó lưu hai số 0 vô nghĩa và code bắt đầu nhân chia 100 không đúng chỗ. Quy tắc: lưu <code>amount_minor BIGINT</code> cùng cột <code>currency CHAR(3)</code>, và lấy số mũ từ bảng loại tiền.</div>
+
+<div class="prose">
+<h3>Đọc tiền từ MySQL vào Node</h3>
+<p>Ý chính: driver mysql2 đổi kiểu cột thành kiểu JavaScript theo những mặc định dễ gây nhầm. <code>BIGINT</code> thành <code>number</code> và mất chính xác sau 2<sup>53</sup>. <code>DECIMAL</code> thành chuỗi. Và <code>SUM</code> của một cột <code>BIGINT</code> trả về <code>DECIMAL</code>, nên thành chuỗi.</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Biểu thức MySQL</th><th>Kiểu kết quả</th><th>mysql2 3.24.6 mặc định trả</th><th>Rủi ro</th></tr></thead>
+<tbody>
+<tr><td><code>amount_minor BIGINT</code></td><td>BIGINT</td><td><code>number</code></td><td>Trên 9.007.199.254.740.991 thì sai lặng lẽ</td></tr>
+<tr><td><code>SUM(amount_minor)</code></td><td><code>DECIMAL(41,0)</code> (sandbox 8.0.46)</td><td>chuỗi <code>"4996047600"</code></td><td><code>sum + 1</code> thành nối chuỗi <code>"49960476001"</code></td></tr>
+<tr><td><code>amount DECIMAL(15,2)</code></td><td>DECIMAL</td><td>chuỗi</td><td>Đổi sang <code>Number</code> để tính là quay về float</td></tr>
+<tr><td><code>amount DOUBLE</code></td><td>DOUBLE</td><td><code>number</code></td><td>Sai số nhị phân ngay từ lúc lưu</td></tr>
+<tr><td><code>ROUND(2.5)</code> và <code>ROUND(2.5e0)</code></td><td>DECIMAL và DOUBLE</td><td>3 và 2</td><td>Số chính xác làm tròn xa số 0; số xấp xỉ làm tròn về chẵn (sandbox 8.0.46)</td></tr>
+</tbody></table></div>
+<div class="prose">
+<p>Tuỳ chọn <code>supportBigNumbers: true</code> làm mysql2 trả chuỗi khi số vượt giới hạn an toàn, và <code>number</code> khi không vượt: một cột trả hai kiểu. Thêm <code>bigNumberStrings: true</code> thì luôn là chuỗi. Cách gọn nhất: đổi sang <code>BigInt</code> ở repository, và đổi sang chuỗi khi trả JSON (<code>JSON.stringify</code> không nhận <code>BigInt</code>).</p>
+</div>
+</section>
+
+<!-- 3 -->
+<section id="s3">
+<header><span class="num">03</span><h2>Vì sao thiết kế như vậy</h2></header>
+<div class="prose">
+<p><strong>Vì sao kiểm tra hai lần, ở domain và ở database?</strong> Hai lần kiểm tra làm hai việc khác nhau. Domain cho lời giải thích: lỗi <code>INSUFFICIENT_FUNDS</code>, status 422, message cho người dùng. Database cho sự bảo đảm: không đường ghi nào vượt qua được. Lỗi 3819 từ <code>CHECK</code> nghĩa là có một đường ghi chưa đi qua domain, tức là một bug cần sửa, không phải một lỗi của người dùng.</p>
+<p><strong>Vì sao transaction ở service, không ở repository?</strong> Chỉ service biết một use case gồm những câu ghi nào. Repository mở transaction riêng thì mỗi câu tự commit, và không ai rollback được phần đã làm.</p>
+<p><strong>Vì sao không đặt hết quy tắc trong database (stored procedure, trigger)?</strong> Làm được, và một số hệ thống ngân hàng làm vậy. Cái giá: logic khó test, khó review, khó deploy cùng code, và khó thấy khi đọc service. Chỉ những gì database diễn tả gọn mới nên ở đó: <code>NOT NULL</code>, <code>UNIQUE</code>, <code>FOREIGN KEY</code>, <code>CHECK</code> trên một dòng.</p>
+<p><strong>Database không diễn tả được gì?</strong> <code>CHECK</code> của MySQL chỉ nhìn một dòng. I2 (tổng bút toán của giao dịch bằng 0) và I3 (số dư bằng tổng bút toán) liên quan nhiều dòng. Chúng được giữ bằng cách chỉ có một hàm service ghi bút toán và cập nhật số dư trong cùng transaction, cộng một job đối soát chạy định kỳ để phát hiện vi phạm.</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Cách tổ chức</th><th>Quy tắc nằm ở</th><th>Hợp khi</th><th>Rủi ro</th></tr></thead>
+<tbody>
+<tr><td>Transaction script (service có hết logic)</td><td>Hàm service</td><td>Quy tắc ít, đơn giản</td><td>Logic trùng lặp giữa các hàm; khó test không có database</td></tr>
+<tr><td>Domain model (class có hành vi)</td><td>Class domain, service chỉ điều phối</td><td>Quy tắc nhiều, liên quan nhau</td><td>Mapping giữa row và object; dễ thành trang trí nếu class chỉ có getter</td></tr>
+<tr><td>Database trước (procedure, trigger)</td><td>MySQL</td><td>Nhiều ứng dụng khác nhau ghi chung một database</td><td>Khó test, khó deploy, khó đọc</td></tr>
+<tr><td>Mọi cách trên cộng ràng buộc</td><td>Domain cho message, ràng buộc làm lưới</td><td>Gần như mọi hệ thống có tiền</td><td>Phải đổi lỗi ràng buộc thành response hợp lý</td></tr>
+</tbody></table></div>
+<div class="prose">
+<p><strong>Vì sao số nguyên, không phải <code>DECIMAL</code>?</strong> <code>DECIMAL</code> trong MySQL là số chính xác và dùng được. Vấn đề nằm ở phía Node: mysql2 trả chuỗi, và code dễ đổi chuỗi đó thành <code>number</code> để tính. Số nguyên minor units cộng trừ chính xác ở cả hai phía, và số mũ nằm ở một chỗ (bảng loại tiền). <code>DECIMAL</code> vẫn hợp khi cần nhiều chữ số hơn minor unit, ví dụ tỉ giá hay đơn giá tính theo phần nhỏ của cent.</p>
+</div>
+</section>
+
+<!-- 4 -->
+<section id="s4">
+<header><span class="num">04</span><h2>Ví dụ</h2></header>
+<div class="prose"><p>Schema và lệnh SQL đã chạy trên sandbox của Claude (MySQL 8.0.46). Code TypeScript viết theo API mysql2 3.x, chưa chạy.</p><h3>Schema: ràng buộc làm lưới an toàn</h3></div>
+<pre><code>CREATE TABLE currencies (
+  code     CHAR(3) PRIMARY KEY,
+  exponent TINYINT UNSIGNED NOT NULL          -- VND 0, USD 2, KWD 3
+);
+CREATE TABLE accounts (
+  id            BIGINT PRIMARY KEY,
+  currency      CHAR(3) NOT NULL,
+  balance_minor BIGINT NOT NULL DEFAULT 0,
+  version       INT NOT NULL DEFAULT 0,
+  CONSTRAINT fk_acc_cur FOREIGN KEY (currency) REFERENCES currencies(code),
+  CONSTRAINT chk_balance CHECK (balance_minor &gt;= 0)   -- I1, cho mọi đường ghi
+);
+CREATE TABLE ledger_entries (
+  id             BIGINT PRIMARY KEY AUTO_INCREMENT,
+  transaction_id BIGINT NOT NULL,
+  account_id     BIGINT NOT NULL,
+  amount_minor   BIGINT NOT NULL,              -- âm: tiền ra, dương: tiền vào
+  CONSTRAINT chk_nonzero CHECK (amount_minor &lt;&gt; 0),
+  CONSTRAINT fk_le_acc FOREIGN KEY (account_id) REFERENCES accounts(id),
+  KEY idx_txn (transaction_id), KEY idx_acc (account_id, id)
+);</code></pre>
+<pre><code>mysql&gt; UPDATE accounts SET balance_minor = balance_minor - 150 WHERE id = 1;   -- số dư 100
+ERROR 3819 (HY000): Check constraint 'chk_balance' is violated.
+mysql&gt; UPDATE accounts SET balance_minor = balance_minor - 30 WHERE id = 1 AND balance_minor &gt;= 30;
+Query OK, 1 row affected                                                       -- số dư 70
+-- cùng phép trừ trên cột BIGINT UNSIGNED:
+ERROR 1690 (22003): BIGINT UNSIGNED value is out of range in '(`lab`.`au`.`b` - 150)'</code></pre>
+<p class="prose">Ba kết quả, ba ý nghĩa. Câu có điều kiện trả 0 dòng khi không đủ tiền: đó là lời từ chối bình thường, service đổi thành lỗi nghiệp vụ. Lỗi 3819 là lưới bắt bug. <code>UNSIGNED</code> cũng chặn được số âm, nhưng bằng lỗi 1690 khó đọc hơn và làm phép trừ trung gian trong câu SQL cũng lỗi.</p>
+
+<div class="prose"><h3>Domain: Money và Account</h3></div>
+<pre><code>export class Money {
+  private constructor(readonly minor: bigint, readonly currency: string) {}
+  static of(minor: bigint, currency: string) { return new Money(minor, currency); }
+  add(o: Money) { this.same(o); return new Money(this.minor + o.minor, this.currency); }
+  sub(o: Money) { this.same(o); return new Money(this.minor - o.minor, this.currency); }
+  isNegative() { return this.minor &lt; 0n; }
+  private same(o: Money) { if (o.currency !== this.currency) throw new CurrencyMismatchError(this.currency, o.currency); }
+  // chia đều, phần dư cho những phần đầu: tổng luôn bằng số ban đầu
+  allocate(n: number): Money[] {
+    const q = this.minor / BigInt(n), r = this.minor % BigInt(n);
+    return Array.from({ length: n }, (_, i) =&gt; new Money(q + (BigInt(i) &lt; r ? 1n : 0n), this.currency));
+  }
+}
+export class Account {
+  constructor(readonly id: bigint, public balance: Money) {}
+  debit(amount: Money) {
+    const next = this.balance.sub(amount);
+    if (next.isNegative()) throw new InsufficientFundsError(this.id, amount);
+    this.balance = next;
+  }
+  credit(amount: Money) { this.balance = this.balance.add(amount); }
+}</code></pre>
+
+<div class="prose"><h3>Service: một use case, một transaction</h3></div>
+<pre><code>async transfer(cmd: { from: bigint; to: bigint; amount: Money }) {
+  return this.db.inTransaction(async (conn) =&gt; {
+    const [a, b] = await this.accounts.lockBoth(conn, cmd.from, cmd.to);  // FOR UPDATE theo id tăng dần
+    a.debit(cmd.amount);                                                   // quy tắc I1, lỗi rõ nghĩa
+    b.credit(cmd.amount);
+    const txId = await this.ledger.post(conn, [                            // I2: tổng hai bút toán bằng 0
+      { account: a.id, amount: -cmd.amount.minor },
+      { account: b.id, amount:  cmd.amount.minor },
+    ]);
+    await this.accounts.saveBalances(conn, [a, b]);                        // I3: cùng transaction với bút toán
+    return txId;
+  });
+}
+// repository nhận conn của transaction, không tự COMMIT
+async lockBoth(conn: PoolConnection, x: bigint, y: bigint) {
+  const [rows] = await conn.query&lt;RowDataPacket[]&gt;(
+    'SELECT id, currency, balance_minor FROM accounts WHERE id IN (?, ?) ORDER BY id FOR UPDATE', [x, y]);
+  if (rows.length !== 2) throw new AccountNotFoundError();
+  const byId = new Map(rows.map(r =&gt; [BigInt(r.id), new Account(BigInt(r.id), Money.of(BigInt(r.balance_minor), r.currency))]));
+  return [byId.get(x)!, byId.get(y)!];
+}</code></pre>
+
+<div class="prose"><h3>Job đối soát cho I2 và I3</h3></div>
+<pre><code>-- giao dịch có tổng bút toán khác 0 (I2)
+SELECT transaction_id, SUM(amount_minor) AS s FROM ledger_entries
+ GROUP BY transaction_id HAVING s &lt;&gt; 0;
+-- tài khoản có số dư khác tổng bút toán (I3); chạy theo khoảng id để không quét một lần cả bảng
+SELECT a.id, a.balance_minor, COALESCE(SUM(e.amount_minor), 0) AS ledger
+  FROM accounts a LEFT JOIN ledger_entries e ON e.account_id = a.id
+ WHERE a.id BETWEEN ? AND ?
+ GROUP BY a.id, a.balance_minor
+HAVING a.balance_minor &lt;&gt; ledger;</code></pre>
+</section>
+
+<!-- 5 -->
+<section id="s5">
+<header><span class="num">05</span><h2>Thí nghiệm</h2></header>
+<div class="prose"><p>Chạy trên MySQL 8.4 của lab với service của Month 2. Viết dự đoán trước. E48 gần với tiêu chí hoàn thành của Month 2: test bắt được một vi phạm bất biến cố ý đưa vào.</p></div>
+<details><summary>E48. Đi vòng qua quy tắc</summary>
+<p><strong>Câu hỏi.</strong> Với năm cách đặt kiểm tra I1 trong widget phần 01, chạy năm đường ghi: một request, 20 request song song rút 70.000 từ 100.000, job gọi service, job tự viết câu <code>UPDATE</code>, câu SQL tay. Mỗi tổ hợp có bao nhiêu lần số dư âm, và client nhận status gì?</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e48/prediction.md</code></p>
+<p><strong>Chạy.</strong> Một script Node bật hoặc tắt từng lớp kiểm tra, chạy các đường ghi, rồi chạy câu đối soát.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+<details><summary>E49. Tiền đi qua MySQL và mysql2</summary>
+<p><strong>Câu hỏi.</strong> Trên 8.4: kiểu của <code>SUM(bigint)</code>, <code>AVG(bigint)</code>, <code>ROUND</code> trên <code>DECIMAL</code> và <code>DOUBLE</code>. Với mysql2 và ba cấu hình (mặc định, <code>supportBigNumbers</code>, thêm <code>bigNumberStrings</code>): giá trị JavaScript và <code>typeof</code> cho <code>BIGINT</code> bằng 2<sup>53</sup> − 1, 2<sup>53</sup> + 1, và cho <code>SUM</code>.</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e49/prediction.md</code></p>
+<p><strong>Chạy.</strong> <code>CREATE TABLE … AS SELECT</code> để đọc kiểu kết quả; một script Node in <code>typeof</code> và giá trị.</p>
+<p><strong>Kết quả.</strong> Chưa chạy trên lab. Sandbox 8.0.46: <code>SUM(bigint)</code> là <code>DECIMAL(41,0)</code>; <code>ROUND(2.5)</code> = 3, <code>ROUND(2.5e0)</code> = 2.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+</section>
+
+<!-- 6 -->
+<section id="s6">
+<header><span class="num">06</span><h2>Ảnh hưởng khi chạy production</h2></header>
+<div class="prose">
+<h3>Khi nào phân tầng đáng công</h3>
+<ul>
+<li>Có quy tắc thật (tiền, tồn kho, quyền, trạng thái) và nhiều đường ghi: phân tầng và domain đáng công.</li>
+<li>CRUD thuần, không quy tắc: controller gọi repository là đủ. Thêm tầng không có gì để giữ chỉ thêm file.</li>
+<li>Nhiều ứng dụng ghi chung database (app cũ, script, công cụ admin): ràng buộc trong database trở thành bắt buộc.</li>
+</ul>
+<h3>Cái giá</h3>
+<ul>
+<li>Mapping giữa row và object domain; nhiều code hơn transaction script.</li>
+<li><code>CHECK</code> và khoá ngoại thêm việc kiểm tra cho mỗi câu ghi; khoá ngoại còn thêm khoá chia sẻ trên dòng cha.</li>
+<li>Giữ số dư riêng (I3) thêm một câu <code>UPDATE</code> mỗi giao dịch, đổi lại đọc số dư không phải <code>SUM</code>.</li>
+</ul>
+<h3>Nhận ra trên production bằng gì</h3>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Triệu chứng</th><th>Xem ở đâu</th></tr></thead>
+<tbody>
+<tr><td>Lỗi 3819 trong log</td><td>Một đường ghi bỏ qua domain. Tìm câu SQL trong stack, không chỉ sửa message.</td></tr>
+<tr><td>Số dư lệch tổng bút toán</td><td>Job đối soát I3; ai ghi <code>accounts</code> mà không ghi <code>ledger_entries</code></td></tr>
+<tr><td>Báo cáo lệch vài đồng</td><td>Tìm <code>Number(</code>, <code>parseFloat</code>, <code>DOUBLE</code>, <code>toFixed</code> trên đường tiền</td></tr>
+<tr><td>Số tiền có chuỗi lạ như "1000500"</td><td>Kết quả <code>SUM</code> là chuỗi bị cộng nối</td></tr>
+<tr><td>Module A sửa bảng của module B</td><td>Ai inject repository của B; <code>performance_schema.events_statements_summary_by_digest</code> theo bảng</td></tr>
+</tbody></table></div>
+<div class="senior"><h4>Góc nhìn senior: viết bất biến ra, kèm nơi giữ nó</h4><p>Senior giữ một bảng ngắn trong tài liệu của service: mỗi bất biến, nơi chặn (domain, câu SQL, ràng buộc), nơi phát hiện (job đối soát, alert), và test chứng minh nó. Bảng này là thứ Month 2 yêu cầu ("business-rule specification, naming where each invariant is enforced"). Khi có một đường ghi mới (job, consumer, công cụ admin), câu hỏi đầu tiên trong review là: đường này đi qua những dòng nào của bảng?</p></div>
+<div class="prose">
+<h3>Checklist khi review một thay đổi có ghi dữ liệu</h3>
+<ul>
+<li>Câu ghi này đi qua service nào? Có đường nào ghi cùng bảng mà không qua service đó?</li>
+<li>Bất biến nào bị chạm, và nó được giữ ở đâu khi có hai request song song?</li>
+<li>Ai mở và commit transaction? Repository có tự commit không?</li>
+<li>Tiền là số nguyên minor units? Có <code>Number()</code>, <code>parseFloat</code>, <code>toFixed</code> nào trên đường đi không? Kết quả <code>SUM</code> có được đổi kiểu không?</li>
+<li>Ràng buộc của database có phản ánh bất biến không? Lỗi ràng buộc được đổi thành response gì?</li>
+<li>Module này export repository không?</li>
+</ul>
+</div>
+</section>
+
+<!-- 7 -->
+<section id="s7">
+<header><span class="num">07</span><h2>Hiểu lầm thường gặp</h2></header>
+<div class="prose"><ul>
+<li><strong>Hiểu lầm:</strong> kiểm tra ở service là đủ. <strong>Vì sao sai:</strong> job, script và hai request song song đi vòng qua được một <code>if</code> (<a href="#s1">phần 01</a>). <strong>Quy tắc:</strong> domain cho message, câu có điều kiện hoặc khoá cho đồng thời, ràng buộc cho mọi đường.</li>
+<li><strong>Hiểu lầm:</strong> ràng buộc của database thay được kiểm tra trong code. <strong>Vì sao sai:</strong> nó chỉ cho lỗi 3819 khó hiểu và không diễn tả được quy tắc nhiều dòng. <strong>Quy tắc:</strong> cả hai, mỗi cái một việc.</li>
+<li><strong>Hiểu lầm:</strong> repository nên tự mở transaction cho an toàn. <strong>Vì sao sai:</strong> mỗi câu tự commit, chết ở giữa để lại dữ liệu nửa vời. <strong>Quy tắc:</strong> transaction ở service, repository nhận connection.</li>
+<li><strong>Hiểu lầm:</strong> <code>number</code> của JavaScript đủ chính xác cho tiền nếu làm tròn khi hiển thị. <strong>Vì sao sai:</strong> sai số cộng dồn và làm tròn sai ngay ở <code>1.005</code>. <strong>Quy tắc:</strong> số nguyên minor units, <code>BigInt</code> khi cần.</li>
+<li><strong>Hiểu lầm:</strong> <code>SUM</code> của cột số nguyên trả số nguyên. <strong>Vì sao sai:</strong> MySQL trả <code>DECIMAL</code>, mysql2 trả chuỗi. <strong>Quy tắc:</strong> đổi kiểu rõ ràng ở repository.</li>
+</ul></div>
+</section>
+
+<!-- 8 -->
+<section id="s8">
+<header><span class="num">08</span><h2>Câu hỏi ôn tập</h2></header>
+<p class="prose">Viết ngày 2026-10-22. Đánh số Q95 đến Q100.</p>
+<details><summary><span class="tag">Dự đoán</span>Q95. Kiểm tra ở service, hai request</summary>
+<p>Service đọc số dư 100.000, kiểm tra <code>balance &gt;= 70000</code>, rồi chạy <code>UPDATE accounts SET balance_minor = balance_minor - 70000</code>. Không có <code>CHECK</code>. Hai request tới cùng lúc. Số dư cuối là bao nhiêu?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>−40.000. Cả hai đọc 100.000 (đọc nhất quán, không khoá), cả hai qua kiểm tra, cả hai trừ. Câu <code>UPDATE</code> dùng giá trị mới nhất nên không mất phép trừ nào, nhưng kiểm tra đã dựa trên giá trị cũ. Đây là check-then-act.</p></details></details>
+<details><summary><span class="tag">Giải thích</span>Q96. Hai lần kiểm tra</summary>
+<p>Vì sao một service có cả <code>Account.debit()</code> lẫn <code>CHECK (balance_minor &gt;= 0)</code>? Không phải thừa sao?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Hai việc khác nhau. <code>debit()</code> cho lỗi nghiệp vụ có code và message, trả 422. <code>CHECK</code> chặn mọi đường ghi, kể cả code chưa viết; khi nó bắn (3819) thì đó là bug, cần alert. Bỏ cái đầu thì người dùng nhận 500; bỏ cái sau thì một job mới có thể làm số dư âm.</p></details></details>
+<details><summary><span class="tag">Dự đoán</span>Q97. Chia 100 USD cho 3</summary>
+<p>Chia 100,00 USD cho 3 người bằng <code>(100 / 3).toFixed(2)</code> cho mỗi người. Tổng ba phần là bao nhiêu? Cách nào cho tổng đúng?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Mỗi người 33,33, tổng 99,99: mất 1 cent. Làm trên minor units: 10.000 cent chia 3 được 3.333 dư 1; người đầu nhận 3.334, hai người sau 3.333. Tổng đúng 10.000.</p></details></details>
+<details><summary><span class="tag">Chẩn đoán</span>Q98. Số tiền dài bất thường</summary>
+<p>API trả tổng chi tiêu của tháng là <code>"1250000500"</code> cho một khách vừa chi 1.250.000 và có thêm khoản 500. Code là <code>const total = rows[0].total + extra</code>, với <code>total</code> là <code>SUM(amount_minor)</code>. Vì sao?</p>
+<details class="answer"><summary>Xem đáp án</summary><p><code>SUM</code> của <code>BIGINT</code> trả <code>DECIMAL</code>; mysql2 mặc định trả <code>DECIMAL</code> dạng chuỗi. <code>"1250000" + 500</code> là nối chuỗi. Sửa: đổi kiểu ở repository (<code>BigInt(rows[0].total)</code>), có test kiểm tra <code>typeof</code>.</p></details></details>
+<details><summary><span class="tag">Giải thích</span>Q99. Repository tự commit</summary>
+<p><code>LedgerRepository.post()</code> và <code>AccountsRepository.saveBalances()</code> mỗi hàm tự mở và commit transaction. Process chết giữa hai lời gọi. Bất biến nào bị phá, và job nào phát hiện?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Bút toán đã commit, số dư chưa: I3 bị phá (số dư khác tổng bút toán). Nếu chết giữa hai bút toán thì cả I2 bị phá. Câu đối soát I3 phát hiện được. Sửa: một transaction ở service, repository nhận connection.</p></details></details>
+<details><summary><span class="tag">Chẩn đoán</span>Q100. Lỗi 3819 lúc 2 giờ sáng</summary>
+<p>Alert báo vài chục lỗi <code>Check constraint 'chk_balance' is violated</code> mỗi đêm. API ban ngày không bao giờ gây lỗi này. Bạn tìm gì?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Một đường ghi chạy ban đêm không đi qua <code>Account.debit()</code>: job phí, job hoàn tiền, đồng bộ từ hệ thống khác. Stack trace và digest của câu SQL chỉ ra nơi gọi. Ràng buộc đã làm đúng việc: chặn số dư âm. Việc cần làm là cho job đó đi qua service và xử lý trường hợp không đủ tiền theo nghiệp vụ (bỏ qua, ghi nợ, báo).</p></details></details>
+</section>
+
+<!-- 9 -->
+<section id="s9">
+<header><span class="num">09</span><h2>Bài toán thực tế</h2></header>
+<div class="prose">
+<p>Mỗi bài là một vòng phỏng vấn system design cấp senior, khoảng 30–45 phút. Cách dùng:</p>
+<ol class="list">
+<li>Đọc bối cảnh và câu hỏi của interviewer. Bối cảnh là những gì interviewer nói lúc đầu: hệ thống, cách đang làm, quy mô, chuyện đã xảy ra. Viết ra những gì bạn sẽ hỏi thêm trước khi thiết kế, rồi mới mở "Hỏi lại interviewer" để xem câu hỏi nên hỏi và câu trả lời của interviewer: con số chính xác, yêu cầu, ràng buộc. Các con số ở đó dùng cho những câu sau.</li>
+<li>Với mỗi follow-up, tự trả lời (nói to hoặc viết ra) trong vài phút, rồi mới mở đáp án. Follow-up cuối luôn là triển khai và kiểm chứng: thiết kế đã chọn được làm ra sao, test gì, theo dõi gì, lùi lại thế nào.</li>
+<li>Cuối bài, dùng rubric để tự chấm: câu trả lời của bạn giống cột "mid" hay cột "senior", và có rơi vào red flag nào không.</li>
+</ol>
+<p>Đáp án là lập luận từ tài liệu, không phải số đo; con số trong đó là ước lượng. Viết ngày 2026-10-22.</p>
+</div>
+
+<!-- C28 -->
+<div class="case" id="c28">
+<h3>C28. Số dư âm xuất hiện sau khi thêm job hoàn tiền</h3>
+<p class="src">Dựa trên: phần 01 và 02 của trang này; <a href="../concurrency-control-strategies/index.html">Kiểm soát ghi đồng thời</a>.</p>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> Ví điện tử, NestJS và MySQL 8.4. <code>WalletService.debit()</code> kiểm tra số dư rồi trừ.</li><li><strong>Đang làm:</strong> Team thanh toán vừa thêm một job hoàn tiền và thu phí chạy đêm. Job dùng thẳng <code>WalletRepository</code> để "chạy nhanh".</li><li><strong>Quy mô:</strong> 4 triệu ví, khoảng 300.000 giao dịch mỗi ngày.</li><li><strong>Đã xảy ra:</strong> Sau hai tuần, kế toán thấy 1.140 ví có số dư âm, tổng khoảng 86 triệu đồng.</li></ul></div>
+<blockquote class="q">"Tìm nguyên nhân, sửa dữ liệu, và làm sao để chuyện này không xảy ra với job tiếp theo do một team khác viết?"</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>Job làm gì với mỗi ví?</td><td>Tính phí tháng, chạy <code>UPDATE wallets SET balance = balance - ? WHERE id = ?</code>. Không đọc số dư trước.</td><td>Đường ghi không có kiểm tra nào.</td></tr>
+<tr><td>Có bảng bút toán không?</td><td>Có <code>wallet_transactions</code>, nhưng job không ghi vào đó; chỉ trừ số dư.</td><td>I3 cũng bị phá: số dư không còn khớp lịch sử.</td></tr>
+<tr><td>Ràng buộc trên <code>balance</code>?</td><td>Cột <code>BIGINT</code>, không có <code>CHECK</code>.</td><td>Không có lưới.</td></tr>
+<tr><td>Nghiệp vụ muốn gì khi ví không đủ tiền trả phí?</td><td>Thu phần có được, ghi nợ phần còn lại, thu khi có tiền vào.</td><td>Quy tắc đúng không phải "từ chối" mà là "ghi nợ".</td></tr>
+<tr><td>API trong ngày có bị ảnh hưởng không?</td><td>Có: ví âm làm vài lần rút tiếp theo bị từ chối với lỗi lạ.</td><td>Hậu quả lan sang khách hàng.</td></tr>
+<tr><td>Có bao nhiêu đường ghi vào <code>wallets</code>?</td><td>Không ai biết chắc; ít nhất 5 service và 3 job.</td><td>Phạm vi của việc chặn.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> hỏi "nghiệp vụ muốn gì khi không đủ tiền". Câu trả lời đổi bài toán từ "chặn" sang "mô hình hoá khoản nợ".</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Nguyên nhân là gì? Vì sao test của <code>WalletService</code> không bắt được?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Quy tắc "không âm" chỉ nằm trong <code>WalletService.debit()</code>. Job đi vòng qua service, ghi thẳng qua repository, và câu <code>UPDATE</code> không có điều kiện.</li>
+<li>Test của service chỉ chứng minh service đúng. Không test nào nói "mọi đường ghi vào <code>wallets</code> giữ được bất biến", vì bất biến được giữ ở một chỗ không bao phủ mọi đường.</li>
+<li>Repository được export ra khỏi module ví, nên team khác dùng được.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> Một đồng nghiệp đề xuất thêm <code>CHECK (balance &gt;= 0)</code> ngay hôm nay. Có đủ không? Có rủi ro gì?</p>
+<details class="answer"><summary>Đáp án</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>A. Thêm <code>CHECK</code> ngay</td><td>Chặn mọi đường ghi</td><td>1.140 dòng đang âm làm <code>ALTER TABLE … ADD CHECK</code> thất bại; job đêm nay gặp lỗi 3819 và dừng giữa chừng</td></tr>
+<tr><td>B. Câu <code>UPDATE</code> có điều kiện trong job</td><td>Sửa đúng chỗ</td><td>Chỉ sửa một đường; không có ghi nợ</td></tr>
+<tr><td>C. Job gọi <code>WalletService.chargeFee()</code> có ghi nợ; không export repository; rồi mới thêm <code>CHECK</code></td><td>Quy tắc nghiệp vụ đúng, chặn đường vòng, có lưới</td><td>Nhiều bước, phải làm theo thứ tự</td></tr>
+</tbody></table></div>
+<p><strong>Chọn C, theo thứ tự.</strong> Dừng job ngay. Sửa dữ liệu (Follow-up 3). Viết <code>chargeFee()</code> với ghi nợ. Bỏ export repository. Cuối cùng thêm <code>CHECK</code>, khi chắc không còn dòng âm. Thêm ràng buộc trước khi sửa dữ liệu thì <code>ALTER</code> thất bại; thêm trước khi sửa code thì job hỏng giữa đêm.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> Sửa 1.140 ví đang âm thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ol class="list">
+<li>Không <code>UPDATE balance = 0</code>: làm vậy là xoá nợ mà không ai quyết định.</li>
+<li>Với mỗi ví âm: ghi bút toán "chuyển phần âm sang khoản nợ phí" (<code>fee_debts</code>), đưa số dư về 0. Bút toán có <code>reason = 'migration-2026-10'</code> để truy lại.</li>
+<li>Bổ sung bút toán còn thiếu cho các lần job đã trừ mà không ghi lịch sử, tính từ log của job; đối soát lại I3 cho mọi ví bị chạm.</li>
+<li>Kế toán duyệt danh sách trước khi chạy; script chạy theo lô 500 ví, idempotent theo <code>wallet_id</code>.</li>
+</ol>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> Làm sao để team tiếp theo không lặp lại?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li><strong>Ranh giới module:</strong> <code>WalletModule</code> chỉ export <code>WalletService</code>. Một test kiểm tra <code>exports</code> của module không chứa repository.</li>
+<li><strong>Quyền database:</strong> user MySQL của các service khác chỉ có <code>SELECT</code> trên <code>wallets</code>; chỉ service ví có <code>UPDATE</code>. Đây là ranh giới mà code review không lách được.</li>
+<li><strong>Ràng buộc:</strong> <code>CHECK (balance &gt;= 0)</code> sau khi sửa dữ liệu.</li>
+<li><strong>Phát hiện:</strong> job đối soát I3 mỗi giờ theo khoảng id; alert khi có ví lệch hoặc có lỗi 3819.</li>
+<li><strong>Tài liệu:</strong> bảng bất biến của service ví, nêu nơi chặn và nơi phát hiện.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai và kiểm chứng thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ol class="list">
+<li>Ngày 0: tắt job. Đếm ví âm, chạy câu đối soát I3 để biết phạm vi thật.</li>
+<li>Ngày 1–2: <code>chargeFee()</code> trong một transaction: khoá ví (<code>FOR UPDATE</code>), trừ phần có thể trừ, ghi bút toán, ghi nợ phần còn lại. Test trên MySQL thật: ví 0, ví đủ tiền, ví thiếu một phần, hai lần chạy cùng một tháng (idempotent theo <code>(wallet_id, fee_month)</code> UNIQUE).</li>
+<li>Ngày 3: script sửa dữ liệu, chạy trên bản sao trước, kế toán duyệt kết quả, rồi chạy thật.</li>
+<li>Ngày 4: <code>ALTER TABLE wallets ADD CONSTRAINT chk_balance CHECK (balance &gt;= 0)</code>. Đây là thao tác phải kiểm tra mọi dòng; trên bảng 4 triệu dòng, thử trên bản sao để biết thời gian và kiểu khoá (trang Online schema migration sẽ nói kỹ).</li>
+<li>Thu hồi quyền <code>UPDATE</code> của các user khác. Theo dõi lỗi 1142 (thiếu quyền) để tìm đường ghi còn sót.</li>
+<li>Bật lại job. Metric: số ví âm (phải bằng 0), số lỗi 3819, tổng nợ phí.</li>
+</ol>
+</details>
+</div>
+
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Chẩn đoán</td><td>"Job có bug"</td><td>Bất biến chỉ giữ ở một đường; repository bị export; không có lưới</td></tr>
+<tr><td>Nghiệp vụ</td><td>Từ chối khi không đủ tiền</td><td>Hỏi nghiệp vụ, mô hình hoá khoản nợ</td></tr>
+<tr><td>Sửa dữ liệu</td><td>Đưa số dư về 0</td><td>Bút toán chuyển sang nợ, có lý do, được duyệt, idempotent</td></tr>
+<tr><td>Phòng ngừa</td><td>Thêm review</td><td>Ranh giới module, quyền database, <code>CHECK</code>, đối soát</td></tr>
+<tr><td>Thứ tự</td><td>Thêm ràng buộc trước</td><td>Dữ liệu, code, rồi ràng buộc</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> <code>UPDATE balance = 0</code> cho các ví âm; thêm <code>CHECK</code> khi còn dòng vi phạm; chỉ sửa job mà không chặn đường vòng cho job tiếp theo.</p>
+</details>
+</div>
+
+<!-- C29 -->
+<div class="case" id="c29">
+<h3>C29. Đa tiền tệ, phí theo phần trăm, báo cáo lệch vài đồng mỗi ngày</h3>
+<p class="src">Dựa trên: phần 02 của trang này (minor units, mysql2).</p>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> Cổng thanh toán cho thương mại điện tử, đang hỗ trợ VND và bắt đầu nhận USD.</li><li><strong>Đang làm:</strong> Bảng <code>payments</code> có cột <code>amount DOUBLE</code>. Phí 1,5% tính bằng <code>Math.round(amount * 0.015 * 100) / 100</code>. Thanh toán chia nhiều lần (trả góp 3 kỳ) chia đều rồi làm tròn.</li><li><strong>Quy mô:</strong> 200.000 thanh toán mỗi ngày.</li><li><strong>Đã xảy ra:</strong> Đối soát cuối ngày với ngân hàng lệch từ vài chục đến vài trăm nghìn đồng; trả góp USD có kỳ thiếu hoặc thừa 1 cent.</li></ul></div>
+<blockquote class="q">"Bạn thiết kế lại cách lưu và tính tiền thế nào?"</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>Quy tắc làm tròn phí theo hợp đồng?</td><td>Hợp đồng với ngân hàng: phí tính trên từng giao dịch, làm tròn nửa lên tới đơn vị nhỏ nhất của loại tiền.</td><td>Quy tắc là của nghiệp vụ, không phải của code.</td></tr>
+<tr><td>Ngân hàng tính phí trên từng giao dịch hay trên tổng?</td><td>Từng giao dịch.</td><td>Cộng phí đã làm tròn khác với làm tròn phí của tổng.</td></tr>
+<tr><td>Trả góp: phần dư đi vào kỳ nào?</td><td>Kỳ đầu.</td><td>Quy tắc phân bổ.</td></tr>
+<tr><td>Có quy đổi tiền tệ không?</td><td>Có, hiển thị giá USD theo tỉ giá ngày; ghi sổ bằng loại tiền khách trả.</td><td>Tỉ giá cần nhiều chữ số hơn minor unit.</td></tr>
+<tr><td>Dữ liệu cũ bao nhiêu?</td><td>3 năm, khoảng 200 triệu dòng <code>DOUBLE</code>.</td><td>Migration là một phần của bài.</td></tr>
+<tr><td>Ai đọc bảng này?</td><td>Service thanh toán, job đối soát, công cụ BI đọc replica.</td><td>Đổi kiểu cột ảnh hưởng nhiều người đọc.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> hỏi quy tắc làm tròn nằm trong hợp đồng nào. Đối soát chỉ khớp khi hai bên dùng cùng một quy tắc.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Chỉ ra các nguồn lệch trong cách đang làm.</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li><code>DOUBLE</code> lưu xấp xỉ: 1,005 USD không lưu đúng được, nên làm tròn tới cent có thể ra 1,00 thay vì 1,01.</li>
+<li><code>Math.round(x * 100) / 100</code> nhân trên số đã sai: <code>1.005 * 100 = 100.49999999999999</code>, làm tròn thành 100.</li>
+<li>Với VND, <code>* 100 / 100</code> là làm tròn tới phần trăm đồng: VND không có đơn vị đó, nên phí có phần lẻ được lưu rồi cộng dồn.</li>
+<li>Trả góp chia đều rồi làm tròn từng kỳ: tổng các kỳ khác số tiền gốc 1 đơn vị.</li>
+<li>MySQL làm tròn <code>DOUBLE</code> về số chẵn, còn số chính xác thì xa số 0 (sandbox 8.0.46: <code>ROUND(2.5e0)</code> = 2, <code>ROUND(2.5)</code> = 3). Báo cáo tính bằng SQL và code tính bằng JavaScript có thể ra hai kết quả.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> Chọn kiểu lưu. Đồng nghiệp đề xuất <code>DECIMAL(19,4)</code> cho mọi thứ.</p>
+<details class="answer"><summary>Đáp án</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>A. Giữ <code>DOUBLE</code>, làm tròn cẩn thận hơn</td><td>Không migration</td><td>Không sửa được gốc</td></tr>
+<tr><td>B. <code>DECIMAL(19,4)</code> cho mọi loại tiền</td><td>Chính xác trong MySQL; một kiểu cho mọi thứ</td><td>Bốn chữ số lẻ cho VND là vô nghĩa; mysql2 trả chuỗi và code dễ đổi về <code>number</code>; vẫn phải biết số mũ để làm tròn</td></tr>
+<tr><td>C. <code>amount_minor BIGINT</code> cộng <code>currency CHAR(3)</code>; tỉ giá <code>DECIMAL(20,10)</code> riêng</td><td>Số nguyên ở cả MySQL và Node; số mũ ở một chỗ; làm tròn rõ ràng ở từng phép tính</td><td>Phải đổi khi hiển thị; migration</td></tr>
+</tbody></table></div>
+<p><strong>Chọn C.</strong> Số tiền đã ghi sổ luôn là số nguyên của đơn vị nhỏ nhất. Những thứ cần độ chính xác cao hơn (tỉ giá, đơn giá) dùng <code>DECIMAL</code> và chỉ là đầu vào; kết quả của phép tính được làm tròn một lần, theo quy tắc của hợp đồng, rồi mới ghi. <strong>Khi nào đổi ý:</strong> sản phẩm cần lưu số tiền nhỏ hơn minor unit (giá điện theo phần nghìn đồng, phí giao dịch tiền mã hoá): lưu <code>DECIMAL</code> với số chữ số lẻ cố định cho loại đó.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> Viết phép tính phí và chia kỳ trên minor units.</p>
+<details class="answer"><summary>Đáp án</summary>
+<pre><code>// phí = amount × bps / 10000, làm tròn nửa lên; 1,5% = 150 bps
+function fee(amountMinor: bigint, bps: bigint): bigint {
+  const num = amountMinor * bps;
+  return (num + 5000n) / 10000n;          // amount không âm: cộng nửa rồi chia nguyên = nửa lên
+}
+fee(100_500n, 150n)   // 100.500 đồng × 1,5% = 1.507,5 → 1.508
+// chia kỳ: phần dư vào kỳ đầu
+function installments(total: bigint, n: number): bigint[] {
+  const q = total / BigInt(n), r = total % BigInt(n);
+  return Array.from({ length: n }, (_, i) =&gt; q + (BigInt(i) &lt; r ? 1n : 0n));
+}
+installments(10_000n, 3)  // [3334n, 3333n, 3333n], tổng 10.000</code></pre>
+<p>Tỉ lệ phí lưu bằng basis point (phần vạn) dạng số nguyên, không lưu 0,015. Mọi phép làm tròn đi qua một hàm duy nhất, có test bằng các giá trị biên (x,5; số âm nếu có hoàn tiền).</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> Migration 200 triệu dòng <code>DOUBLE</code> sang <code>BIGINT</code> thế nào, và đổi giá trị cũ ra sao?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Expand: thêm cột <code>amount_minor BIGINT NULL</code> và <code>currency</code>. Code mới ghi cả hai cột.</li>
+<li>Backfill theo lô theo khoảng PK: <code>amount_minor = ROUND(amount * POW(10, exponent))</code>. Với <code>DOUBLE</code>, <code>ROUND</code> làm tròn về chẵn và giá trị đã sai sẵn; ghi lại các dòng mà <code>ABS(amount * POW(10, e) - ROUND(…)) &gt; 0.0001</code> để kế toán xem.</li>
+<li>Đối soát: tổng theo ngày của cột mới so với sao kê ngân hàng; lệch nào cũng có tên dòng.</li>
+<li>Contract: đổi người đọc (job, BI) sang cột mới, rồi bỏ cột cũ. Mỗi bước lùi lại được.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai và kiểm chứng thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ol class="list">
+<li><code>Money</code> với <code>bigint</code> và <code>currency</code>; bảng <code>currencies</code> có số mũ; hàm <code>fee</code> và <code>allocate</code> có test bảng giá trị (property test: tổng các kỳ luôn bằng gốc; phí không âm; phí của 0 là 0).</li>
+<li>Repository đổi <code>BIGINT</code> và kết quả <code>SUM</code> sang <code>BigInt</code>; test kiểm tra <code>typeof</code> trên MySQL thật.</li>
+<li>Lint cấm <code>parseFloat</code>, <code>Number(</code> và <code>toFixed</code> trong module thanh toán.</li>
+<li>Chạy song song một tuần: tính phí bằng cả cách cũ và cách mới, log mọi chênh lệch, so với sao kê ngân hàng.</li>
+<li>Metric: chênh lệch đối soát hằng ngày (mục tiêu 0), số dòng backfill bị đánh dấu.</li>
+</ol>
+</details>
+</div>
+
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Chẩn đoán</td><td>"Float không chính xác"</td><td>Chỉ ra từng nguồn: lưu, nhân, làm tròn VND, chia kỳ, SQL khác JS</td></tr>
+<tr><td>Kiểu lưu</td><td><code>DECIMAL</code> cho mọi thứ</td><td>Minor units cho số đã ghi sổ, <code>DECIMAL</code> cho tỉ lệ và tỉ giá</td></tr>
+<tr><td>Làm tròn</td><td>"Làm tròn 2 chữ số"</td><td>Quy tắc của hợp đồng, theo số mũ của loại tiền, một hàm duy nhất</td></tr>
+<tr><td>Chia</td><td>Chia đều rồi làm tròn</td><td>Phân bổ phần dư, tổng luôn đúng</td></tr>
+<tr><td>Migration</td><td><code>ALTER COLUMN</code> một lần</td><td>Expand, backfill có đánh dấu, đối soát, contract</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> giữ <code>DOUBLE</code>; dùng <code>toFixed</code> để làm tròn tiền; một quy tắc làm tròn cho mọi loại tiền; đổi kiểu cột 200 triệu dòng bằng một câu <code>ALTER</code> trong giờ cao điểm.</p>
+</details>
+</div>
+
+<!-- C30 -->
+<div class="case" id="c30">
+<h3>C30. Module đơn hàng sửa thẳng bảng thanh toán</h3>
+<p class="src">Dựa trên: phần 02 của trang này (ranh giới); <a href="../nestjs-request-lifecycle/index.html">Vòng đời request NestJS</a> (module, exports); <a href="../transactional-outbox/index.html">Transactional outbox</a>.</p>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> Monolith NestJS 4 năm tuổi, một database MySQL. Module <code>orders</code>, <code>payments</code>, <code>inventory</code>.</li><li><strong>Đang làm:</strong> <code>OrdersService.cancel()</code> inject <code>PaymentsRepository</code>, đặt <code>payments.status = 'refunded'</code> và cộng lại tồn kho trong cùng transaction.</li><li><strong>Kế hoạch:</strong> Công ty muốn tách <code>payments</code> thành service riêng trong 6 tháng, do một team khác sở hữu.</li><li><strong>Đã xảy ra:</strong> Một số đơn huỷ có <code>payments.status = 'refunded'</code> nhưng tiền chưa bao giờ được hoàn qua cổng thanh toán.</li></ul></div>
+<blockquote class="q">"Bạn sửa lỗi này và chuẩn bị cho việc tách payments thế nào?"</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>Hoàn tiền thật được gọi ở đâu?</td><td><code>PaymentsService.refund()</code> gọi API cổng thanh toán rồi đặt <code>refunded</code>. <code>OrdersService.cancel()</code> chỉ đặt cột, không gọi API.</td><td>Hai đường cùng đặt một trạng thái với hai ý nghĩa.</td></tr>
+<tr><td>Bao nhiêu chỗ ngoài payments đọc hoặc ghi bảng <code>payments</code>?</td><td>Grep thấy 11 chỗ đọc, 3 chỗ ghi ở module khác.</td><td>Phạm vi của ranh giới bị rò.</td></tr>
+<tr><td>Cổng thanh toán có idempotency key không?</td><td>Có, <code>Idempotency-Key</code> theo header, giữ 24 giờ.</td><td>Gọi lại hoàn tiền có an toàn không.</td></tr>
+<tr><td>Bao nhiêu đơn bị ảnh hưởng?</td><td>Khoảng 900 trong 3 tháng.</td><td>Việc khắc phục dữ liệu.</td></tr>
+<tr><td>Huỷ đơn có cần đồng bộ không?</td><td>Người dùng cần thấy "đã huỷ" ngay; tiền về sau vài phút là chấp nhận được.</td><td>Cho phép làm hoàn tiền bất đồng bộ.</td></tr>
+<tr><td>Team payments đồng ý API gì?</td><td>Chưa có; họ muốn sở hữu mọi thay đổi trạng thái thanh toán.</td><td>Ranh giới là chuyện sở hữu, không chỉ là code.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> đếm số chỗ ghi chéo trước khi đề xuất. Ba chỗ ghi chéo là ba bất biến của payments mà payments không kiểm soát.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Vì sao có đơn "refunded" mà chưa hoàn tiền?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p>Trạng thái <code>refunded</code> của payments có nghĩa "cổng thanh toán đã xác nhận hoàn tiền". <code>OrdersService</code> đặt cùng giá trị đó mà không làm việc tương ứng. Bất biến "refunded thì đã có giao dịch hoàn ở cổng" chỉ được giữ trong <code>PaymentsService</code>; repository bị export nên module khác đi vòng qua. Đây là C28 ở cấp module.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> Huỷ đơn nên gọi payments thế nào? So các cách.</p>
+<details class="answer"><summary>Đáp án</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>A. Giữ inject repository, thêm gọi API cổng trong <code>cancel()</code></td><td>Sửa nhanh</td><td>Gọi mạng trong transaction; logic hoàn tiền ở hai nơi; tách service thì vỡ</td></tr>
+<tr><td>B. <code>cancel()</code> gọi <code>PaymentsService.refund()</code> đồng bộ</td><td>Một nơi giữ quy tắc</td><td>Huỷ đơn chờ cổng thanh toán; cổng lỗi thì huỷ lỗi; khi tách thành gọi HTTP</td></tr>
+<tr><td>C. <code>cancel()</code> ghi sự kiện <code>OrderCancelled</code> vào outbox cùng transaction; payments tiêu thụ và hoàn tiền với idempotency key</td><td>Huỷ nhanh; payments sở hữu trạng thái của mình; giống hệt khi tách service</td><td>Bất đồng bộ; cần hiện "đang hoàn tiền"; vận hành outbox</td></tr>
+</tbody></table></div>
+<p><strong>Chọn C.</strong> Nó dùng ranh giới đúng ngay trong monolith, nên việc tách sau này chỉ đổi chỗ chạy consumer. Người dùng thấy "đã huỷ, đang hoàn tiền". <strong>Khi nào đổi ý:</strong> nghiệp vụ đòi hoàn tiền xong mới được báo huỷ: B, có timeout và thông báo lỗi rõ.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> 11 chỗ đọc bảng <code>payments</code> từ module khác thì sao?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Phân loại: đọc để hiển thị (trạng thái thanh toán của đơn), đọc để báo cáo, đọc để quyết định (chỉ giao hàng khi đã trả).</li>
+<li>Hiển thị và quyết định: gọi <code>PaymentsService.getStatus(orderId)</code>, hàm đọc do payments export. Khi tách thì thành API.</li>
+<li>Báo cáo: đọc từ replica hoặc kho dữ liệu, chấp nhận trễ; không đi qua service.</li>
+<li>Không chặn đọc ngay; đọc không phá bất biến. Nhưng mỗi chỗ đọc trực tiếp là một sợi dây phải cắt khi tách.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> 900 đơn bị ảnh hưởng xử lý thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Tìm đơn huỷ có <code>payments.status = 'refunded'</code> nhưng không có bản ghi hoàn tiền từ cổng (đối chiếu với báo cáo hoàn tiền của cổng).</li>
+<li>Đưa trạng thái về <code>refund_pending</code>, để consumer mới gọi hoàn tiền với idempotency key theo <code>payment_id</code>. Key cố định nên chạy lại không hoàn hai lần, kể cả khi đơn đã được hoàn tay ở đâu đó trong vòng 24 giờ.</li>
+<li>Với đơn cũ hơn thời hạn hoàn tiền của cổng: danh sách cho bộ phận chăm sóc khách hàng.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai và kiểm chứng thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ol class="list">
+<li>Payments thêm trạng thái <code>refund_pending</code>, consumer <code>OrderCancelled</code>, gọi cổng với <code>Idempotency-Key: refund-{paymentId}</code>.</li>
+<li><code>OrdersService.cancel()</code> ghi outbox thay cho ghi bảng payments. Bỏ <code>PaymentsRepository</code> khỏi <code>exports</code>; build hỏng ở 3 chỗ ghi chéo, sửa từng chỗ.</li>
+<li>Test tích hợp: huỷ đơn, chạy relay và consumer, kiểm tra cổng giả nhận đúng một lệnh hoàn; chạy consumer hai lần, vẫn một lệnh.</li>
+<li>Quyền MySQL: user của module orders (khi tách) không có quyền ghi bảng payments; trong monolith thì một test kiến trúc cấm import <code>payments/*.repository</code> từ module khác.</li>
+<li>Metric: số đơn <code>refund_pending</code> quá 15 phút, lỗi từ cổng. Khắc phục 900 đơn theo lô, theo dõi phản hồi của khách.</li>
+</ol>
+</details>
+</div>
+
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Chẩn đoán</td><td>"Quên gọi API hoàn tiền"</td><td>Trạng thái của payments bị module khác đặt; ranh giới rò</td></tr>
+<tr><td>Thiết kế</td><td>Gọi API trong <code>cancel()</code></td><td>Sự kiện qua outbox, payments sở hữu trạng thái</td></tr>
+<tr><td>Chuẩn bị tách</td><td>Tách khi đến lúc</td><td>Ranh giới trong monolith giống hệt ranh giới sau khi tách</td></tr>
+<tr><td>Đọc chéo</td><td>Không nhắc</td><td>Phân loại đọc, đổi dần sang hàm đọc của payments</td></tr>
+<tr><td>Khắc phục</td><td>Hoàn tay</td><td>Idempotency key cố định, chạy lại an toàn</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> gọi API cổng thanh toán trong transaction của MySQL; tiếp tục export repository; tách service bằng cách cho service mới dùng chung database và bảng như cũ.</p>
+</details>
+</div>
+</section>
+
+<!-- 10 -->
+<section id="s10">
+<header><span class="num">10</span><h2>Câu hỏi còn mở</h2></header>
+<p class="prose">Số thứ tự trùng với Open questions trong <code>.claude/docs/LEARNING_LOG.md</code>. Log là bản gốc.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>#</th><th>Câu hỏi</th><th>Trạng thái</th></tr></thead>
+<tbody>
+<tr><td>39</td><td>Giữ cột số dư riêng (I3) hay tính bằng <code>SUM</code> trên bút toán mỗi lần đọc? Từ bao nhiêu bút toán mỗi tài khoản thì <code>SUM</code> theo index <code>(account_id, id)</code> quá chậm cho một API, và snapshot số dư theo ngày giúp bao nhiêu?</td><td>Mở. Biến thể của E48 trên lab.</td></tr>
+<tr><td>40</td><td>Đổi <code>BIGINT</code> sang <code>BigInt</code> ở đâu là gọn nhất với mysql2: <code>typeCast</code> cho từng cột, <code>bigNumberStrings</code> rồi đổi ở repository, hay để chuỗi tới tận JSON? Mỗi cách tốn bao nhiêu khi đọc 10.000 dòng?</td><td>Mở. Đo trong E49.</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- 11 -->
+<section id="s11">
+<header><span class="num">11</span><h2>Tài liệu tham khảo</h2></header>
+<div class="prose"><ul>
+<li>MySQL 8.4 Reference Manual: CHECK Constraints (thực thi từ 8.0.16); Precision Math, Rounding Behavior (<code>ROUND</code> với số chính xác và số xấp xỉ); Aggregate Function Descriptions (<code>SUM</code> trả <code>DECIMAL</code> cho đối số chính xác); Out-of-Range and Overflow Handling (<code>UNSIGNED</code>)</li>
+<li>mysql2 3.24.6, mã nguồn: <code>lib/connection_config.js</code> (mặc định <code>supportBigNumbers</code>, <code>bigNumberStrings</code>, <code>decimalNumbers</code> đều tắt), <code>lib/parsers/text_parser.js</code>, <code>lib/packets/packet.js</code> (<code>parseInt</code>)</li>
+<li>ISO 4217: số chữ số của minor unit cho từng loại tiền</li>
+<li>Martin Fowler, <em>Patterns of Enterprise Application Architecture</em>: Transaction Script, Domain Model, Money, Unit of Work</li>
+<li>ECMAScript: <code>Number.MAX_SAFE_INTEGER</code>, <code>BigInt</code></li>
+</ul></div>
+<h3>Mức kiểm chứng</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>Khẳng định</th><th>Nguồn</th></tr></thead>
+<tbody>
+<tr><td><code>CHECK</code> vi phạm cho lỗi 3819; câu có điều kiện trả 0 dòng; trừ âm trên <code>UNSIGNED</code> cho lỗi 1690</td><td>sandbox của Claude, MySQL 8.0.46; chưa chạy trên 8.4</td></tr>
+<tr><td><code>SUM(bigint)</code> có kiểu <code>DECIMAL(41,0)</code>; <code>ROUND(2.5)</code> = 3, <code>ROUND(2.5e0)</code> = 2</td><td>sandbox 8.0.46; manual nói cùng quy tắc cho 8.4; E49</td></tr>
+<tr><td>mysql2 trả <code>BIGINT</code> là <code>number</code>, <code>DECIMAL</code> là chuỗi theo mặc định</td><td>mã nguồn mysql2 3.24.6</td></tr>
+<tr><td><code>0.1 + 0.2</code>, <code>1.005 * 100</code></td><td>chạy bằng Node trong sandbox</td></tr>
+<tr><td>Đường nào đi vòng qua kiểm tra nào (widget phần 01)</td><td>mô hình theo cơ chế khoá và MVCC; chưa đo (E48)</td></tr>
+</tbody></table></div>
+</section>
+</main>
+
+</div>
+
+<script>
+const DEFS=`<defs><marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>`;
+function B(x,y,w,h,cls,t,sub){
+  const tx=x+w/2;
+  return `<g class="n ${cls||''}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="5"/>`+
+  `<text class="tb" x="${tx}" y="${y+(sub?h/2-8:h/2)}" text-anchor="middle" dominant-baseline="central">${t}</text>`+
+  (sub?`<text class="ts" x="${tx}" y="${y+h/2+10}" text-anchor="middle" dominant-baseline="central">${sub}</text>`:'')+`</g>`;
+}
+const A=(d,cls)=>`<path d="${d}" class="edge ${cls||''}" marker-end="url(#arw)"/>`;
+const T=(x,y,t,anchor,cls)=>`<text class="${cls||'lbl'}" x="${x}" y="${y}" text-anchor="${anchor||'start'}">${t}</text>`;
+const $=id=>document.getElementById(id);
+const fmt=n=>Math.round(n).toLocaleString('vi-VN');
+const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+// Mounts a stepper into <div class="frame" id="ID"></div>; steps may be replaced via the returned set().
+function stepper(id,{title,vb,steps,draw,after,extra}){
+  const el=document.getElementById(id);
+  el.innerHTML=`<div class="ph"><strong>${title}</strong><span class="meta"></span></div><div class="bd">
+  ${extra||''}<h4 class="st-t"></h4>
+  <svg viewBox="${vb}" role="img"></svg>
+  <div class="desc" aria-live="polite"><div class="st-d"></div><pre hidden></pre></div>
+  <div class="nav"><button data-d="-1">Trước</button><button data-d="1" class="primary">Tiếp</button></div></div>`;
+  const svg=el.querySelector('svg'),t=el.querySelector('.st-t'),d=el.querySelector('.st-d'),pre=el.querySelector('pre'),meta=el.querySelector('.meta');
+  const [pv,nx]=el.querySelectorAll('.nav button');let i=0;
+  function render(){const s=steps[i];svg.innerHTML=DEFS+draw(s,i);svg.setAttribute('aria-label',s.t);t.textContent=s.t;d.textContent=s.d;
+    pre.hidden=!s.c;pre.textContent=s.c||'';meta.textContent=`bước ${i+1} / ${steps.length}`;pv.disabled=i===0;nx.disabled=i===steps.length-1;after&&after(s,el);}
+  function go(k){i=Math.max(0,Math.min(steps.length-1,i+k));render();}
+  pv.onclick=()=>go(-1);nx.onclick=()=>go(1);
+  el.tabIndex=0;el.addEventListener('keydown',e=>{if(e.target.closest('select,input'))return;if(e.key==='ArrowRight')go(1);if(e.key==='ArrowLeft')go(-1);});
+  render();
+  return {set(ns){steps=ns;i=0;render();},el};
+}
+
+/* ---------- 01: where is the rule ---------- */
+const PLACES=[
+  ['ctl','Controller: if trước khi gọi service'],
+  ['svc','Service: đọc số dư rồi if (check-then-act)'],
+  ['lock','Service: SELECT … FOR UPDATE rồi if, trong transaction'],
+  ['cond','Repository: UPDATE … WHERE balance_minor >= ?'],
+  ['chk','Database: CHECK (balance_minor >= 0)']
+];
+const PATHS=[
+  ['p1','Một request API'],
+  ['p2','Hai request song song'],
+  ['p3','Job đêm gọi service'],
+  ['p4','Job mới tự viết câu UPDATE'],
+  ['p5','Admin chạy SQL tay']
+];
+const COVER={ctl:['p1'],svc:['p1','p3'],lock:['p1','p2','p3'],cond:['p1','p2','p3'],chk:['p1','p2','p3','p4','p5']};
+const SHORT={ctl:'controller',svc:'service',lock:'FOR UPDATE',cond:'câu có điều kiện',chk:'CHECK'};
+$('whOpts').innerHTML=PLACES.map(([k,t])=>`<label><input type="checkbox" id="wh_${k}"${k==='svc'?' checked':''}><span>${esc(t)}</span></label>`).join('');
+function wh(){
+  const on=PLACES.map(p=>p[0]).filter(k=>$('wh_'+k).checked);
+  let held=0,clean=0;const rows=[];let firstBad=null;
+  PATHS.forEach(([p,name])=>{
+    const by=on.filter(k=>k!=='chk'&&COVER[k].includes(p));
+    let cls,res,why;
+    if(by.length){cls='ok';res='giữ được';why=by.map(k=>SHORT[k]).join(', ')+(p==='p1'||p==='p2'?' → 422 có code':' → lỗi nghiệp vụ rõ ràng');held++;clean++;}
+    else if(on.includes('chk')){cls='warn';res='giữ được';why=(p==='p1'||p==='p2')?'chỉ nhờ CHECK → lỗi 3819, client nhận 500':'chỉ nhờ CHECK → job hoặc script nhận lỗi 3819';held++;}
+    else{cls='bad';res='có thể âm';why=p==='p2'?'cả hai đọc 100.000, cả hai qua kiểm tra, số dư thành −40.000':'không có kiểm tra nào trên đường này';if(!firstBad)firstBad=[p,name];}
+    rows.push(`<tr class="${cls}"><td>${name}</td><td>${res}</td><td>${why}</td></tr>`);
+  });
+  $('whTbl').innerHTML=`<thead><tr><th>Đường ghi</th><th>Bất biến I1</th><th>Nhờ đâu, client thấy gì</th></tr></thead><tbody>${rows.join('')}</tbody>`;
+  $('whStats').innerHTML=[['Đường giữ được',`${held} / 5`,held===5?'good':'bad'],['Đường có lỗi rõ nghĩa',`${clean} / 5`,clean>=3?'good':''],['Lớp kiểm tra đang bật',on.length,'']]
+    .map(([k,v,c])=>`<div class="stat"><span>${k}</span><b${c?` class="${c}"`:''}>${v}</b></div>`).join('');
+  let d;
+  if(!on.length)d='Không có kiểm tra nào: mọi đường ghi đều có thể làm số dư âm.';
+  else if(firstBad){
+    const tip={p1:'Không lớp nào chạy trên đường API.',p2:'Đọc rồi kiểm tra không giữ được khi hai request chạy cùng lúc: cả hai đọc giá trị cũ. Cần khoá dòng (FOR UPDATE) hoặc câu UPDATE có điều kiện.',
+      p3:'Job không đi qua controller, nên kiểm tra ở controller không có tác dụng với nó.',p4:'Code tự viết câu SQL đi vòng qua service và repository. Chỉ ràng buộc trong database chặn được.',p5:'Không code nào chạy khi admin gõ SQL. Chỉ ràng buộc trong database chặn được.'}[firstBad[0]];
+    d=`Đường "${firstBad[1]}" còn hở. ${tip}`;
+  }else if(clean<5)d='Mọi đường đều giữ được bất biến. Nhưng đường nào chỉ nhờ CHECK sẽ nhận lỗi 3819: với API là 500, với job là lỗi khó hiểu. Đó là tín hiệu có một đường ghi chưa đi qua domain, cần sửa, không phải để yên.';
+  else d='Mọi đường đều giữ được và có lỗi rõ nghĩa.';
+  if(on.includes('chk')&&(on.includes('lock')||on.includes('cond')))d+=' Đây là cách nên dùng: một lớp cho lời giải thích và cho đồng thời, ràng buộc làm lưới cho mọi đường còn lại.';
+  $('whDesc').textContent=d;$('whMeta').textContent=`${held} / 5 đường giữ được`;
+}
+PLACES.forEach(([k])=>$('wh_'+k).addEventListener('change',wh));wh();
+
+/* ---------- 02: layers (static) ---------- */
+(function(){
+  let g=DEFS;
+  g+=B(20,20,170,56,'struct','Controller','DTO, status HTTP');
+  g+=B(20,112,170,56,'struct','Service','use case, transaction');
+  g+=B(255,112,170,56,'row','Domain','Money, Account.debit()');
+  g+=B(490,112,170,56,'struct','Repository','SQL, đổi row ↔ object');
+  g+=B(490,206,170,56,'key','MySQL','CHECK, UNIQUE, FK');
+  g+=A('M105 76 L105 109');
+  g+=A('M190 140 L252 140');
+  g+=A('M150 112 C 150 84, 575 84, 575 109');
+  g+=`<path d="M490 140 L428 140" class="edge dash" marker-end="url(#arw)"/>`;
+  g+=A('M575 168 L575 203');
+  g+=T(360,80,'gọi, truyền connection của transaction','middle','ts');
+  g+=T(459,160,'dùng kiểu','middle','ts');
+  g+=T(340,200,'không import HTTP, không import mysql2','middle','ts');
+  g+=T(105,200,'mở BEGIN / COMMIT','middle','ts');
+  $('lySvg').innerHTML=g;
+})();
+
+/* ---------- 02: transaction boundary stepper ---------- */
+const ACC0={1:100000,2:20000};
+const TXV={
+ svc:[
+  {t:'BEGIN ở service',d:'Ý chính: service mở một transaction cho cả use case và truyền connection xuống repository. Chưa có gì thay đổi.',c:'BEGIN;',acc:{1:['row',100000],2:['row',20000]},le:[]},
+  {t:'Khoá hai tài khoản theo id',d:'Repository khoá cả hai dòng bằng FOR UPDATE, theo id tăng dần. Request khác muốn chuyển tiền từ hai tài khoản này phải chờ.',c:'SELECT id, balance_minor FROM accounts WHERE id IN (1, 2) ORDER BY id FOR UPDATE;',acc:{1:['path',100000,'khoá X'],2:['path',20000,'khoá X']},le:[]},
+  {t:'Domain kiểm tra I1',d:'Account.debit(70.000) tính số dư mới 30.000, không âm, nên cho qua. Không có câu SQL nào ở bước này; quy tắc chạy trong bộ nhớ, trên giá trị đã khoá.',acc:{1:['path',100000,'khoá X'],2:['path',20000,'khoá X']},le:[]},
+  {t:'Ghi hai bút toán',d:'Hai dòng ledger_entries có tổng bằng 0 (I2). Chúng đã ghi nhưng chưa commit: session khác chưa thấy.',c:'INSERT INTO ledger_entries (transaction_id, account_id, amount_minor)\nVALUES (501, 1, -70000), (501, 2, 70000);',acc:{1:['path',100000,'khoá X'],2:['path',20000,'khoá X']},le:[[1,-70000,'hot'],[2,70000,'hot']]},
+  {t:'Cập nhật số dư',d:'Số dư mới ghi trong cùng transaction với bút toán (I3). Vẫn chưa commit.',c:'UPDATE accounts SET balance_minor = 30000 WHERE id = 1;\nUPDATE accounts SET balance_minor = 90000 WHERE id = 2;',acc:{1:['hot',30000,'chưa commit'],2:['hot',90000,'chưa commit']},le:[[1,-70000,'hot'],[2,70000,'hot']]},
+  {t:'COMMIT',d:'Mọi thay đổi hiện ra cùng lúc. Khoá được nhả. Bốn bất biến đều đúng: số dư không âm, tổng bút toán bằng 0, số dư khớp bút toán.',c:'COMMIT;',acc:{1:['row',30000],2:['row',90000]},le:[[1,-70000,'row'],[2,70000,'row']]},
+  {t:'Nếu process chết trước COMMIT',d:'Kết nối đứt, InnoDB rollback transaction. Không bút toán nào, không số dư nào đổi. Client không biết kết quả (timeout), nhưng dữ liệu nhất quán; gửi lại với idempotency key là an toàn.',c:'-- kết nối đứt sau bước 5\nROLLBACK;  -- InnoDB tự làm',acc:{1:['row',100000],2:['row',20000]},le:[]}
+ ],
+ repo:[
+  {t:'Đọc tài khoản, không khoá',d:'Ý chính: mỗi hàm repository tự lấy connection và tự commit. accounts.find() đọc hai dòng bằng câu đọc thường, không khoá.',c:'SELECT id, balance_minor FROM accounts WHERE id IN (1, 2);',acc:{1:['row',100000],2:['row',20000]},le:[]},
+  {t:'Domain kiểm tra I1',d:'Kiểm tra trên giá trị vừa đọc. Một request khác có thể đổi số dư ngay sau đó; kiểm tra này không còn đúng khi tới lúc ghi.',acc:{1:['row',100000],2:['row',20000]},le:[]},
+  {t:'ledger.post(): bút toán thứ nhất, tự commit',d:'Bút toán −70.000 commit ngay. Từ giây này, I2 đang bị phá: giao dịch 501 có tổng −70.000.',c:'INSERT INTO ledger_entries VALUES (…, 501, 1, -70000);  -- autocommit',acc:{1:['row',100000],2:['row',20000]},le:[[1,-70000,'miss']]},
+  {t:'Bút toán thứ hai, tự commit',d:'Tổng bút toán của giao dịch về 0. Nhưng số dư vẫn là số cũ: I3 bị phá cho tới khi saveBalances() chạy.',c:'INSERT INTO ledger_entries VALUES (…, 501, 2, 70000);  -- autocommit',acc:{1:['miss',100000,'lệch bút toán'],2:['miss',20000,'lệch bút toán']},le:[[1,-70000,'row'],[2,70000,'row']]},
+  {t:'Process chết trước saveBalances()',d:'Deploy giết process đúng lúc này. Không có transaction nào để rollback: hai bút toán đã commit, số dư không bao giờ được cập nhật. Tài khoản 1 vẫn rút được 100.000.',acc:{1:['miss',100000,'lệch −70.000'],2:['miss',20000,'lệch +70.000']},le:[[1,-70000,'row'],[2,70000,'row']]},
+  {t:'Nếu chết giữa hai bút toán',d:'Chỉ một bút toán tồn tại: I2 và I3 cùng bị phá. Job đối soát phát hiện được, nhưng sửa phải làm tay. Cách sửa thật: transaction ở service, repository nhận connection.',acc:{1:['miss',100000,'lệch −70.000'],2:['row',20000]},le:[[1,-70000,'miss']]}
+ ]
+};
+function drawTx(s){
+  let g=T(20,18,'accounts','start','tb')+T(360,18,'ledger_entries (giao dịch 501)','start','tb');
+  [1,2].forEach((id,i)=>{const [cls,bal,note]=s.acc[id];g+=B(20,30+i*58,280,48,cls,`id ${id}: ${fmt(bal)}`,note||'đã commit');});
+  if(!s.le.length)g+=T(360,60,'chưa có bút toán','start','t');
+  s.le.forEach(([acc,amt,cls],i)=>{g+=B(360,30+i*58,300,48,cls,`account ${acc}: ${amt>0?'+':'−'}${fmt(Math.abs(amt))}`,cls==='hot'?'đã ghi, chưa commit':cls==='miss'?'đã commit, thiếu bút toán đối ứng':'đã commit');});
+  return g;
+}
+const txEl=stepper('txn',{title:'Chuyển 70.000 từ tài khoản 1 sang tài khoản 2',vb:'0 0 680 150',steps:TXV.svc,draw:drawTx,
+  extra:`<div class="scen"><label for="txSc">Cách tổ chức</label><select id="txSc"><option value="svc">Service giữ một transaction</option><option value="repo">Mỗi hàm repository tự commit</option></select></div>`});
+$('txSc').addEventListener('change',e=>txEl.set(TXV[e.target.value]));
+
+/* ---------- 02: money calculator ---------- */
+const EXP={USD:2,VND:0,KWD:3};
+function toMinor(str,e){
+  const s=String(str).trim().replace(',','.');
+  if(!/^\d+(\.\d+)?$/.test(s))return {err:'Nhập số không âm, ví dụ 19.00'};
+  const [i,f='']=s.split('.');
+  if(f.length>e)return {err:`Loại tiền này chỉ có ${e} chữ số lẻ; ${s} có ${f.length}.`};
+  return {v:BigInt(i)*10n**BigInt(e)+BigInt((f+'0'.repeat(e)).slice(0,e)||'0')};
+}
+function showMinor(m,e){const neg=m<0n;let a=neg?-m:m;const p=10n**BigInt(e);const i=a/p,f=a%p;return (neg?'−':'')+i.toLocaleString('vi-VN')+(e?','+f.toString().padStart(e,'0'):'');}
+function mn(){
+  const cur=$('mnC').value,e=EXP[cur];
+  const N=Math.max(1,Math.min(12,parseInt($('mnN').value,10)||3));
+  const am=toMinor($('mnA').value,e);
+  const feeStr=String($('mnF').value).trim().replace(',','.');
+  if(am.err||!/^\d+(\.\d+)?$/.test(feeStr)){$('mnTbl').innerHTML='';$('mnStats').innerHTML='';$('mnDesc').textContent=am.err||'Nhập phí dạng 1.5';$('mnMeta').textContent='';return;}
+  const a=parseFloat(String($('mnA').value).replace(',','.')),f=parseFloat(feeStr),P=Math.pow(10,e);
+  // float split
+  const shareF=Number((a/N).toFixed(e)),sumF=shareF*N;
+  const sumFminor=Math.round(sumF*P);
+  // minor split
+  const q=am.v/BigInt(N),r=am.v%BigInt(N);
+  const parts=Array.from({length:N},(_,i)=>q+(BigInt(i)<r?1n:0n));
+  // fee
+  const feeF=Math.round(a*f/100*P)/P;
+  const [fi,ff='']=feeStr.split('.');const k=ff.length;const pnum=BigInt(fi+ff);const den=100n*10n**BigInt(k);
+  const num=am.v*pnum;let fq=num/den;const fr=num%den;const mode=$('mnR').value;
+  if(mode==='hu'&&2n*fr>=den)fq++;
+  else if(mode==='he'&&(2n*fr>den||(2n*fr===den&&fq%2n===1n)))fq++;
+  const exactFee=Number(num)/Number(den);
+  const rows=[
+    ['Mỗi phần',`${shareF.toFixed(e)} (×${N})`,parts.length>1&&r>0n?`${showMinor(parts[0],e)} cho ${r} phần đầu, ${showMinor(q,e)} cho phần còn lại`:showMinor(q,e)],
+    ['Tổng các phần',`${String(sumF)}`,showMinor(parts.reduce((x,y)=>x+y,0n),e)],
+    [`Phí ${feeStr}%`,`${feeF.toFixed(e)}`,showMinor(fq,e)]
+  ];
+  $('mnTbl').innerHTML=`<thead><tr><th></th><th>float (number)</th><th>minor units (BigInt)</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${r[0]}</td><td><code>${esc(r[1])}</code></td><td><code>${esc(r[2])}</code></td></tr>`).join('')}</tbody>`;
+  const lost=Number(am.v)-sumFminor;const feeDiff=Math.round(feeF*P)!==Number(fq);
+  $('mnStats').innerHTML=[['Lệch khi chia (đơn vị nhỏ nhất)',lost,lost?'bad':'good'],['Phí float khác phí đúng',feeDiff?'có':'không',feeDiff?'bad':'good'],['Phí chính xác trước làm tròn',`${(exactFee/P).toLocaleString('vi-VN',{maximumFractionDigits:e+4})}`,'']]
+    .map(([kk,v,c])=>`<div class="stat"><span>${kk}</span><b${c?` class="${c}"`:''}>${v}</b></div>`).join('');
+  let d=`${showMinor(am.v,e)} ${cur} là ${am.v.toString()} đơn vị nhỏ nhất. `;
+  d+=lost?`Chia rồi làm tròn từng phần mất ${lost} đơn vị: tổng các phần không còn bằng số ban đầu. Chia trên số nguyên và cho phần dư vào những phần đầu thì tổng luôn đúng. `:'Lần chia này không lệch, nhưng chỉ vì số tiền chia hết; thử 19.00 chia 3. ';
+  d+=feeDiff?`Phí bằng float là ${feeF.toFixed(e)} vì phép nhân cho ${String(a*f/100*P)} thay vì số chính xác, và Math.round làm tròn xuống. Tính trên số nguyên cho ${showMinor(fq,e)}.`:`Phí của hai cách trùng nhau ở lần này; với 19.00 USD và 1,5%, float cho 0,28 còn cách đúng (nửa lên) cho 0,29.`;
+  $('mnDesc').textContent=d;$('mnMeta').textContent=`${cur}, số mũ ${e}`;
+}
+['mnA','mnC','mnN','mnF','mnR'].forEach(id=>$(id).addEventListener('input',mn));mn();
+</script>
+</body>
+</html>

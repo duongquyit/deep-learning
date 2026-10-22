@@ -67,6 +67,7 @@ Research and topics done outside the monthly plan. Each row needs a log entry, a
 | 2026-10-20 | Replication and read-your-writes (binlog pipeline, async vs semi-sync, lag sources and measurement, GTID-based read-your-writes, monotonic reads) — documentation only, written ahead of Month 5; no measurements | [topics/replication-read-your-writes](../topics/replication-read-your-writes/index.html) | Month 5 | [2026-10-20](LEARNING_LOG.md) |
 | 2026-10-20 | Distributed consistency (CAP stated precisely, PACELC, consistency models, quorums, conflict resolution, consistency across services, MySQL Group Replication) — documentation only, written ahead of Month 5; no measurements | [topics/distributed-consistency](../topics/distributed-consistency/index.html) | Month 5 | [2026-10-20](LEARNING_LOG.md) |
 | 2026-10-22 | NestJS request lifecycle and DI (middleware, guards, interceptors, pipes, exception filters, scopes, module boundaries) — documentation only, written ahead of Month 2; no measurements | [topics/nestjs-request-lifecycle](../topics/nestjs-request-lifecycle/index.html) | Month 2 | [2026-10-22](LEARNING_LOG.md) |
+| 2026-10-22 | Layering and business invariants (where each rule is enforced and what bypasses it, transaction boundary in the service, module boundaries, money as integer minor units) — documentation only, written ahead of Month 2; no measurements | [topics/layering-business-invariants](../topics/layering-business-invariants/index.html) | Month 2 | [2026-10-22](LEARNING_LOG.md) |
 
 ## Month 1 — Database Internals and Query Optimization
 

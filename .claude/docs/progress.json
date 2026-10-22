@@ -245,6 +245,13 @@
   "sessions": [
     {
       "date": "2026-10-22",
+      "title": "Layering and business invariants",
+      "artifact": "../topics/layering-business-invariants/index.html",
+      "planned": false,
+      "feeds": "Month 2"
+    },
+    {
+      "date": "2026-10-22",
       "title": "NestJS request lifecycle and DI",
       "artifact": "../topics/nestjs-request-lifecycle/index.html",
       "planned": false,
@@ -422,6 +429,12 @@
       "date": "2026-10-22",
       "work": "NestJS request lifecycle and DI (middleware, guards, interceptors, pipes, exception filters, scopes, module boundaries) — documentation only, written ahead of Month 2; no measurements",
       "artifact": "topics/nestjs-request-lifecycle",
+      "feeds": "Month 2"
+    },
+    {
+      "date": "2026-10-22",
+      "work": "Layering and business invariants (where each rule is enforced and what bypasses it, transaction boundary in the service, module boundaries, money as integer minor units) — documentation only, written ahead of Month 2; no measurements",
+      "artifact": "topics/layering-business-invariants",
       "feeds": "Month 2"
     }
   ],
@@ -924,10 +937,31 @@
         "provisional": true,
         "evidence": "same, §02–§04",
         "date": "2026-10-22"
+      },
+      {
+        "topic": "Where an invariant is enforced (controller, service read-then-check, locked check, conditional SQL, CHECK constraint) and which write paths bypass each; defense in depth",
+        "level": 2,
+        "provisional": true,
+        "evidence": "layering-business-invariants §01, §03",
+        "date": "2026-10-22"
+      },
+      {
+        "topic": "Layering: controller, service (use case and transaction boundary), domain, repository; dependency direction; module boundaries that do not export repositories",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §02, §04",
+        "date": "2026-10-22"
+      },
+      {
+        "topic": "Money as integer minor units: ISO 4217 exponents, allocation of remainders, fee rounding, float pitfalls; mysql2 types for BIGINT, DECIMAL, SUM",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §02, §04",
+        "date": "2026-10-22"
       }
     ],
     "levels": {
-      "2": 66,
+      "2": 69,
       "1": 2
     }
   }
