@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-20",
+  "generated_at": "2026-10-22",
   "program": {
     "start": "2026-10-19",
     "end": "2027-04-18",
@@ -244,6 +244,13 @@
   },
   "sessions": [
     {
+      "date": "2026-10-22",
+      "title": "NestJS request lifecycle and DI",
+      "artifact": "../topics/nestjs-request-lifecycle/index.html",
+      "planned": false,
+      "feeds": "Month 2"
+    },
+    {
       "date": "2026-10-20",
       "title": "Distributed consistency: CAP, PACELC, quorums",
       "artifact": "../topics/distributed-consistency/index.html",
@@ -410,6 +417,12 @@
       "work": "Distributed consistency (CAP stated precisely, PACELC, consistency models, quorums, conflict resolution, consistency across services, MySQL Group Replication) — documentation only, written ahead of Month 5; no measurements",
       "artifact": "topics/distributed-consistency",
       "feeds": "Month 5"
+    },
+    {
+      "date": "2026-10-22",
+      "work": "NestJS request lifecycle and DI (middleware, guards, interceptors, pipes, exception filters, scopes, module boundaries) — documentation only, written ahead of Month 2; no measurements",
+      "artifact": "topics/nestjs-request-lifecycle",
+      "feeds": "Month 2"
     }
   ],
   "targets": {
@@ -890,10 +903,31 @@
         "provisional": true,
         "evidence": "same, §02, §04",
         "date": "2026-10-20"
+      },
+      {
+        "topic": "NestJS request lifecycle: middleware, guard, interceptor, pipe, handler, exception filter; pipes inside the interceptor chain; global/controller/route order",
+        "level": 2,
+        "provisional": true,
+        "evidence": "nestjs-request-lifecycle §01–§02",
+        "date": "2026-10-22"
+      },
+      {
+        "topic": "Exception filters: selection (route, controller, global, first match wins), default filter behaviour for HttpException vs unknown errors",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §02, §04",
+        "date": "2026-10-22"
+      },
+      {
+        "topic": "NestJS DI: scopes (default, request, transient), scope bubbling, durable providers, module exports and boundaries; AsyncLocalStorage for per-request data",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §02–§04",
+        "date": "2026-10-22"
       }
     ],
     "levels": {
-      "2": 63,
+      "2": 66,
       "1": 2
     }
   }
