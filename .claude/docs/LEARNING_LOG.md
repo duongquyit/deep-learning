@@ -93,6 +93,9 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 | CAP stated precisely (linearizable C, availability of non-failed nodes, choice only under partition) and PACELC (latency vs consistency in normal operation) | 2 (prov.) | [distributed-consistency](../topics/distributed-consistency/index.html) §01–§03 | 2026-10-20 | Exercise E44: Group Replication under a network partition |
 | Consistency models (linearizable, causal, read-your-writes, monotonic reads, eventual) and choosing one per feature | 2 (prov.) | same, §02–§03, §06 | 2026-10-20 | Exercise E45: stale-read rate and latency per `group_replication_consistency` level |
 | Quorums (N, W, R; majority 2f+1) and conflict resolution (LWW, version vectors, CRDTs, single-writer per key); versioned events between services | 2 (prov.) | same, §02, §04 | 2026-10-20 | Write and test a G-counter merge; versioned-event consumer in a service at work |
+| NestJS request lifecycle: middleware, guard, interceptor, pipe, handler, exception filter; pipes inside the interceptor chain; global/controller/route order | 2 (prov.) | [nestjs-request-lifecycle](../topics/nestjs-request-lifecycle/index.html) §01–§02 | 2026-10-22 | Exercise E46: trace the six cases and match the widget; then place every concern of one module at work in the right layer |
+| Exception filters: selection (route, controller, global, first match wins), default filter behaviour for `HttpException` vs unknown errors | 2 (prov.) | same, §02, §04 | 2026-10-22 | Write the domain filter and the catch-all filter for the Month 2 lab service, with a test per error type |
+| NestJS DI: scopes (default, request, transient), scope bubbling, durable providers, module exports and boundaries; `AsyncLocalStorage` for per-request data | 2 (prov.) | same, §02–§04 | 2026-10-22 | Exercise E47: cost of a request-scoped chain vs `AsyncLocalStorage` |
 
 "(prov.)" = provisional. Every row above rests on one artifact I wrote myself, with no measurement behind it. Week 1 of Month 1 includes a baseline assessment (TECHNICAL_GROWTH.md Section 11) that should confirm or cut these.
 
@@ -134,6 +137,8 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 34. Does `WAIT_FOR_EXECUTED_GTID_SET` accept a fractional timeout on 8.4, and what does it cost the replica when thousands of sessions wait at once? Variant of E41.
 35. With Group Replication and `group_replication_unreachable_majority_timeout` = 0, how long does a client committing on the minority member hang, what error does it get, and is that transaction committed or rolled back after the network heals? E44.
 36. How much read and write latency do `BEFORE` and `AFTER` of `group_replication_consistency` add over `EVENTUAL` on the lab, with and without 20 ms of delay to one member? E45.
+37. With NestJS 12 on Express, what status and body does a malformed JSON body produce, and does a global `@Catch()` filter see it? The default filter has a branch for `http-errors`-shaped errors; whether body-parser errors reach a custom filter is unchecked. E46.
+38. On Node 22, how many microseconds and how much GC does a chain of 10 request-scoped providers cost per request, and from what request rate does it become the bottleneck? E47.
 
 ## Pending verification (from the session's own exercise list)
 
@@ -205,8 +210,41 @@ These are written in the page as exercises; none have been run yet.
 - **E45** — Stale reads and latency for `EVENTUAL`, `BEFORE`, `AFTER`, with and without 20 ms delay to one member.
 - **Q83–Q88** — The six recall questions in section 08 of the distributed consistency page.
 - **C22–C24** — The three real-world cases in section 09 of the distributed consistency page (concert seats across two regions, one consistency level per feature, an email change drifting across five services). Solve in writing before opening the answers.
+- **E46** — Six requests through a NestJS 12 app that logs every layer in and out: success, guard false, guard 401, invalid body, domain error with and without a filter, broken JSON. Order of lines, status and body.
+- **E47** — Singleton vs `Scope.REQUEST` vs `AsyncLocalStorage` tenant context at 500, 2,000, 5,000 req/s: max throughput, p50/p99, constructor calls, GC time.
+- **Q89–Q94** — The six recall questions in section 08 of the NestJS request lifecycle page.
+- **C25–C27** — The three real-world cases in section 09 of the NestJS request lifecycle page (cross-tenant invoice leak, p99 tripled by a request-scoped tenant context, a timeout interceptor that let transfers commit twice). Solve in writing before opening the answers.
 - **Q11–Q16** — The six recall questions in section 08 of the composite-index page (answers are on the page, hidden).
 - **Q1–Q5** — The five check questions at the end of the page (leftmost prefix, `COUNT(*)` and the visibility map, full scan polluting the cache, TOAST, a `sessions` table updated 5,000×/sec). Answer in writing before looking anything up, then verify.
+
+---
+
+## 2026-10-22 — NestJS request lifecycle and DI
+
+**Topic and objective.** Month 2 topic, written ahead as documentation only (Phase 2 of the documentation plan, 1 of 5): the order in which middleware, guards, interceptors, pipes, the handler and exception filters run in NestJS, which filter handles an exception, and how DI scopes and module boundaries work.
+
+**Output.** [topics/nestjs-request-lifecycle/index.html](../topics/nestjs-request-lifecycle/index.html) — 11 sections, including section 09 with cases C25–C27. Widgets: a request stepper with six scenarios (success, guard false, invalid body, domain error with and without a filter, broken JSON) showing which layers run and the response; a static figure of interceptors as nested layers; a filter selector (exception type and filters bound at route, controller, global); a DI scope graph showing how `Scope.REQUEST` bubbles up and how many objects are created per request and per second. Prediction templates for E46–E47.
+
+**What it covers.**
+
+- Order read from the NestJS 12.2.0 source (`router-execution-context.js`): guards in sequence, first `false` throws `ForbiddenException('Forbidden resource')`; interceptor chain; pipes run inside the innermost `next.handle()`, all params started in order under one `Promise.all`; handler; response.
+- Global, then controller, then route for guards, interceptors and pipes (`context-creator.js`); filters reversed to route, controller, global and the first `@Catch` match wins (`router-exception-filters.js`).
+- Default filter (`base-exception-filter.js`): `HttpException` keeps its status and body; `http-errors`-shaped errors keep status and message; anything else becomes `500 Internal server error` and is logged as `ExceptionsHandler`.
+- `ValidationPipe` defaults (`transform` off, `forbidUnknownValues` false, status 400, list format) and class-validator 0.15.1 default messages.
+- Scopes from `scope-options.interface.d.ts` and `isDependencyTreeStatic`; module exports and the "Nest can't resolve dependencies" error, including the new `import type` hint in 12.2.0.
+- Why an RxJS `timeout()` in an interceptor does not stop the handler's Promise (inferred from `interceptors-consumer.js`), used in case C27.
+
+**Initial understanding.** TODO — what did I believe about the NestJS request lifecycle before this page? No prior belief was stated in the session.
+
+**Mistakes and misconceptions corrected.** TODO — only I know which. Traps the page writes down: pipes run before interceptors; a guard can trust the body; every matching filter runs; request scope only affects one class; a timeout interceptor cancels the work.
+
+**Experiments and results.** None. The widgets are models of the source code; E46–E47 need a NestJS app on the lab.
+
+**Competency level.** Level 2 provisional on three new matrix rows.
+
+**Remaining questions.** Open questions 37 and 38.
+
+**Next step.** Write the layering and business-invariants page (Phase 2, 2 of 5); run E46 together with the Month 2 lab service.
 
 ---
 

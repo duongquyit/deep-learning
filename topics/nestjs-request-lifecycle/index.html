@@ -1,0 +1,1117 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>NestJS: vòng đời request và DI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F2F4F6; --surface:#FFFFFF; --ink:#18203A; --ink-2:#56607A; --ink-3:#8A93A8;
+  --rule:#CCD3DD; --rule-strong:#8C96AB;
+  --struct:#3446B8; --struct-bg:#E6E9FA;            /* cấu trúc index, chrome của trang */
+  --row:#16795F;    --row-bg:#DDF2EA;               /* dữ liệu row thật */
+  --hot:#9A5F00;    --hot-bg:#FCEFD2; --hot-line:#E3A21A;  /* bị ghi, bị chạm, bị lọc */
+  --miss:#B5302B;   --miss-bg:#FBE1DF;              /* đọc từ disk, việc thừa, lỗi */
+  --path:#0B7A8A;   --path-bg:#D8F1F3;              /* đường đi hoặc khoảng đang đọc */
+  --key:#A8327A;    --key-bg:#F8E0EE;               /* con trỏ: PK, TID */
+  --ram:#5B4BB0;    --ram-bg:#E7E3FA;               /* hit trong buffer pool */
+  --grid:rgba(52,70,184,.06);
+  --r-s:4px; --r-m:8px;
+  --sans:"Instrument Sans",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --paper:#0F1320; --surface:#171C2B; --ink:#E6E9F2; --ink-2:#A3ABC0; --ink-3:#6E7790;
+  --rule:#2C3448; --rule-strong:#55607A;
+  --struct:#97A3FF; --struct-bg:#232A55;
+  --row:#5FD0AE;    --row-bg:#123A31;
+  --hot:#F2BE5C;    --hot-bg:#3B2C0E; --hot-line:#E3A21A;
+  --miss:#FF8A84;   --miss-bg:#3E1A1A;
+  --path:#5ED3E0;   --path-bg:#113A40;
+  --key:#F28DC4;    --key-bg:#3E1A2E;
+  --ram:#B7A8FF;    --ram-bg:#2A2350;
+  --grid:rgba(151,163,255,.05);
+}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important;animation:none!important}}
+body{margin:0;color:var(--ink);font:400 17px/1.65 var(--sans);
+  background-color:var(--paper);
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:24px 24px}
+a{color:var(--struct)}
+:focus-visible{outline:2px solid var(--struct);outline-offset:2px}
+
+/* layout */
+.shell{display:grid;grid-template-columns:230px minmax(0,1fr);gap:56px;max-width:1180px;margin:0 auto;padding:0 32px}
+nav.toc{position:sticky;top:0;align-self:start;height:100vh;padding:48px 0;overflow:auto}
+nav.toc p{font-weight:600;margin:0 0 12px;font-size:15px}
+nav.toc ol,.mobile-toc ol{list-style:none;margin:0;padding:0;counter-reset:s}
+nav.toc li,.mobile-toc li{counter-increment:s;margin:0}
+nav.toc a,.mobile-toc a{display:grid;grid-template-columns:28px 1fr;padding:5px 0;color:var(--ink-2);text-decoration:none;font-size:14.5px;line-height:1.4}
+nav.toc a::before,.mobile-toc a::before{content:counter(s,decimal-leading-zero);font:500 12px/1.9 var(--mono);color:var(--ink-3)}
+nav.toc a:hover,nav.toc a.on{color:var(--struct)}
+main{min-width:0;padding:56px 0 120px}
+.prose{max-width:720px}
+section{padding-top:72px}
+section>header{display:grid;grid-template-columns:auto 1fr;gap:0 18px;align-items:baseline;max-width:720px;margin-bottom:12px}
+section>header .num{font:500 15px var(--mono);color:var(--struct);border:1.5px solid var(--struct);border-radius:var(--r-s);padding:2px 7px;transform:translateY(-4px)}
+h1,h2,h3,h4{line-height:1.2;letter-spacing:-.015em;margin:0}
+h1{font-size:clamp(2.3rem,5.4vw,3.9rem);font-weight:700;letter-spacing:-.03em;line-height:1.02;max-width:14ch;margin-bottom:20px}
+.lede{font-size:19px;color:var(--ink-2);max-width:56ch;margin-bottom:28px}
+h2{font-size:clamp(1.6rem,3vw,2.1rem);font-weight:650}
+h3{font-size:1.2rem;font-weight:600;margin:36px 0 8px}
+p{margin:0 0 14px}
+ul,ol.list{margin:0 0 16px;padding-left:22px}
+li{margin:4px 0}
+code{font:0.88em var(--mono);background:var(--struct-bg);color:var(--ink);padding:1px 5px;border-radius:3px}
+pre{font:13.5px/1.6 var(--mono);background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:var(--r-s);padding:14px 16px;overflow-x:auto;margin:0 0 18px;max-width:720px}
+pre code{background:none;padding:0}
+.tablewrap{overflow-x:auto;max-width:720px;margin:0 0 20px}
+table{border-collapse:collapse;width:100%;max-width:720px;margin:0 0 20px;font-size:15px;background:var(--surface)}
+.tablewrap table{margin:0;min-width:560px}
+th,td{text-align:left;padding:9px 12px;border:1px solid var(--rule);vertical-align:top}
+th{font-weight:600;background:var(--struct-bg)}
+
+/* widget frame: styled like a page, header strip = page header */
+.frame{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);margin:22px 0 28px;max-width:920px;overflow:hidden}
+.frame>.ph{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:9px 16px;border-bottom:1px solid var(--rule);background:var(--struct-bg);font-size:14px}
+.frame>.ph strong{font-weight:600}
+.frame>.ph .meta{margin-left:auto;font:500 12.5px var(--mono);color:var(--ink-2)}
+.frame .bd{padding:16px;min-width:0}
+.frame svg{display:block;width:100%;height:auto}
+.st-t{font:600 16px var(--sans);margin:0 0 8px}
+.desc{background:var(--paper);border-radius:var(--r-s);padding:12px 14px;margin-top:12px;min-height:84px;font-size:15.5px;color:var(--ink-2)}
+.desc pre{margin:10px 0 0;font-size:12.5px;border-left-color:var(--rule-strong)}
+.nav{display:flex;gap:8px;margin-top:12px;align-items:center}
+button{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 14px;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--struct);color:var(--struct)}
+button:disabled{opacity:.4;cursor:default}
+button.primary,button[aria-pressed="true"]{background:var(--struct);border-color:var(--struct);color:var(--surface)}
+button.primary:hover:not(:disabled),button[aria-pressed="true"]:hover{color:var(--surface);filter:brightness(1.1)}
+input,select{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 10px}
+input[type=number]{width:84px}
+input[type=range],input[type=checkbox]{accent-color:var(--struct)}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-top:12px}
+.stat{background:var(--paper);border-radius:var(--r-s);padding:8px 12px}
+.stat span{display:block;font-size:13px;color:var(--ink-2)}
+.stat b{font:600 20px var(--sans);font-variant-numeric:tabular-nums}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;color:var(--ink-2);margin-top:12px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:14px;height:14px;border-radius:3px;border:2px solid;display:inline-block}
+.fine{font-size:13.5px;color:var(--ink-2);margin:10px 0 0}  /* chú thích nhỏ dưới widget */
+
+/* svg text */
+.tb{font:600 14px var(--sans)} .t{font:400 13px var(--sans)} .ts{font:400 12px var(--sans)} .tm{font:500 12.5px var(--mono)}
+.lbl{fill:var(--ink-2);font:400 12.5px var(--sans)}
+
+/* callouts */
+.note{border-left:3px solid var(--hot-line);background:var(--hot-bg);padding:12px 16px;border-radius:0 var(--r-s) var(--r-s) 0;margin:18px 0;max-width:720px;font-size:16px}
+.note strong{color:var(--hot)}
+.senior{border:1.5px solid var(--struct);border-radius:var(--r-m);padding:14px 18px;margin:22px 0;max-width:720px;background:var(--surface)}
+.senior h4{font-size:16px;margin-bottom:6px;color:var(--struct)}
+.senior p:last-child,.senior ul:last-child{margin-bottom:0}
+details{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-s);padding:10px 14px;margin:10px 0;max-width:720px}
+details summary{cursor:pointer;font-weight:600}
+details[open] summary{margin-bottom:8px}
+details.answer{background:var(--paper);border-style:dashed;margin:10px 0 0}
+details.answer summary{font-weight:500;color:var(--struct)}
+.tag{display:inline-block;font:500 12px var(--sans);color:var(--ink-2);border:1px solid var(--rule-strong);border-radius:999px;padding:0 8px;margin-right:6px;vertical-align:1px}
+
+/* hero brief: mục tiêu, cần biết trước, trạng thái */
+.brief{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px 24px;background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);padding:14px 18px;max-width:920px;margin:0 0 8px;font-size:15px}
+.brief h4{font-size:14px;color:var(--struct);margin:0 0 4px}
+.brief ul{margin:0;padding-left:18px}
+.brief p{margin:0}
+
+.mobile-toc{display:none}
+@media (max-width:900px){
+  .shell{grid-template-columns:1fr;padding:0 16px;gap:0}
+  nav.toc{display:none}
+  .mobile-toc{display:block;margin-top:20px}
+  main{padding-top:32px}
+  .frame .bd{padding:12px}
+  body{font-size:16px}
+}
+
+
+/* ---- page widgets ---- */
+.n rect{fill:var(--surface);stroke:var(--rule-strong);stroke-width:1}
+.n text{fill:var(--ink)}
+.n.struct rect{fill:var(--struct-bg);stroke:var(--struct)} .n.struct text{fill:var(--struct)}
+.n.row rect{fill:var(--row-bg);stroke:var(--row);stroke-width:1.6} .n.row text{fill:var(--row)}
+.n.hot rect{fill:var(--hot-bg);stroke:var(--hot);stroke-width:2} .n.hot text{fill:var(--hot)}
+.n.miss rect{fill:var(--miss-bg);stroke:var(--miss);stroke-width:2} .n.miss text{fill:var(--miss)}
+.n.path rect{fill:var(--path-bg);stroke:var(--path);stroke-width:2.4} .n.path text{fill:var(--path)}
+.n.key rect{fill:var(--key-bg);stroke:var(--key);stroke-width:2} .n.key text{fill:var(--key)}
+.n.dim rect{fill:var(--paper);stroke:var(--rule)} .n.dim text{fill:var(--ink-3)}
+.edge{stroke:var(--rule-strong);stroke-width:1.2;fill:none}
+.edge.on{stroke:var(--path);stroke-width:2.6}
+.lg-path{border-color:var(--path);background:var(--path-bg)} .lg-row{border-color:var(--row);background:var(--row-bg)}
+.lg-miss{border-color:var(--miss);background:var(--miss-bg)} .lg-hot{border-color:var(--hot);background:var(--hot-bg)}
+.calc{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px 14px;margin-bottom:12px}
+.calc label{display:flex;flex-direction:column;gap:4px;font-size:13.5px;color:var(--ink-2)}
+.calc label.chk{flex-direction:row;align-items:center;gap:8px}
+.calc input[type=text]{width:100%}
+.stat b.bad{color:var(--miss)} .stat b.good{color:var(--row)}
+.log{font:12.5px/1.6 var(--mono);background:var(--paper);border-radius:var(--r-s);padding:8px 12px;margin:10px 0 0;min-height:60px;list-style:none}
+.log li{margin:0}
+.btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.lg-dim{border-color:var(--rule);background:var(--paper)}
+.ring{fill:none;stroke-width:1.6;stroke:var(--rule-strong)}
+.ring.g{stroke:var(--struct)} .ring.c{stroke:var(--path)} .ring.r{stroke:var(--key)}
+.core{fill:var(--row-bg);stroke:var(--row);stroke-width:1.6}
+.edge.in{stroke:var(--path);stroke-width:2}
+.edge.out{stroke:var(--key);stroke-width:2}
+.resp{font:500 12.5px/1.5 var(--mono);background:var(--paper);border:1px solid var(--rule);border-radius:var(--r-s);padding:8px 12px;margin:10px 0 0;white-space:pre-wrap;word-break:break-word}
+.resp b{color:var(--struct)}
+.scen{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 12px}
+.scen label{font-size:13.5px;color:var(--ink-2)}
+.scen select{max-width:100%}
+.chks{display:flex;flex-direction:column;gap:6px;margin:0 0 12px;font-size:14px;color:var(--ink-2)}
+.chks label{display:flex;gap:8px;align-items:flex-start}
+.chks input{margin-top:4px}
+#ftSvg .tb{font-size:12.5px}
+/* bài toán thực tế: dạng phỏng vấn */
+.case{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:0 var(--r-m) var(--r-m) 0;padding:16px 20px;margin:22px 0;max-width:720px}
+.case>h3{margin:0 0 6px;font-size:1.15rem}
+.case .src{font-size:13.5px;color:var(--ink-2);margin:0 0 12px}
+.case .ctx{background:var(--paper);border:1px solid var(--rule);border-radius:var(--r-m);padding:10px 14px;margin:8px 0 0;font-size:15px}
+.case .ctx-h{margin:0 0 4px;font-weight:600;color:var(--struct)}
+.case .ctx ul{margin:0;padding-left:20px}
+.case .ctx li{margin:2px 0}
+.case .q{margin:10px 0 4px;padding:8px 0 8px 14px;border-left:3px solid var(--key);font-size:1.06rem;font-weight:500;color:var(--ink);max-width:none}
+.case details{max-width:none;margin:12px 0 0}
+.case details.answer[open]{background:var(--surface)}
+.case details.clar>summary,.case details.rubric>summary{color:var(--key)}
+.case .fu{margin:18px 0 0;padding-top:14px;border-top:1px solid var(--rule)}
+.case .fq{margin:0;font-weight:500}
+.case .fq b{color:var(--struct);margin-right:4px}
+.ah{font-size:15.5px;color:var(--struct);margin:20px 0 6px}
+.answer .tablewrap{max-width:none}
+@media (max-width:900px){.case{padding:14px}}
+</style>
+</head>
+<body>
+
+<div class="shell">
+<nav class="toc" aria-label="Mục lục">
+  <p>Vòng đời request</p>
+  <ol>
+    <li><a href="#s1">Bản chất vấn đề</a></li>
+    <li><a href="#s2">Cơ chế hoạt động</a></li>
+    <li><a href="#s3">Vì sao thiết kế như vậy</a></li>
+    <li><a href="#s4">Ví dụ</a></li>
+    <li><a href="#s5">Thí nghiệm</a></li>
+    <li><a href="#s6">Ảnh hưởng khi chạy production</a></li>
+    <li><a href="#s7">Hiểu lầm thường gặp</a></li>
+    <li><a href="#s8">Câu hỏi ôn tập</a></li>
+    <li><a href="#s9">Bài toán thực tế</a></li>
+    <li><a href="#s10">Câu hỏi còn mở</a></li>
+    <li><a href="#s11">Tài liệu tham khảo</a></li>
+  </ol>
+</nav>
+
+<main>
+<div class="hero">
+<h1>NestJS: vòng đời request và DI</h1>
+<p class="lede">Một request <code>POST /transfers</code> đi qua năm loại code trước khi tới hàm của bạn và quay ra. Khi client nhận 403, 400 hay 500, bạn cần biết tầng nào đã trả lời, và đoạn code nào chưa hề chạy. Bài này đi theo request qua middleware, guard, interceptor, pipe, handler và exception filter, theo đúng thứ tự trong mã nguồn NestJS. Phần sau là DI: ai tạo object, sống bao lâu, và module nào được thấy provider nào.</p>
+<div class="brief">
+  <div><h4>Mục tiêu</h4><ul>
+    <li>Dự đoán được tầng nào chạy và tầng nào bị bỏ qua khi guard từ chối, khi validation lỗi, khi service ném lỗi.</li>
+    <li>Kể được thứ tự global, controller, route của guard, interceptor, pipe, và chọn được filter nào bắt một exception.</li>
+    <li>Giải thích được vì sao một provider <code>REQUEST</code> scope làm cả chuỗi phụ thuộc tạo lại theo từng request, và cái giá của nó.</li>
+    <li>Đặt được mỗi việc (xác thực, phân quyền, validation, đo thời gian, đổi lỗi thành response) vào đúng tầng.</li>
+  </ul></div>
+  <div><h4>Cần biết trước</h4><ul>
+    <li>TypeScript, decorator, async/await, và Promise cơ bản.</li>
+    <li><a href="../idempotency-retries/index.html">Idempotency và retry</a>: timeout nghĩa là "không biết", dùng ở bài toán C27.</li>
+  </ul></div>
+  <div><h4>Trạng thái</h4><p>Level 2 (prov.). Thứ tự các tầng, cách chọn filter và mặc định của <code>ValidationPipe</code> đọc từ mã nguồn NestJS 12.2.0. Widget là mô hình theo mã nguồn đó, chưa đo (E46–E47).</p></div>
+</div>
+<details class="mobile-toc"><summary>Mục lục</summary><ol><li><a href="#s1">Bản chất vấn đề</a></li><li><a href="#s2">Cơ chế hoạt động</a></li><li><a href="#s3">Vì sao thiết kế như vậy</a></li><li><a href="#s4">Ví dụ</a></li><li><a href="#s5">Thí nghiệm</a></li><li><a href="#s6">Ảnh hưởng khi chạy production</a></li><li><a href="#s7">Hiểu lầm thường gặp</a></li><li><a href="#s8">Câu hỏi ôn tập</a></li><li><a href="#s9">Bài toán thực tế</a></li><li><a href="#s10">Câu hỏi còn mở</a></li><li><a href="#s11">Tài liệu tham khảo</a></li></ol></details>
+</div>
+
+<!-- 1 -->
+<section id="s1">
+<header><span class="num">01</span><h2>Bản chất vấn đề</h2></header>
+<div class="prose">
+<p>App mobile gọi <code>POST /transfers</code> với body <code>{"fromAccountId": 1, "toAccountId": 2, "amountMinor": 50000}</code>. Có ngày nó nhận 403, có ngày 400, có ngày 500 với message "Internal server error". Log của service không có dòng nào. Câu hỏi đầu tiên luôn là: request dừng ở tầng nào?</p>
+<p>NestJS chia việc xử lý request thành các tầng, mỗi tầng có một việc:</p>
+<ul>
+<li><strong>Middleware</strong>: hàm chạy trước khi Nest chọn handler, như middleware của Express. Dùng cho việc chung của mọi route: gắn correlation ID, parse cookie.</li>
+<li><strong>Guard</strong>: trả lời một câu: request này có được chạy handler không. Trả <code>false</code> thì dừng.</li>
+<li><strong>Interceptor</strong>: bọc quanh phần còn lại, chạy được code trước và sau handler. Dùng để đo thời gian, đổi dạng response, đặt timeout.</li>
+<li><strong>Pipe</strong>: biến đổi và kiểm tra từng tham số của handler (body, query, param). <code>ValidationPipe</code> là pipe hay dùng nhất.</li>
+<li><strong>Exception filter</strong>: bắt exception ném ra từ các tầng trên và viết response lỗi.</li>
+</ul>
+<p>Hình dung một sân bay. Middleware là cửa vào nhà ga, ai cũng đi qua. Guard là cửa an ninh: không có vé thì về. Interceptor là quầy bấm giờ lúc vào và lúc ra. Pipe là cân hành lý: sai kích thước thì không lên máy bay. Exception filter là quầy xử lý sự cố, nơi mọi chuyện hỏng được viết thành một tờ thông báo cho khách.</p>
+<p>Chọn một tình huống rồi bấm Tiếp để đi theo request qua từng tầng.</p>
+</div>
+<div class="frame" id="pipe"></div>
+<div class="legend"><span><i class="lg-path"></i>tầng đang chạy</span><span><i class="lg-row"></i>đã chạy xong</span><span><i class="lg-miss"></i>nơi ném lỗi</span><span><i class="lg-hot"></i>filter viết response lỗi</span><span><i class="lg-dim"></i>không chạy</span></div>
+<p class="fine">Thứ tự và response mặc định theo mã nguồn NestJS 12.2.0 (<code>router-execution-context.js</code>, <code>base-exception-filter.js</code>) với platform Express. Message của <code>ValidationPipe</code> là message mặc định của class-validator 0.15.1. Mô hình; chưa đo (E46).</p>
+</section>
+
+<!-- 2 -->
+<section id="s2">
+<header><span class="num">02</span><h2>Cơ chế hoạt động</h2></header>
+<div class="prose">
+<h3>Thứ tự giữa các tầng</h3>
+<p>Ý chính: guard chạy trước, rồi interceptor, rồi pipe, rồi handler. Pipe nằm <em>bên trong</em> interceptor, nên interceptor thấy cả lỗi validation.</p>
+<p>Trong mã nguồn (<code>RouterExecutionContext.create</code>), mỗi request đi theo thứ tự này:</p>
+<ol class="list">
+<li>Guard chạy lần lượt. Guard đầu tiên trả <code>false</code> làm Nest ném <code>ForbiddenException('Forbidden resource')</code>. Guard sau không chạy.</li>
+<li>Nest đặt status mặc định (201 cho <code>POST</code>, 200 cho các method khác) và header từ decorator.</li>
+<li>Nest gọi chuỗi interceptor. Phần cuối chuỗi là một hàm gồm hai việc: chạy pipe cho mọi tham số, rồi gọi handler.</li>
+<li>Kết quả của handler đi ngược ra qua interceptor, rồi được ghi thành response.</li>
+</ol>
+<p>Pipe của các tham số khác nhau được bắt đầu theo thứ tự tham số và chạy đồng thời (một <code>Promise.all</code>). Lỗi của tham số đứng trước được báo ra. Pipe chỉ chạy cho body, query, param, file, cookie và tham số của decorator tự viết có truyền key; tham số <code>@Req()</code> không qua pipe.</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Tầng</th><th>Thấy gì</th><th>Dừng request bằng cách</th><th>Dùng cho</th></tr></thead>
+<tbody>
+<tr><td>Middleware</td><td><code>req</code>, <code>res</code>, <code>next</code>; chưa biết handler nào</td><td>Không gọi <code>next()</code>, hoặc ném lỗi</td><td>Correlation ID, log truy cập, parse</td></tr>
+<tr><td>Guard</td><td><code>ExecutionContext</code>: biết class và method của handler, đọc được metadata</td><td>Trả <code>false</code> (403) hoặc ném exception khác (ví dụ 401)</td><td>Xác thực, phân quyền theo vai trò</td></tr>
+<tr><td>Interceptor</td><td>Context và một Observable của phần còn lại</td><td>Không gọi <code>next.handle()</code>, hoặc ném lỗi trong stream</td><td>Đo thời gian, timeout, cache, đổi dạng response</td></tr>
+<tr><td>Pipe</td><td>Giá trị của một tham số và metadata (kiểu, nguồn)</td><td>Ném exception</td><td>Ép kiểu, validation</td></tr>
+<tr><td>Exception filter</td><td>Exception và context</td><td>Nó chính là nơi viết response lỗi</td><td>Đổi lỗi thành status và body</td></tr>
+</tbody></table></div>
+<div class="note"><strong>Lỗi hay gặp:</strong> kiểm tra quyền sở hữu tài nguyên trong guard bằng cách đọc <code>req.body.fromAccountId</code>. Guard chạy trước pipe, nên body chưa được validate: <code>fromAccountId</code> có thể là chuỗi, mảng, hoặc không có. Quy tắc: guard chỉ dựa vào thứ đã tin được (token, vai trò, param của route); kiểm tra "tài khoản này có phải của bạn không" đặt trong service, sau khi dữ liệu đã qua pipe, và tốt nhất là trong chính câu SQL (<code>WHERE id = ? AND owner_id = ?</code>).</div>
+
+<div class="prose">
+<h3>Global, controller, route: ai chạy trước</h3>
+<p>Ý chính: guard, interceptor và pipe được gom theo thứ tự global, rồi controller, rồi route. Interceptor xếp như các lớp vỏ hành: lớp ngoài cùng vào đầu tiên và ra cuối cùng.</p>
+<p>Mỗi interceptor nhận một <code>next</code>. Gọi <code>next.handle()</code> là chạy lớp bên trong. Code trước lệnh đó chạy theo thứ tự global, controller, route. Code trong <code>pipe(map(…))</code> sau lệnh đó chạy ngược lại: route, controller, global. Một interceptor đo thời gian đặt ở global sẽ đo cả các interceptor bên trong, cả pipe và handler.</p>
+</div>
+<div class="frame" id="onion">
+  <div class="ph"><strong>Interceptor bọc nhau như vỏ hành</strong><span class="meta">tĩnh</span></div>
+  <div class="bd">
+    <svg id="onSvg" viewBox="0 0 680 250" role="img" aria-label="Ba interceptor lồng nhau: global ngoài cùng, controller ở giữa, route trong cùng; pipe và handler ở tâm. Mũi tên đi vào theo thứ tự global, controller, route và đi ra theo thứ tự ngược lại"></svg>
+    <p class="fine">Ví dụ: <code>LoggingInterceptor</code> đăng ký global, <code>TimeoutInterceptor</code> gắn ở controller, <code>CacheInterceptor</code> gắn ở route. Theo <code>ContextCreator.createContext</code> và <code>InterceptorsConsumer.intercept</code> trong mã nguồn.</p>
+  </div>
+</div>
+
+<div class="prose">
+<h3>Exception filter: filter cụ thể nhất bắt trước</h3>
+<p>Ý chính: Nest xếp filter theo thứ tự route, controller, global, và chọn filter <em>đầu tiên</em> có <code>@Catch</code> khớp với exception. Chỉ một filter chạy. Không filter nào khớp thì filter mặc định trả lời.</p>
+<p>Một filter khớp khi <code>@Catch()</code> rỗng (bắt mọi thứ), hoặc exception là instance của một class trong <code>@Catch(…)</code>. Filter mặc định làm hai việc khác nhau:</p>
+<ul>
+<li>Exception là <code>HttpException</code>: dùng status và body của nó.</li>
+<li>Exception khác (lỗi của bạn, <code>TypeError</code>, lỗi của driver MySQL): trả <code>500 {"statusCode":500,"message":"Internal server error"}</code> và log lỗi với tên <code>ExceptionsHandler</code>.</li>
+</ul>
+<p>Chọn exception và các filter đang gắn để xem filter nào bắt.</p>
+</div>
+<div class="frame" id="filt">
+  <div class="ph"><strong>Filter nào bắt exception này?</strong><span class="meta" id="ftMeta"></span></div>
+  <div class="bd">
+    <div class="calc">
+      <label>Exception được ném<select id="ftE">
+        <option value="dom">InsufficientFundsError extends DomainError</option>
+        <option value="bad">BadRequestException (từ ValidationPipe)</option>
+        <option value="type">TypeError: Cannot read properties of undefined</option>
+        <option value="dup">Lỗi mysql2 ER_DUP_ENTRY (1062)</option>
+      </select></label>
+      </div>
+    <div class="chks">
+      <label><input id="ftR" type="checkbox" checked><span>Route: <code>DomainExceptionFilter</code>, bắt <code>DomainError</code></span></label>
+      <label><input id="ftC" type="checkbox"><span>Controller: <code>HttpFilter</code>, bắt <code>HttpException</code></span></label>
+      <label><input id="ftG" type="checkbox"><span>Global: <code>AllExceptionsFilter</code>, <code>@Catch()</code> rỗng</span></label>
+    </div>
+    <svg id="ftSvg" viewBox="0 0 680 150" role="img" aria-label="Danh sách filter theo thứ tự Nest thử, filter được chọn được tô màu"></svg>
+    <div class="desc" aria-live="polite" id="ftDesc"></div>
+  </div>
+</div>
+<div class="note"><strong>Lỗi hay gặp:</strong> ném <code>new Error('Số dư không đủ')</code> từ service rồi ngạc nhiên vì client nhận 500. Filter mặc định chỉ hiểu <code>HttpException</code>. Quy tắc: lỗi nghiệp vụ là class riêng (<code>DomainError</code>), và có đúng một filter đổi chúng thành status và body. Service không ném <code>HttpException</code>: nó không biết mình đang được gọi qua HTTP hay từ một job.</div>
+
+<div class="prose">
+<h3>DI: provider, scope và ranh giới module</h3>
+<p>Ý chính: Nest tạo mỗi provider một lần khi app khởi động (scope mặc định, singleton) và đưa cùng một instance cho mọi nơi cần. Đổi một provider sang <code>Scope.REQUEST</code> thì mọi thứ phụ thuộc vào nó, trực tiếp hay gián tiếp, cũng phải tạo lại cho từng request.</p>
+<p>DI (dependency injection) nghĩa là class không tự <code>new</code> thứ nó cần. Nó khai báo trong constructor, và container của Nest tạo và truyền vào. Có ba scope:</p>
+<ul>
+<li><code>DEFAULT</code>: một instance cho cả app. Phù hợp với service không giữ trạng thái của request.</li>
+<li><code>REQUEST</code>: một instance cho mỗi request, bị bỏ đi khi request xong.</li>
+<li><code>TRANSIENT</code>: mỗi nơi inject nhận một instance riêng.</li>
+</ul>
+<p>Scope lan lên trên. Một singleton không thể giữ một object chỉ sống trong một request, nên Nest biến class phụ thuộc thành request-scoped theo. Chọn provider nào là <code>REQUEST</code> để xem phạm vi lan, và số object phải tạo mỗi giây.</p>
+</div>
+<div class="frame" id="scope">
+  <div class="ph"><strong>Scope lan lên chuỗi phụ thuộc</strong><span class="meta" id="scMeta"></span></div>
+  <div class="bd">
+    <div class="calc">
+      <label class="chk"><input id="scT" type="checkbox" checked>TenantContext là REQUEST</label>
+      <label class="chk"><input id="scA" type="checkbox">AuditService là REQUEST</label>
+      <label class="chk"><input id="scD" type="checkbox">TenantContext durable</label>
+      <label>Request mỗi giây<input id="scQ" type="number" min="1" max="100000" value="2000"></label>
+    </div>
+    <svg id="scSvg" viewBox="0 0 680 230" role="img" aria-label="Đồ thị phụ thuộc giữa controller, các service, repository và TenantContext; các provider phải tạo theo request được tô màu"></svg>
+    <div class="stats" id="scStats"></div>
+    <div class="desc" aria-live="polite" id="scDesc"></div>
+    <div class="legend"><span><i class="lg-miss"></i>tự khai báo REQUEST</span><span><i class="lg-hot"></i>bị lan thành request-scoped</span><span><i class="lg-row"></i>singleton, tạo một lần</span></div>
+    <p class="fine">Luật lan theo <code>InstanceWrapper.isDependencyTreeStatic</code> trong mã nguồn NestJS 12.2.0. <code>durable</code> chỉ có tác dụng khi có <code>ContextIdStrategy</code> nhóm request theo tenant; widget giả định 50 tenant. Số object mỗi giây là đếm theo luật; chi phí thời gian thật chưa đo (E47).</p>
+  </div>
+</div>
+<div class="prose">
+<p><strong>Ranh giới module.</strong> Mỗi module có danh sách <code>providers</code> riêng. Module khác chỉ thấy provider có trong <code>exports</code> của nó, và chỉ khi đã <code>imports</code> module đó. Thiếu một trong hai thì Nest dừng lúc khởi động với lỗi "Nest can't resolve dependencies of …". Lỗi này là tin tốt: ranh giới module được kiểm tra trước khi app nhận request.</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Cách viết</th><th>Hệ quả</th></tr></thead>
+<tbody>
+<tr><td><code>TransfersModule</code> exports <code>TransfersService</code>; <code>ReportsModule</code> imports <code>TransfersModule</code></td><td>Reports gọi được service, không thấy repository bên trong. Ranh giới rõ.</td></tr>
+<tr><td>Mọi module export repository của mình</td><td>Module khác ghi thẳng vào bảng, bỏ qua mọi quy tắc nghiệp vụ. Xem <a href="../layering-business-invariants/index.html">Phân tầng và bất biến</a>.</td></tr>
+<tr><td><code>@Global()</code> cho một module nghiệp vụ</td><td>Ai cũng inject được mà không cần import; mất dấu ai phụ thuộc vào ai.</td></tr>
+<tr><td>Hai module import nhau</td><td>Phụ thuộc vòng; phải dùng <code>forwardRef</code>. Thường là dấu hiệu một phần nên tách thành module thứ ba.</td></tr>
+<tr><td><code>import type { X }</code> cho class được inject</td><td>TypeScript xoá import đó khi build; Nest không biết kiểu của tham số. Bản 12.2.0 nhận ra trường hợp này và gợi ý sửa trong message lỗi.</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- 3 -->
+<section id="s3">
+<header><span class="num">03</span><h2>Vì sao thiết kế như vậy</h2></header>
+<div class="prose">
+<p><strong>Vì sao guard chạy trước pipe?</strong> Guard trả lời "được làm không", pipe trả lời "dữ liệu có đúng hình dạng không". Request không được phép thì không cần biết dữ liệu đúng hay sai. Đổi lại, guard không được tin body. Lưu ý: body JSON đã được parse bởi middleware của Express từ trước, nên guard chặn sớm chỉ tiết kiệm phần validation, không tiết kiệm phần đọc body.</p>
+<p><strong>Vì sao interceptor dùng Observable?</strong> Interceptor cần chạy code cả trước lẫn sau handler, và handler có thể trả một giá trị, một Promise hay một stream. RxJS cho một kiểu chung để <code>map</code>, <code>catchError</code>, <code>timeout</code>. Cái giá: <code>timeout()</code> chỉ huỷ việc <em>chờ</em>. Nó không dừng được Promise đang chạy trong handler (bài toán C27).</p>
+<p><strong>Vì sao chỉ một filter chạy?</strong> Response chỉ viết được một lần. Chọn filter cụ thể nhất cho phép một route xử lý lỗi riêng mà không phá cách xử lý chung.</p>
+<p><strong>Vì sao singleton là mặc định?</strong> Node chạy JavaScript trên một luồng; một instance dùng chung không có rủi ro hai luồng ghi cùng lúc, miễn là nó không giữ trạng thái của request trong field. Tạo object theo request tốn bộ nhớ, tốn thời gian và tăng GC. Dữ liệu theo request (user, tenant, correlation ID) nên đi qua tham số hoặc <code>AsyncLocalStorage</code>, không qua scope.</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th></th><th>NestJS (Express)</th><th>Express thuần</th><th>Fastify</th><th>Spring MVC</th></tr></thead>
+<tbody>
+<tr><td>Chạy cho mọi route</td><td>Middleware</td><td>Middleware</td><td>Hook <code>onRequest</code></td><td>Servlet <code>Filter</code></td></tr>
+<tr><td>Phân quyền theo handler</td><td>Guard</td><td>Middleware gắn từng route</td><td>Hook <code>preHandler</code></td><td><code>HandlerInterceptor.preHandle</code>, Spring Security</td></tr>
+<tr><td>Validation</td><td>Pipe</td><td>Middleware hoặc thư viện</td><td>JSON schema ở <code>preValidation</code></td><td><code>@Valid</code> và Bean Validation</td></tr>
+<tr><td>Bọc trước và sau handler</td><td>Interceptor (Observable)</td><td>Middleware tự viết</td><td><code>preHandler</code> và <code>onSend</code></td><td>AOP, <code>HandlerInterceptor</code></td></tr>
+<tr><td>Đổi lỗi thành response</td><td>Exception filter</td><td>Error middleware 4 tham số</td><td><code>setErrorHandler</code></td><td><code>@ControllerAdvice</code></td></tr>
+<tr><td>DI</td><td>Container, scope theo provider</td><td>Không có</td><td>Plugin và decorate</td><td>Container, scope theo bean</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- 4 -->
+<section id="s4">
+<header><span class="num">04</span><h2>Ví dụ</h2></header>
+<div class="prose"><p>Viết theo API NestJS 12; chưa chạy trên lab. Bản 12 phát hành dạng ES module.</p><h3>Khởi động: pipe, filter và interceptor dùng chung</h3></div>
+<pre><code>// main.ts
+const app = await NestFactory.create(AppModule);
+app.use(correlationId());                         // middleware: gắn req.id, header x-request-id
+app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
+app.useGlobalInterceptors(new TimingInterceptor());
+await app.listen(3000);
+// Filter cần inject (logger, config) thì đăng ký bằng provider APP_FILTER trong AppModule,
+// vì useGlobalFilters(new X()) tạo object ngoài container.</code></pre>
+
+<div class="prose"><h3>Guard xác thực và vai trò</h3></div>
+<pre><code>@Injectable()
+export class AuthGuard implements CanActivate {
+  constructor(private readonly tokens: TokenService, private readonly reflector: Reflector) {}
+  async canActivate(ctx: ExecutionContext): Promise&lt;boolean&gt; {
+    const req = ctx.switchToHttp().getRequest();
+    const user = await this.tokens.verify(req.headers.authorization);   // ném UnauthorizedException → 401
+    req.user = user;
+    const roles = this.reflector.get&lt;string[]&gt;('roles', ctx.getHandler()) ?? [];
+    return roles.length === 0 || roles.some(r =&gt; user.roles.includes(r)); // false → 403 "Forbidden resource"
+  }
+}</code></pre>
+
+<div class="prose"><h3>Interceptor đo thời gian, kể cả khi lỗi</h3></div>
+<pre><code>@Injectable()
+export class TimingInterceptor implements NestInterceptor {
+  intercept(ctx: ExecutionContext, next: CallHandler): Observable&lt;unknown&gt; {
+    const t0 = performance.now();
+    const { method, route } = ctx.switchToHttp().getRequest();
+    return next.handle().pipe(
+      tap({
+        next: () =&gt; metrics.observe(method, route?.path, 'ok', performance.now() - t0),
+        error: (e) =&gt; metrics.observe(method, route?.path, e?.constructor?.name, performance.now() - t0),
+      }),
+    );  // pipe chạy bên trong next.handle(): lỗi validation cũng được đo
+  }
+}</code></pre>
+
+<div class="prose"><h3>Filter cho lỗi nghiệp vụ</h3></div>
+<pre><code>export abstract class DomainError extends Error { abstract readonly code: string; }
+export class InsufficientFundsError extends DomainError { readonly code = 'INSUFFICIENT_FUNDS'; }
+
+@Catch(DomainError)
+export class DomainExceptionFilter implements ExceptionFilter {
+  catch(e: DomainError, host: ArgumentsHost) {
+    const res = host.switchToHttp().getResponse();
+    res.status(422).type('application/problem+json')
+       .json({ type: `https://errors.example.com/${e.code}`, title: e.message, status: 422, code: e.code });
+  }
+}</code></pre>
+
+<div class="prose"><h3>Module chỉ export service, không export repository</h3></div>
+<pre><code>@Module({
+  imports: [DatabaseModule],
+  controllers: [TransfersController],
+  providers: [TransfersService, AccountsRepository, LedgerRepository],
+  exports: [TransfersService],             // module khác không inject được repository
+})
+export class TransfersModule {}</code></pre>
+
+<div class="prose"><h3>Dữ liệu theo request mà không cần REQUEST scope</h3></div>
+<pre><code>// tenant-context.ts: một singleton, dữ liệu nằm trong AsyncLocalStorage của request
+export const tenantStore = new AsyncLocalStorage&lt;{ tenantId: number }&gt;();
+export function tenantMiddleware(req, _res, next) {
+  tenantStore.run({ tenantId: Number(req.user?.tenantId ?? 0) }, next);
+}
+@Injectable() export class TenantContext {
+  get tenantId(): number { const s = tenantStore.getStore(); if (!s) throw new Error('no tenant'); return s.tenantId; }
+}</code></pre>
+<p class="prose">Nest 12 bọc mỗi lớp interceptor bằng <code>AsyncResource</code>, nên giá trị trong <code>AsyncLocalStorage</code> đi theo tới handler (có chú thích về việc này trong <code>interceptors-consumer.js</code>). Middleware đặt <code>tenantStore.run</code> phải chạy sau middleware xác thực, hoặc lấy tenant từ guard rồi gọi <code>enterWith</code>; điểm này cần kiểm tra trong E47.</p>
+</section>
+
+<!-- 5 -->
+<section id="s5">
+<header><span class="num">05</span><h2>Thí nghiệm</h2></header>
+<div class="prose"><p>Chạy với một app NestJS 12 nhỏ trên Node 22. Viết dự đoán trước.</p></div>
+<details><summary>E46. Dấu vết của request qua các tầng</summary>
+<p><strong>Câu hỏi.</strong> Gắn một middleware, hai guard (global và route), ba interceptor (global, controller, route), một pipe và hai filter. Mỗi tầng in một dòng khi vào và khi ra. Với sáu tình huống của widget ở phần 01 (thành công, guard trả false, guard ném 401, body sai, lỗi nghiệp vụ không có filter và có filter, JSON hỏng), những dòng nào được in, theo thứ tự nào, và response là gì?</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e46/prediction.md</code></p>
+<p><strong>Chạy.</strong> <code>curl -i</code> cho từng tình huống; so log với widget.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+<details><summary>E47. Cái giá của REQUEST scope</summary>
+<p><strong>Câu hỏi.</strong> Endpoint đọc một tài khoản qua controller, service, repository. So hai bản: mọi thứ singleton, và <code>TenantContext</code> là <code>REQUEST</code>. Ở 500, 2.000 và 5.000 request mỗi giây: request/giây tối đa, p50 và p99, số lần constructor được gọi, thời gian GC (<code>--trace-gc</code> hoặc <code>perf_hooks</code>). Thêm bản thứ ba dùng <code>AsyncLocalStorage</code>.</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e47/prediction.md</code></p>
+<p><strong>Chạy.</strong> <code>autocannon</code> hoặc <code>k6</code> mở vòng (open loop), 60 giây mỗi mức; đếm constructor bằng một biến đếm tĩnh.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+</section>
+
+<!-- 6 -->
+<section id="s6">
+<header><span class="num">06</span><h2>Ảnh hưởng khi chạy production</h2></header>
+<div class="prose">
+<h3>Việc nào đặt ở tầng nào</h3>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Việc</th><th>Tầng</th><th>Không nên đặt ở</th></tr></thead>
+<tbody>
+<tr><td>Correlation ID, log truy cập</td><td>Middleware</td><td>Interceptor (không thấy request bị chặn trước đó)</td></tr>
+<tr><td>Xác thực token, vai trò</td><td>Guard</td><td>Service (quên một chỗ là lộ)</td></tr>
+<tr><td>Quyền trên một bản ghi cụ thể</td><td>Service, trong câu SQL</td><td>Guard đọc body chưa validate</td></tr>
+<tr><td>Hình dạng dữ liệu vào</td><td>Pipe (<code>ValidationPipe</code>)</td><td>Handler tự <code>if</code></td></tr>
+<tr><td>Quy tắc nghiệp vụ</td><td>Domain, service, ràng buộc của database</td><td>Pipe, guard</td></tr>
+<tr><td>Đo thời gian, timeout chờ</td><td>Interceptor</td><td>Middleware (không thấy lỗi từ handler theo cách Nest báo)</td></tr>
+<tr><td>Đổi lỗi thành status và body</td><td>Một filter nghiệp vụ và một filter <code>@Catch()</code> cuối cùng</td><td>Từng handler tự <code>try/catch</code></td></tr>
+</tbody></table></div>
+<div class="prose">
+<h3>Cái giá</h3>
+<ul>
+<li>Mỗi tầng thêm một ít thời gian trên mọi request; đáng kể nhất là <code>ValidationPipe</code> với DTO lớn và lồng nhau.</li>
+<li><code>REQUEST</code> scope tạo lại cả chuỗi phụ thuộc mỗi request: bộ nhớ, thời gian khởi tạo, GC.</li>
+<li>Interceptor timeout cho client câu trả lời sớm nhưng việc vẫn chạy tiếp; client thử lại thì việc chạy hai lần.</li>
+</ul>
+<h3>Nhận ra trên production bằng gì</h3>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Triệu chứng</th><th>Xem ở đâu</th></tr></thead>
+<tbody>
+<tr><td>403 với message "Forbidden resource"</td><td>Một guard trả <code>false</code>. Log tên guard và lý do trước khi trả.</td></tr>
+<tr><td>500 "Internal server error", không có log của service</td><td>Log có context <code>ExceptionsHandler</code>: một lỗi không phải <code>HttpException</code> đã tới filter mặc định</td></tr>
+<tr><td>400 với mảng message</td><td><code>ValidationPipe</code>; xem DTO và body thật client gửi</td></tr>
+<tr><td>p99 tăng sau khi thêm một provider</td><td>Scope của provider đó và những gì nó làm lan; số lần constructor được gọi</td></tr>
+<tr><td>Client nhận 504 nhưng dữ liệu vẫn được ghi</td><td>Interceptor timeout; so thời điểm response với thời điểm commit trong log</td></tr>
+</tbody></table></div>
+<div class="senior"><h4>Góc nhìn senior: response lỗi là một phần của API</h4><p>Mid-level coi exception filter là chỗ "bắt lỗi cho khỏi crash". Senior coi nó là nơi duy nhất định nghĩa hợp đồng lỗi: mỗi lỗi nghiệp vụ có một <code>code</code> ổn định, một status, và không lộ stack hay câu SQL. Senior cũng giữ một filter <code>@Catch()</code> cuối cùng để mọi lỗi lạ có cùng dạng body và luôn được log kèm correlation ID. Chi tiết ở <a href="../validation-error-contracts/index.html">Validation và hợp đồng lỗi</a>.</p></div>
+<div class="prose">
+<h3>Checklist khi review một module NestJS</h3>
+<ul>
+<li>Guard nào đọc <code>req.body</code>? Nếu có, nó có tin dữ liệu chưa validate không?</li>
+<li>Kiểm tra quyền trên bản ghi có nằm trong câu truy vấn không, hay chỉ trong guard?</li>
+<li>Service có ném <code>HttpException</code> không? Nó có được gọi từ job hay consumer không?</li>
+<li>Có provider nào <code>REQUEST</code> hoặc giữ trạng thái request trong field của singleton không?</li>
+<li>Module export những gì? Có repository nào bị export không?</li>
+<li>Interceptor timeout có đi kèm cách huỷ việc thật (<code>AbortSignal</code>, timeout của câu SQL) hay idempotency không?</li>
+</ul>
+</div>
+</section>
+
+<!-- 7 -->
+<section id="s7">
+<header><span class="num">07</span><h2>Hiểu lầm thường gặp</h2></header>
+<div class="prose"><ul>
+<li><strong>Hiểu lầm:</strong> pipe chạy trước interceptor. <strong>Vì sao sai:</strong> pipe chạy bên trong <code>next.handle()</code> của interceptor trong cùng (<a href="#s2">phần 02</a>). <strong>Quy tắc:</strong> interceptor thấy cả lỗi validation và đo cả thời gian validation.</li>
+<li><strong>Hiểu lầm:</strong> guard có thể tin body. <strong>Vì sao sai:</strong> guard chạy trước pipe. <strong>Quy tắc:</strong> guard dựa vào token và param; quyền trên bản ghi kiểm tra sau validation.</li>
+<li><strong>Hiểu lầm:</strong> mọi filter khớp đều chạy, từ global vào trong. <strong>Vì sao sai:</strong> Nest chọn đúng một filter, cụ thể nhất trước. <strong>Quy tắc:</strong> một filter nghiệp vụ, một filter <code>@Catch()</code> cuối cùng.</li>
+<li><strong>Hiểu lầm:</strong> <code>REQUEST</code> scope chỉ ảnh hưởng một class. <strong>Vì sao sai:</strong> nó lan lên mọi class phụ thuộc vào nó. <strong>Quy tắc:</strong> dữ liệu theo request đi qua tham số hoặc <code>AsyncLocalStorage</code>.</li>
+<li><strong>Hiểu lầm:</strong> interceptor <code>timeout()</code> dừng việc đang chạy. <strong>Vì sao sai:</strong> nó chỉ ngừng chờ; Promise trong handler chạy tiếp tới commit. <strong>Quy tắc:</strong> timeout phải đi tới tận câu SQL hoặc lời gọi ra ngoài, và việc phải idempotent.</li>
+</ul></div>
+</section>
+
+<!-- 8 -->
+<section id="s8">
+<header><span class="num">08</span><h2>Câu hỏi ôn tập</h2></header>
+<p class="prose">Viết ngày 2026-10-22. Đánh số Q89 đến Q94.</p>
+<details><summary><span class="tag">Dự đoán</span>Q89. Guard trả false</summary>
+<p>Route có một guard global và một guard route. Guard global trả <code>false</code>. Guard route, interceptor, pipe và handler có chạy không? Client nhận gì?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Không tầng nào sau guard global chạy. Nest ném <code>ForbiddenException('Forbidden resource')</code>; filter mặc định trả <code>403 {"message":"Forbidden resource","error":"Forbidden","statusCode":403}</code>. Interceptor không thấy lỗi này, vì chuỗi interceptor chưa bắt đầu.</p></details></details>
+<details><summary><span class="tag">Dự đoán</span>Q90. Ba interceptor</summary>
+<p><code>A</code> global, <code>B</code> ở controller, <code>C</code> ở route. Mỗi cái in "vào" trước <code>next.handle()</code> và "ra" trong <code>tap</code>. Thứ tự in là gì?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>A vào, B vào, C vào, (pipe, handler), C ra, B ra, A ra. Interceptor được gom theo global, controller, route; mỗi cái bọc phần còn lại.</p></details></details>
+<details><summary><span class="tag">Giải thích</span>Q91. Filter nào chạy</summary>
+<p>Route gắn filter <code>@Catch(DomainError)</code>, controller gắn <code>@Catch(HttpException)</code>, global có <code>@Catch()</code>. Pipe ném <code>BadRequestException</code>. Filter nào chạy và vì sao?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Nest thử theo thứ tự route, controller, global và chọn cái đầu tiên khớp. Filter của route không khớp (<code>BadRequestException</code> không phải <code>DomainError</code>). Filter của controller khớp vì <code>BadRequestException</code> kế thừa <code>HttpException</code>. Chỉ nó chạy; filter global không chạy.</p></details></details>
+<details><summary><span class="tag">Chẩn đoán</span>Q92. 500 không có log</summary>
+<p>Client nhận <code>500 {"statusCode":500,"message":"Internal server error"}</code>. Log của service trống; log có một dòng với context <code>ExceptionsHandler</code> và một stack <code>TypeError</code>. Chuyện gì đã xảy ra?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Một lỗi không phải <code>HttpException</code> (ở đây <code>TypeError</code>) ném ra và không filter nào khớp, nên filter mặc định trả 500 và log nó. Stack chỉ ra dòng hỏng. Sửa lỗi gốc; và nếu đây là lỗi nghiệp vụ thì đổi thành một class <code>DomainError</code> có filter riêng.</p></details></details>
+<details><summary><span class="tag">Giải thích</span>Q93. Scope lan</summary>
+<p><code>OrdersController</code> → <code>OrdersService</code> → <code>OrdersRepository</code> → <code>TenantContext</code> (<code>REQUEST</code>). <code>OrdersService</code> còn dùng <code>PricingService</code> (singleton). Class nào tạo lại mỗi request?</p>
+<details class="answer"><summary>Xem đáp án</summary><p><code>TenantContext</code>, <code>OrdersRepository</code>, <code>OrdersService</code>, <code>OrdersController</code>: mọi class trên đường từ nó lên tới controller. <code>PricingService</code> không phụ thuộc vào <code>TenantContext</code> nên vẫn là singleton.</p></details></details>
+<details><summary><span class="tag">Chẩn đoán</span>Q94. 504 nhưng tiền đã chuyển</summary>
+<p>Có interceptor <code>timeout(5000)</code>. Một lần chuyển tiền mất 7 giây vì chờ khoá. Client nhận lỗi timeout và bấm lại. Kết quả là hai lần chuyển. Giải thích và nêu hai cách sửa.</p>
+<details class="answer"><summary>Xem đáp án</summary><p><code>timeout()</code> huỷ đăng ký Observable và ném lỗi sau 5 giây, nhưng Promise của handler vẫn chạy tới commit ở giây thứ 7. Client thấy lỗi nên gửi lại. Sửa: (1) idempotency key cho <code>POST /transfers</code>, để lần gửi lại trả kết quả của lần đầu; (2) đặt giới hạn thời gian ở tầng thật sự làm việc, ví dụ <code>innodb_lock_wait_timeout</code> hoặc <code>MAX_EXECUTION_TIME</code> cho câu đọc, nhỏ hơn timeout của HTTP, để việc dừng thật thay vì chạy ngầm.</p></details></details>
+</section>
+
+<!-- 9 -->
+<section id="s9">
+<header><span class="num">09</span><h2>Bài toán thực tế</h2></header>
+<div class="prose">
+<p>Mỗi bài là một vòng phỏng vấn system design cấp senior, khoảng 30–45 phút. Cách dùng:</p>
+<ol class="list">
+<li>Đọc bối cảnh và câu hỏi của interviewer. Bối cảnh là những gì interviewer nói lúc đầu: hệ thống, cách đang làm, quy mô, chuyện đã xảy ra. Viết ra những gì bạn sẽ hỏi thêm trước khi thiết kế, rồi mới mở "Hỏi lại interviewer" để xem câu hỏi nên hỏi và câu trả lời của interviewer: con số chính xác, yêu cầu, ràng buộc. Các con số ở đó dùng cho những câu sau.</li>
+<li>Với mỗi follow-up, tự trả lời (nói to hoặc viết ra) trong vài phút, rồi mới mở đáp án. Follow-up cuối luôn là triển khai và kiểm chứng: thiết kế đã chọn được làm ra sao, test gì, theo dõi gì, lùi lại thế nào.</li>
+<li>Cuối bài, dùng rubric để tự chấm: câu trả lời của bạn giống cột "mid" hay cột "senior", và có rơi vào red flag nào không.</li>
+</ol>
+<p>Đáp án là lập luận từ tài liệu, không phải số đo; con số trong đó là ước lượng. Viết ngày 2026-10-22.</p>
+</div>
+
+<!-- C25 -->
+<div class="case" id="c25">
+<h3>C25. Khách hàng xem được hoá đơn của công ty khác</h3>
+<p class="src">Dựa trên: phần 02 của trang này (guard, pipe, thứ tự); <a href="../layering-business-invariants/index.html">Phân tầng và bất biến</a>.</p>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> SaaS kế toán cho doanh nghiệp, NestJS và MySQL 8.4. Mỗi công ty là một tenant, dữ liệu chung một database, phân biệt bằng cột <code>tenant_id</code>.</li><li><strong>Đang làm:</strong> <code>AuthGuard</code> global xác thực JWT và kiểm tra vai trò. Các service đọc dữ liệu theo <code>id</code> từ URL.</li><li><strong>Quy mô:</strong> 1.200 tenant, khoảng 180 endpoint.</li><li><strong>Đã xảy ra:</strong> Một khách hàng báo đổi số trong URL <code>/invoices/48213</code> thành <code>/invoices/48214</code> thì thấy hoá đơn của công ty khác.</li></ul></div>
+<blockquote class="q">"Bạn sửa lỗi này thế nào, và làm sao chắc nó không xảy ra ở 179 endpoint còn lại?"</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>Guard đang kiểm tra những gì?</td><td>Chữ ký JWT, hạn, vai trò (<code>@Roles('accountant')</code>). Đặt <code>req.user = { id, tenantId, roles }</code>.</td><td>Vai trò khác với quyền trên một bản ghi.</td></tr>
+<tr><td>Service đọc hoá đơn thế nào?</td><td><code>SELECT * FROM invoices WHERE id = ?</code>. Không có điều kiện tenant.</td><td>Đây là lỗ thật.</td></tr>
+<tr><td>Bao nhiêu endpoint đọc theo id như vậy?</td><td>Rà nhanh thấy khoảng 70 endpoint nhận id từ URL hoặc body.</td><td>Phạm vi sửa và rủi ro sót.</td></tr>
+<tr><td>Có bảng nào không có <code>tenant_id</code>?</td><td>Có: <code>invoice_lines</code> chỉ có <code>invoice_id</code>.</td><td>Kiểm tra tenant phải đi qua bảng cha.</td></tr>
+<tr><td>Có dấu hiệu bị khai thác trước đó không?</td><td>Có log truy cập 90 ngày, chưa ai xem.</td><td>Sự cố bảo mật cần điều tra phạm vi, không chỉ vá.</td></tr>
+<tr><td>Ràng buộc?</td><td>Vá trong 24 giờ; không thể viết lại 180 endpoint; không được làm chậm rõ rệt.</td><td>Cần một cách sửa tập trung và một lưới bắt sót.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> tách hai việc ngay: chặn rò rỉ trong vài giờ, và điều tra xem đã rò rỉ những gì. Hỏi về log truy cập là dấu hiệu của người từng xử lý sự cố thật.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Vì sao guard đã có mà vẫn lộ? Một đồng nghiệp đề xuất thêm vào guard: đọc id từ URL, truy vấn hoá đơn, so <code>tenant_id</code>. Bạn nghĩ sao?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p>Guard trả lời "người này có vai trò kế toán không", không trả lời "hoá đơn 48214 có thuộc công ty của người này không". Đó là phân quyền trên bản ghi (object-level authorization), thuộc nhóm lỗi đứng đầu OWASP API Security Top 10 (BOLA).</p>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>A. Guard tra bản ghi theo id rồi so tenant</td><td>Một chỗ, nhìn thấy được</td><td>Một câu đọc thêm mỗi request; guard phải biết mọi loại tài nguyên và cách tìm tenant (qua bảng cha); body chưa validate; vẫn còn khoảng hở giữa lúc kiểm tra và lúc đọc</td></tr>
+<tr><td>B. Thêm <code>AND tenant_id = ?</code> vào mọi câu truy vấn, lấy tenant từ context của request</td><td>Kiểm tra và đọc là một câu; không tốn thêm câu nào</td><td>Phải sửa từng repository; quên một chỗ là lộ</td></tr>
+<tr><td>C. B, cộng một lớp repository cơ sở tự thêm điều kiện tenant, cộng test bắt sót</td><td>Mặc định an toàn; endpoint mới không cần nhớ</td><td>Công sức ban đầu; câu SQL viết tay vẫn phải kiểm tra</td></tr>
+</tbody></table></div>
+<p><strong>Chọn C.</strong> Quyền trên bản ghi phải nằm trong chính câu đọc. Không tìm thấy thì trả 404, không phải 403, để không xác nhận bản ghi tồn tại. <strong>Khi nào đổi ý:</strong> tài nguyên ở hệ thống khác (file trên S3) thì phải kiểm tra trước khi cấp URL, giống A, nhưng đặt ở service.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> Tenant lấy từ đâu và đi tới repository bằng cách nào?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Chỉ từ token đã xác thực (<code>req.user.tenantId</code>). Không bao giờ từ header, query hay body: client điều khiển được những thứ đó.</li>
+<li>Đưa tới repository: truyền tham số rõ ràng (<code>findInvoice(tenantId, id)</code>), hoặc một <code>TenantContext</code> singleton đọc từ <code>AsyncLocalStorage</code>. Tránh <code>Scope.REQUEST</code>: nó lan lên mọi service và controller (C26).</li>
+<li>Bảng con như <code>invoice_lines</code>: join qua bảng cha có điều kiện tenant, hoặc thêm cột <code>tenant_id</code> (dư thừa nhưng làm câu đơn giản và đánh index được).</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> Có 70 endpoint. Làm sao chắc không sót cái nào, kể cả endpoint viết năm sau?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li><strong>Test theo tenant cho mọi route:</strong> một test tự sinh danh sách route từ Nest (đọc metadata của router), tạo dữ liệu cho tenant A, gọi bằng token của tenant B với id của A, và đòi 404 hoặc 403. Route mới tự vào test.</li>
+<li><strong>Kiểm tra câu SQL:</strong> trong môi trường test, một wrapper của pool từ chối mọi câu trên bảng có <code>tenant_id</code> mà không có điều kiện đó (phân tích đơn giản bằng regex hoặc parser). Ồn lúc đầu, rất hiệu quả về sau.</li>
+<li><strong>Lớp bảo vệ trong database:</strong> MySQL không có row-level security như PostgreSQL. Có thể dùng view theo tenant hoặc tài khoản database riêng, nhưng với 1.200 tenant thì tốn công vận hành; ghi nhận như một lựa chọn dài hạn.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> Bạn xác định phạm vi rò rỉ trong 90 ngày thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Từ log truy cập: với mỗi request tới endpoint đọc theo id, lấy <code>tenantId</code> trong token và id trong URL.</li>
+<li>Đối chiếu id với bảng (cả bản ghi đã xoá mềm) để biết tenant thật của bản ghi. Lệch tenant là truy cập trái phép.</li>
+<li>Dấu hiệu dò quét: một user gọi nhiều id liên tiếp, nhiều 404.</li>
+<li>Kết quả đi tới bộ phận pháp lý: luật bảo vệ dữ liệu có thể buộc thông báo cho khách hàng trong thời hạn nhất định.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai và kiểm chứng bản vá thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ol class="list">
+<li>Giờ đầu: vá endpoint hoá đơn bằng <code>WHERE id = ? AND tenant_id = ?</code>; deploy; test thủ công bằng hai token.</li>
+<li>Ngày đầu: <code>TenantContext</code> qua <code>AsyncLocalStorage</code>; repository cơ sở có hàm <code>scoped()</code> thêm điều kiện tenant; sửa 70 endpoint theo thứ tự rủi ro (dữ liệu tài chính trước).</li>
+<li>Test cross-tenant tự sinh chạy trong CI trên MySQL thật; build đỏ nếu route nào trả 200.</li>
+<li>Index: kiểm tra mọi câu mới có index bắt đầu bằng <code>tenant_id</code> hoặc dùng PK; <code>EXPLAIN</code> các câu nóng.</li>
+<li>Theo dõi: số 404 theo user (dò quét), p99 của các endpoint đã sửa.</li>
+<li>Lùi lại: từng endpoint là một thay đổi nhỏ; không có migration dữ liệu.</li>
+</ol>
+</details>
+</div>
+
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Chẩn đoán</td><td>"Guard bị lỗi"</td><td>Phân biệt vai trò với quyền trên bản ghi; gọi tên BOLA</td></tr>
+<tr><td>Chỗ sửa</td><td>Thêm kiểm tra trong guard</td><td>Điều kiện tenant trong chính câu SQL; 404 thay vì 403</td></tr>
+<tr><td>Nguồn của tenant</td><td>Header <code>x-tenant-id</code></td><td>Chỉ từ token đã xác thực</td></tr>
+<tr><td>Chống sót</td><td>Review code</td><td>Test cross-tenant tự sinh cho mọi route; kiểm tra câu SQL trong test</td></tr>
+<tr><td>Sự cố</td><td>Vá xong là hết</td><td>Điều tra 90 ngày log, phối hợp pháp lý</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> tin <code>tenantId</code> do client gửi; trả 403 làm lộ bản ghi tồn tại; dùng <code>Scope.REQUEST</code> cho mọi repository mà không tính chi phí; không hỏi gì về dữ liệu đã bị lộ.</p>
+</details>
+</div>
+
+<!-- C26 -->
+<div class="case" id="c26">
+<h3>C26. p99 tăng gấp ba sau khi thêm TenantContext</h3>
+<p class="src">Dựa trên: phần 02 của trang này (DI và scope); <a href="../capacity-estimation/index.html">Ước lượng capacity</a>.</p>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> API đặt hàng NestJS, 6 pod, mỗi pod một process Node.</li><li><strong>Đang làm:</strong> Sau sự cố kiểu C25, team thêm <code>@Injectable({ scope: Scope.REQUEST }) TenantContext</code> và inject vào mọi repository.</li><li><strong>Quy mô:</strong> giờ cao điểm khoảng 3.000 request mỗi giây cho cả cụm.</li><li><strong>Đã xảy ra:</strong> p99 từ 80 ms lên 240 ms; CPU mỗi pod từ 45% lên 75%; bộ nhớ tăng và dao động mạnh.</li></ul></div>
+<blockquote class="q">"Tại sao, và bạn đề xuất gì để vẫn giữ được kiểm tra tenant?"</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>Bao nhiêu provider phụ thuộc vào <code>TenantContext</code>?</td><td>Khoảng 40 repository, 25 service, 18 controller; một request trung bình chạm 1 controller, 3 service, 5 repository.</td><td>Phạm vi lan của scope.</td></tr>
+<tr><td>Constructor có làm gì nặng không?</td><td>Một số service tạo client HTTP, một số đọc config và dựng map trong constructor.</td><td>Mỗi request lặp lại việc đó.</td></tr>
+<tr><td>Có gì khác thay đổi trong cùng bản deploy?</td><td>Không.</td><td>Loại trừ nguyên nhân khác.</td></tr>
+<tr><td>Có đo GC không?</td><td>Có metric <code>nodejs_gc_duration_seconds</code>: thời gian GC tăng khoảng 4 lần.</td><td>Xác nhận nhiều object sống ngắn.</td></tr>
+<tr><td>Có job hay consumer nào dùng các service này không?</td><td>Có: worker BullMQ gọi <code>OrdersService</code>.</td><td>Không có request HTTP thì request scope làm gì?</td></tr>
+<tr><td>Yêu cầu?</td><td>Giữ kiểm tra tenant; p99 về dưới 100 ms; không viết lại toàn bộ.</td><td>Ràng buộc của giải pháp.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> hỏi "bao nhiêu provider phụ thuộc" trước khi nhìn code. Scope lan, nên câu trả lời quyết định chi phí.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Giải thích vì sao một class nhỏ làm p99 tăng gấp ba.</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li><code>TenantContext</code> là <code>REQUEST</code>, nên mọi provider phụ thuộc nó, trực tiếp hay gián tiếp, thành request-scoped: 40 repository, 25 service, 18 controller.</li>
+<li>Nest tạo các instance cần cho request đó theo từng request. Một request chạm 1 + 3 + 5 + 1 = 10 class, có thể nhiều hơn vì service gọi service khác; với 500 request mỗi giây mỗi pod là ít nhất 5.000 lần tạo object mỗi giây mỗi pod, cộng việc nặng trong constructor (client HTTP, map config).</li>
+<li>Object sống ngắn làm GC chạy nhiều; GC dừng event loop; p99 chịu đầu tiên.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> Đồng nghiệp đề xuất <code>durable: true</code>. Bạn đánh giá thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>A. <code>durable: true</code> và <code>ContextIdStrategy</code> theo tenant</td><td>Mỗi tenant một cây provider, tạo một lần rồi dùng lại</td><td>1.200 tenant × 10 class trở lên giữ trong bộ nhớ của mỗi pod; phải tự viết strategy; vẫn phức tạp</td></tr>
+<tr><td>B. Truyền <code>tenantId</code> làm tham số</td><td>Rõ nhất, không phép màu, test dễ</td><td>Sửa chữ ký của nhiều hàm</td></tr>
+<tr><td>C. <code>TenantContext</code> singleton đọc từ <code>AsyncLocalStorage</code></td><td>Không đổi đồ thị DI; mọi thứ quay về singleton; chi phí rất nhỏ</td><td>Ngầm định; quên đặt store thì lỗi lúc chạy (nên ném lỗi rõ ràng)</td></tr>
+</tbody></table></div>
+<p><strong>Chọn C</strong> cho bản sửa nhanh, và chuyển dần các hàm quan trọng sang B. A sửa triệu chứng nhưng giữ cả nghìn cây object và vẫn khó hiểu. <strong>Khi nào đổi ý:</strong> mỗi tenant có database hoặc cấu hình riêng nặng phải giữ (pool kết nối theo tenant): A mới có ý nghĩa.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> Worker BullMQ gọi <code>OrdersService</code>. Với cách C, tenant đến từ đâu?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p>Không có request HTTP nên không có middleware đặt store. Worker phải tự bọc mỗi job: <code>tenantStore.run({ tenantId: job.data.tenantId }, () =&gt; service.process(job))</code>. <code>TenantContext</code> ném lỗi khi không có store, nên job quên đặt sẽ hỏng ngay ở test, không lặng lẽ đọc dữ liệu của mọi tenant. Đây cũng là lý do service không được dựa vào <code>req</code>.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> Ước lượng: sau khi sửa, p99 có chắc về 80 ms không? Bạn đo gì để biết?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Không chắc. CPU 45% lên 75% cho thấy phần lớn chi phí thêm là tạo object và GC; bỏ request scope thì phần đó mất. Câu SQL nay có thêm điều kiện tenant: nếu index không bắt đầu bằng <code>tenant_id</code> hoặc dùng PK, câu có thể chậm hơn.</li>
+<li>Đo: số lần constructor (đếm), thời gian GC, độ trễ event loop, p99 theo endpoint, và <code>EXPLAIN</code> các câu nóng có điều kiện tenant.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai và kiểm chứng thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ol class="list">
+<li>Viết <code>tenantStore</code> và <code>TenantContext</code> singleton; middleware đặt store sau xác thực; worker bọc job.</li>
+<li>Bỏ <code>scope: Scope.REQUEST</code>. Thêm một test khởi động app và kiểm tra không còn provider nào request-scoped (duyệt container của Nest), để không ai thêm lại vô tình.</li>
+<li>Giữ test cross-tenant của C25; thêm test hai request song song của hai tenant (Promise.all) để chắc store không lẫn.</li>
+<li>Load test trên staging với tải giờ cao điểm: p99, CPU, GC trước và sau (E47 là phiên bản nhỏ của phép đo này).</li>
+<li>Canary một pod 30 phút, so p99 và lỗi với các pod cũ. Lùi lại bằng image cũ.</li>
+</ol>
+</details>
+</div>
+
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Chẩn đoán</td><td>"Request scope chậm"</td><td>Scope lan lên cả chuỗi; đếm object mỗi giây; GC dừng event loop</td></tr>
+<tr><td>Giải pháp</td><td><code>durable</code> hoặc thêm pod</td><td><code>AsyncLocalStorage</code> hoặc tham số; giữ đồ thị DI singleton</td></tr>
+<tr><td>Ngoài HTTP</td><td>Không nghĩ tới</td><td>Worker tự đặt context; thiếu context thì lỗi rõ</td></tr>
+<tr><td>Kiểm chứng</td><td>"Deploy xem p99"</td><td>Đo constructor, GC, event loop; test hai tenant song song; canary</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> thêm pod để bù; lưu tenant vào field của một singleton (request sau ghi đè request trước); để <code>TenantContext</code> trả <code>undefined</code> khi thiếu thay vì ném lỗi.</p>
+</details>
+</div>
+
+<!-- C27 -->
+<div class="case" id="c27">
+<h3>C27. Client nhận timeout nhưng tiền vẫn chuyển, và chuyển hai lần</h3>
+<p class="src">Dựa trên: phần 02 và 03 của trang này (interceptor, Observable); <a href="../idempotency-retries/index.html">Idempotency và retry</a>; <a href="../innodb-locking-deadlock/index.html">Khoá và deadlock</a>.</p>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> Ví điện tử, <code>POST /transfers</code> trên NestJS, MySQL 8.4.</li><li><strong>Đang làm:</strong> Một <code>TimeoutInterceptor</code> global dùng <code>timeout(5000)</code> của RxJS rồi đổi lỗi thành <code>504 Gateway Timeout</code>. App mobile tự gửi lại khi nhận 5xx.</li><li><strong>Đã xảy ra:</strong> Tối thứ sáu, một job đối soát giữ khoá trên vài tài khoản lớn. Hơn 300 lần chuyển tiền bị ghi hai lần; khách hàng thấy 504 rồi thấy số dư bị trừ gấp đôi.</li></ul></div>
+<blockquote class="q">"Giải thích chuyện gì đã xảy ra từ góc nhìn của NestJS và của MySQL, rồi thiết kế lại."</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>Handler làm gì, trong bao lâu?</td><td>Mở transaction, <code>SELECT … FOR UPDATE</code> hai tài khoản, kiểm tra số dư, ghi hai bút toán, commit. Bình thường 15 ms.</td><td>Chỗ có thể chờ là <code>FOR UPDATE</code>.</td></tr>
+<tr><td><code>innodb_lock_wait_timeout</code>?</td><td>Mặc định, 50 giây.</td><td>Câu SQL có thể chờ 50 giây, lâu hơn nhiều so với 5 giây.</td></tr>
+<tr><td>Có idempotency key không?</td><td>Không. Mobile gửi lại cùng body.</td><td>Lần gửi lại là một lần chuyển mới.</td></tr>
+<tr><td>Load balancer và client timeout?</td><td>Load balancer 60 giây, app mobile 10 giây, gửi lại tối đa 2 lần.</td><td>Ba lớp timeout khác nhau.</td></tr>
+<tr><td>Job đối soát giữ khoá bao lâu?</td><td>Tới 40 giây mỗi lô.</td><td>Thời gian chờ khoá thật.</td></tr>
+<tr><td>Yêu cầu?</td><td>Không bao giờ chuyển hai lần; khách hàng biết kết quả thật; p99 bình thường dưới 200 ms.</td><td>Đúng trước, nhanh sau.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> vẽ ba đồng hồ: client, NestJS, MySQL. Lỗi nằm ở chỗ ba đồng hồ không khớp nhau.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Kể dòng thời gian của một lần chuyển bị ghi hai lần.</p>
+<details class="answer"><summary>Đáp án</summary>
+<ol class="list">
+<li>t = 0: request 1 tới, transaction bắt đầu, <code>FOR UPDATE</code> chờ khoá của job đối soát.</li>
+<li>t = 5 s: <code>timeout()</code> của interceptor ném lỗi; Nest trả 504. Nhưng Promise của handler không bị huỷ: câu SQL vẫn đang chờ khoá trong MySQL.</li>
+<li>t = 5 s: app nhận 504 (trước mốc 10 giây của nó) và gửi lại: request 2 cũng chờ cùng khoá.</li>
+<li>t = 38 s: job nhả khoá. Request 1 lấy khoá, kiểm tra, ghi, commit. Request 2 lấy khoá sau đó, số dư vẫn đủ, ghi, commit.</li>
+<li>Kết quả: hai lần chuyển, khách hàng chỉ thấy lỗi.</li>
+</ol>
+<p>Trong mã nguồn Nest, interceptor nhận một Observable bọc Promise của handler. Huỷ đăng ký Observable chỉ bỏ việc chờ kết quả; không có cách nào dừng một Promise đã chạy.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> Đồng nghiệp đề xuất tăng timeout của interceptor lên 60 giây. Bạn trả lời gì?</p>
+<details class="answer"><summary>Đáp án</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>A. Timeout interceptor 60 giây</td><td>Ít 504 hơn</td><td>App vẫn gửi lại ở giây 10; giữ kết nối và transaction lâu; không sửa trùng</td></tr>
+<tr><td>B. Idempotency key bắt buộc cho <code>POST /transfers</code></td><td>Gửi lại bao nhiêu lần cũng một kết quả</td><td>Cần bảng khoá và thay đổi ở app</td></tr>
+<tr><td>C. Đặt giới hạn thời gian thật ở MySQL: <code>SET SESSION innodb_lock_wait_timeout = 3</code> cho kết nối của API</td><td>Việc dừng thật và rollback trước khi HTTP trả lời</td><td>Thêm lỗi 1205 khi tranh khoá; phải trả lỗi rõ ràng và cho phép thử lại</td></tr>
+<tr><td>D. Sửa job đối soát: lô nhỏ, khoá ngắn</td><td>Bỏ nguyên nhân chờ</td><td>Không bảo vệ trước nguyên nhân chờ khác</td></tr>
+</tbody></table></div>
+<p><strong>Chọn B cộng C cộng D.</strong> B làm việc gửi lại an toàn. C làm "timeout" có nghĩa: khi API trả lỗi, transaction đã thật sự rollback. D bỏ nguyên nhân. A chỉ dời vấn đề. Quy tắc: timeout ở tầng ngoài phải dài hơn timeout ở tầng trong, nếu không tầng ngoài trả lỗi cho một việc vẫn đang chạy.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> Xếp các timeout từ trong ra ngoài. Mỗi cái bao nhiêu?</p>
+<details class="answer"><summary>Đáp án</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Lớp</th><th>Giá trị đề xuất (ước lượng)</th><th>Lý do</th></tr></thead>
+<tbody>
+<tr><td>Chờ khoá MySQL (<code>innodb_lock_wait_timeout</code> theo session)</td><td>3 s</td><td>Bình thường 15 ms; chờ hơn 3 giây là có chuyện</td></tr>
+<tr><td>Toàn bộ handler (interceptor, chỉ để báo)</td><td>8 s</td><td>Lớn hơn 3 s cộng thời gian ghi; khi chạm mốc này thì đó là lỗi, cần log</td></tr>
+<tr><td>Load balancer</td><td>15 s</td><td>Lớn hơn handler</td></tr>
+<tr><td>App mobile</td><td>20 s, gửi lại với cùng idempotency key</td><td>Lớn hơn mọi lớp bên trong</td></tr>
+</tbody></table></div>
+<p>Với lỗi 1205 (hết thời gian chờ khoá), API trả <code>409</code> hoặc <code>503</code> có <code>Retry-After</code> và cho biết chưa có gì được ghi. Client gửi lại cùng key là an toàn.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> Lần gửi lại tới khi lần đầu vẫn đang chạy. Idempotency key xử lý thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p>Như trang <a href="../idempotency-retries/index.html">Idempotency</a>: chèn key vào bảng cùng transaction với việc chuyển. Lần gửi lại đụng khoá của dòng key do lần đầu đang giữ và chờ. Khi lần đầu commit, lần sau gặp lỗi trùng key, đọc kết quả đã lưu và trả lại. Nếu lần đầu rollback, lần sau chèn được và tự làm. Không có thời điểm nào hai lần cùng ghi.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai và kiểm chứng thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ol class="list">
+<li>Pool kết nối của API chạy <code>SET SESSION innodb_lock_wait_timeout = 3</code> khi mở kết nối. Job đối soát dùng pool riêng với giá trị riêng.</li>
+<li>Bảng <code>idempotency_keys</code>, header <code>Idempotency-Key</code> bắt buộc cho <code>POST /transfers</code> (400 nếu thiếu, sau một thời gian chuyển tiếp cho app cũ).</li>
+<li>Filter đổi lỗi 1205 thành 503 có <code>Retry-After: 1</code>, 1213 (deadlock) thì thử lại trong server một lần.</li>
+<li>Test tích hợp trên MySQL thật: một session giữ <code>FOR UPDATE</code> 10 giây; gửi chuyển tiền; gửi lại cùng key ở giây 4; kiểm tra đúng một bút toán và cả hai response giống nhau.</li>
+<li>Metric: số 1205, số request trả kết quả từ idempotency key, số lần chạm timeout của interceptor (nên bằng 0).</li>
+<li>Đối soát dữ liệu: tìm các cặp chuyển tiền trùng trong 5 phút có cùng nguồn, đích, số tiền để hoàn tiền cho 300 khách hàng.</li>
+</ol>
+</details>
+</div>
+
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Chẩn đoán</td><td>"Timeout quá ngắn"</td><td>Timeout ngoài không huỷ việc trong; Promise chạy tới commit</td></tr>
+<tr><td>Thứ tự timeout</td><td>Một con số cho mọi lớp</td><td>Trong ngắn, ngoài dài; timeout trong phải dừng việc thật</td></tr>
+<tr><td>Trùng</td><td>Mobile đừng gửi lại</td><td>Idempotency key cùng transaction</td></tr>
+<tr><td>Nguyên nhân gốc</td><td>Không hỏi về job</td><td>Job giữ khoá 40 giây; sửa lô</td></tr>
+<tr><td>Khắc phục</td><td>Không nói</td><td>Đối soát và hoàn tiền cho khách bị trừ hai lần</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> tin rằng <code>timeout()</code> huỷ được câu SQL; tăng timeout làm giải pháp; bảo client "đừng gửi lại" mà không cho cách biết kết quả.</p>
+</details>
+</div>
+</section>
+
+<!-- 10 -->
+<section id="s10">
+<header><span class="num">10</span><h2>Câu hỏi còn mở</h2></header>
+<p class="prose">Số thứ tự trùng với Open questions trong <code>.claude/docs/LEARNING_LOG.md</code>. Log là bản gốc.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>#</th><th>Câu hỏi</th><th>Trạng thái</th></tr></thead>
+<tbody>
+<tr><td>37</td><td>Với NestJS 12 trên Express, body JSON hỏng được báo ra với status và body nào, và một filter global <code>@Catch()</code> có bắt được nó không? Filter mặc định có nhánh riêng cho lỗi dạng <code>http-errors</code>; chưa rõ lỗi của body parser có đi qua filter tự viết hay không.</td><td>Mở. Quan sát trong E46.</td></tr>
+<tr><td>38</td><td>Trên Node 22, một chuỗi 10 provider request-scoped tốn bao nhiêu micro giây và bao nhiêu GC mỗi request? Từ bao nhiêu request mỗi giây thì nó thành nút thắt?</td><td>Mở. Đo trong E47.</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- 11 -->
+<section id="s11">
+<header><span class="num">11</span><h2>Tài liệu tham khảo</h2></header>
+<div class="prose"><ul>
+<li>NestJS 12.2.0, mã nguồn <code>@nestjs/core</code>: <code>router/router-execution-context.js</code> (guard, interceptor, pipe, handler), <code>helpers/context-creator.js</code> (global, class, method), <code>interceptors/interceptors-consumer.js</code>, <code>router/router-exception-filters.js</code> và <code>exceptions/base-exception-filter.js</code> (chọn filter, response mặc định), <code>injector/instance-wrapper.js</code> (scope lan), <code>errors/messages.js</code></li>
+<li>NestJS 12.2.0, mã nguồn <code>@nestjs/common</code>: <code>pipes/validation.pipe.js</code>, <code>exceptions/http.exception.js</code>, <code>interfaces/scope-options.interface.d.ts</code></li>
+<li><a href="https://docs.nestjs.com/faq/request-lifecycle">Tài liệu NestJS</a>: Request lifecycle, Guards, Interceptors, Pipes, Exception filters, Injection scopes, Modules</li>
+<li>class-validator 0.15.1, mã nguồn: message mặc định của <code>IsInt</code>, <code>IsPositive</code></li>
+<li>Node.js, <a href="https://nodejs.org/api/async_context.html">Asynchronous context tracking</a>: <code>AsyncLocalStorage</code></li>
+<li>OWASP API Security Top 10 (2023), API1: Broken Object Level Authorization</li>
+<li>MySQL 8.4 Reference Manual: <code>innodb_lock_wait_timeout</code></li>
+</ul></div>
+<h3>Mức kiểm chứng</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>Khẳng định</th><th>Nguồn</th></tr></thead>
+<tbody>
+<tr><td>Thứ tự guard, interceptor, pipe, handler; pipe chạy bên trong chuỗi interceptor; pipe của các tham số chạy đồng thời</td><td>mã nguồn NestJS 12.2.0</td></tr>
+<tr><td>Guard trả <code>false</code> thì <code>ForbiddenException('Forbidden resource')</code>; guard chạy lần lượt và dừng ở cái đầu tiên trả false</td><td>mã nguồn (<code>guards-consumer.js</code>, <code>guards/constants.js</code>)</td></tr>
+<tr><td>Global, controller, route; filter theo route, controller, global và cái đầu tiên khớp thắng</td><td>mã nguồn (<code>context-creator.js</code>, <code>router-exception-filters.js</code>)</td></tr>
+<tr><td>Lỗi không phải <code>HttpException</code> thành 500 "Internal server error" và được log</td><td>mã nguồn (<code>base-exception-filter.js</code>)</td></tr>
+<tr><td>Scope <code>REQUEST</code> lan lên các class phụ thuộc</td><td>mã nguồn (<code>isDependencyTreeStatic</code>) và tài liệu Injection scopes</td></tr>
+<tr><td><code>timeout()</code> không dừng Promise của handler</td><td>suy ra từ mã nguồn (<code>transformDeferred</code> gọi handler ngay, huỷ chỉ bỏ đăng ký); chưa đo</td></tr>
+<tr><td>Response của từng tình huống trong widget phần 01</td><td>mô hình theo mã nguồn; chưa đo (E46, câu hỏi 37)</td></tr>
+<tr><td>Chi phí của REQUEST scope</td><td>chưa đo (E47, câu hỏi 38)</td></tr>
+</tbody></table></div>
+</section>
+</main>
+
+</div>
+
+<script>
+const DEFS=`<defs><marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>`;
+function B(x,y,w,h,cls,t,sub){
+  const tx=x+w/2;
+  return `<g class="n ${cls||''}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="5"/>`+
+  `<text class="tb" x="${tx}" y="${y+(sub?h/2-8:h/2)}" text-anchor="middle" dominant-baseline="central">${t}</text>`+
+  (sub?`<text class="ts" x="${tx}" y="${y+h/2+10}" text-anchor="middle" dominant-baseline="central">${sub}</text>`:'')+`</g>`;
+}
+const A=(d,cls)=>`<path d="${d}" class="edge ${cls||''}" marker-end="url(#arw)"/>`;
+const T=(x,y,t,anchor,cls)=>`<text class="${cls||'lbl'}" x="${x}" y="${y}" text-anchor="${anchor||'start'}">${t}</text>`;
+const $=id=>document.getElementById(id);
+const fmt=n=>Math.round(n).toLocaleString('vi-VN');
+const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+// Mounts a stepper into <div class="frame" id="ID"></div>; steps may be replaced via the returned set().
+function stepper(id,{title,vb,steps,draw,after,extra}){
+  const el=document.getElementById(id);
+  el.innerHTML=`<div class="ph"><strong>${title}</strong><span class="meta"></span></div><div class="bd">
+  ${extra||''}<h4 class="st-t"></h4>
+  <svg viewBox="${vb}" role="img"></svg>
+  <div class="desc" aria-live="polite"><div class="st-d"></div><pre hidden></pre></div>
+  <div class="nav"><button data-d="-1">Trước</button><button data-d="1" class="primary">Tiếp</button></div></div>`;
+  const svg=el.querySelector('svg'),t=el.querySelector('.st-t'),d=el.querySelector('.st-d'),pre=el.querySelector('pre'),meta=el.querySelector('.meta');
+  const [pv,nx]=el.querySelectorAll('.nav button');let i=0;
+  function render(){const s=steps[i];svg.innerHTML=DEFS+draw(s,i);svg.setAttribute('aria-label',s.t);t.textContent=s.t;d.textContent=s.d;
+    pre.hidden=!s.c;pre.textContent=s.c||'';meta.textContent=`bước ${i+1} / ${steps.length}`;pv.disabled=i===0;nx.disabled=i===steps.length-1;after&&after(s,el);}
+  function go(k){i=Math.max(0,Math.min(steps.length-1,i+k));render();}
+  pv.onclick=()=>go(-1);nx.onclick=()=>go(1);
+  el.tabIndex=0;el.addEventListener('keydown',e=>{if(e.target.closest('select,input'))return;if(e.key==='ArrowRight')go(1);if(e.key==='ArrowLeft')go(-1);});
+  render();
+  return {set(ns){steps=ns;i=0;render();},el};
+}
+
+/* ---------- 01: request pipeline stepper ---------- */
+const LAYERS=[['mw','Middleware','correlation ID, body'],['guard','Guard','AuthGuard'],['icin','Interceptor','trước next.handle()'],['pipe','Pipe','ValidationPipe'],
+  ['handler','Handler','controller → service'],['icout','Interceptor','sau next.handle()'],['filter','Exception filter','viết response lỗi'],['resp','Response','status và body']];
+const LPOS={mw:[10,22],guard:[180,22],icin:[350,22],pipe:[520,22],handler:[520,132],icout:[350,132],filter:[180,132],resp:[10,132]};
+const OKBODY='HTTP/1.1 201 Created\n{"id":9001,"status":"completed"}';
+const SCEN={
+ ok:{name:'Thành công',steps:[
+  ['mw','path','Middleware chạy trước khi chọn handler','Ý chính: middleware chạy cho mọi request. Nó gắn x-request-id và body parser của Express đọc JSON thành object. Lúc này Nest chưa chạy guard nào.'],
+  ['guard','path','Guard cho qua','AuthGuard xác thực JWT, thấy vai trò accountant, trả true. Có nhiều guard thì chúng chạy lần lượt: global, controller, route.'],
+  ['icin','path','Interceptor: phần trước next.handle()','TimingInterceptor ghi thời điểm bắt đầu rồi gọi next.handle(). Mọi thứ phía sau (pipe, handler) chạy bên trong lời gọi này.'],
+  ['pipe','path','Pipe kiểm tra body','ValidationPipe biến body thành TransferDto và chạy các decorator của class-validator. Mọi trường hợp lệ, nên handler nhận được tham số.'],
+  ['handler','path','Handler chạy','Controller gọi TransfersService.transfer(). Service mở transaction, ghi bút toán, commit, trả { id: 9001 }.'],
+  ['icout','path','Interceptor: phần sau next.handle()','Kết quả đi ngược ra. TimingInterceptor đo thời gian và để giá trị đi tiếp, không đổi gì.'],
+  ['resp','row','Response 201','Không có lỗi nên exception filter không chạy. Nest dùng status mặc định của POST là 201 và ghi kết quả thành JSON.',OKBODY]]},
+ guard:{name:'Guard trả false',steps:[
+  ['mw','path','Middleware chạy','Middleware không biết gì về quyền. Request đi tiếp tới guard.'],
+  ['guard','miss','Guard trả false','Token hợp lệ nhưng user chỉ có vai trò viewer. AuthGuard trả false. Nest ném ForbiddenException("Forbidden resource"). Interceptor, pipe và handler không chạy.'],
+  ['filter','hot','Filter mặc định viết lỗi','Không có filter tự viết nào khớp. Filter mặc định thấy đây là HttpException nên dùng status và body của nó.'],
+  ['resp','miss','Response 403','Interceptor không ghi được gì cho request này vì chuỗi interceptor chưa bắt đầu. Nếu metric chỉ đo trong interceptor, 403 loại này không xuất hiện ở đó.','HTTP/1.1 403 Forbidden\n{"message":"Forbidden resource","error":"Forbidden","statusCode":403}']]},
+ pipe:{name:'Body sai: amountMinor = "abc"',steps:[
+  ['mw','path','Middleware chạy','Body {"fromAccountId":1,"toAccountId":2,"amountMinor":"abc"} được parse thành object. JSON hợp lệ, chỉ có giá trị sai.'],
+  ['guard','path','Guard cho qua','Guard không đọc body, nên không thấy gì sai.'],
+  ['icin','path','Interceptor gọi next.handle()','Interceptor bắt đầu đo. Pipe sẽ chạy bên trong lời gọi này.'],
+  ['pipe','miss','ValidationPipe ném 400','"abc" không phải số nguyên và không phải số dương. Pipe ném BadRequestException với mảng message. Handler không chạy.'],
+  ['icout','path','Interceptor thấy lỗi','Lỗi đi qua stream của interceptor. tap({ error }) ghi được thời gian và tên lỗi. Đây là điểm khác so với guard: lỗi validation có trong metric của interceptor.'],
+  ['filter','hot','Filter mặc định','BadRequestException là HttpException; filter mặc định dùng body của nó.'],
+  ['resp','miss','Response 400','Message là văn bản tiếng Anh của class-validator. Client không nên phân tích chuỗi này; xem trang hợp đồng lỗi.','HTTP/1.1 400 Bad Request\n{"message":["amountMinor must be an integer number","amountMinor must be a positive number"],"error":"Bad Request","statusCode":400}']]},
+ dom:{name:'Số dư không đủ, không có filter riêng',steps:[
+  ['mw','path','Middleware chạy','Request bình thường.'],
+  ['guard','path','Guard cho qua','Người dùng có quyền.'],
+  ['icin','path','Interceptor gọi next.handle()','Đo thời gian bắt đầu.'],
+  ['pipe','path','Pipe cho qua','Body đúng hình dạng: amountMinor = 50000.'],
+  ['handler','miss','Service ném lỗi nghiệp vụ','Số dư 30.000 nhỏ hơn 50.000. Service ném InsufficientFundsError, một class kế thừa Error, không phải HttpException.'],
+  ['icout','path','Interceptor thấy lỗi','Interceptor ghi thời gian và tên lỗi, rồi để lỗi đi tiếp.'],
+  ['filter','hot','Filter mặc định: lỗi lạ','Không filter tự viết nào khớp. Filter mặc định không biết lỗi này, nên trả 500 và log stack với context ExceptionsHandler.'],
+  ['resp','miss','Response 500','Client nhận "Internal server error" cho một lỗi nghiệp vụ bình thường. App mobile báo "lỗi hệ thống", và có thể tự gửi lại.','HTTP/1.1 500 Internal Server Error\n{"statusCode":500,"message":"Internal server error"}']]},
+ domf:{name:'Số dư không đủ, có DomainExceptionFilter',steps:[
+  ['mw','path','Middleware chạy','Request bình thường.'],
+  ['guard','path','Guard cho qua','Người dùng có quyền.'],
+  ['icin','path','Interceptor gọi next.handle()','Đo thời gian bắt đầu.'],
+  ['pipe','path','Pipe cho qua','Body đúng hình dạng.'],
+  ['handler','miss','Service ném lỗi nghiệp vụ','Service ném InsufficientFundsError (kế thừa DomainError).'],
+  ['icout','path','Interceptor thấy lỗi','Interceptor ghi thời gian, lỗi đi tiếp.'],
+  ['filter','hot','DomainExceptionFilter bắt','Filter có @Catch(DomainError) khớp, nên nó chạy thay cho filter mặc định. Nó đổi code của lỗi thành status 422 và một body ổn định.'],
+  ['resp','miss','Response 422','Client đọc trường code để hiện thông báo đúng, không cần phân tích message.','HTTP/1.1 422 Unprocessable Content\nContent-Type: application/problem+json\n{"type":"https://errors.example.com/INSUFFICIENT_FUNDS","title":"Số dư không đủ","status":422,"code":"INSUFFICIENT_FUNDS"}']]},
+ json:{name:'JSON hỏng',steps:[
+  ['mw','miss','Body parser không đọc được JSON','Body {"amountMinor": 500,} có dấu phẩy thừa. Body parser của Express gọi JSON.parse và nhận lỗi. Lỗi này xảy ra trước khi Nest chạy guard.'],
+  ['filter','hot','Nest bắt lỗi của middleware','Lỗi của body parser mang statusCode 400 và expose = true theo kiểu thư viện http-errors. Filter mặc định có nhánh riêng cho loại lỗi này và dùng status cùng message của nó.'],
+  ['resp','miss','Response 400','Guard không chạy, nên request chưa xác thực vẫn nhận 400 thay vì 401. Chỉ filter global xử lý được lỗi ở tầng này (câu hỏi mở 37).','HTTP/1.1 400 Bad Request\n{"statusCode":400,"message":"<message của JSON.parse>"}']]}
+};
+function buildSteps(key){
+  const sc=SCEN[key],out=[];const st={};LAYERS.forEach(([k])=>st[k]='dim');
+  const run=sc.steps;
+  run.forEach(([k,cls,t,d,resp],i)=>{
+    for(const kk in st)if(st[kk]==='path')st[kk]='row';
+    st[k]=cls;
+    out.push({t,d,st:{...st},resp:resp||null,c:resp||''});
+  });
+  return out;
+}
+function drawPipe(s){
+  let g='';
+  const order=LAYERS.map(l=>l[0]);
+  for(let i=0;i<order.length-1;i++){
+    const [x1,y1]=LPOS[order[i]],[x2,y2]=LPOS[order[i+1]];
+    if(y1===y2){const dir=x2>x1?1:-1;g+=A(`M${dir>0?x1+150:x1} ${y1+24} L${dir>0?x2-2:x2+152} ${y2+24}`);}
+    else g+=A(`M${x1+75} ${y1+48} L${x2+75} ${y2-2}`);
+  }
+  g+=T(10,112,'đi vào: trái sang phải','start','ts')+T(585,112,'đi ra: phải sang trái','end','ts');
+  LAYERS.forEach(([k,name,sub])=>{const [x,y]=LPOS[k];g+=B(x,y,150,48,s.st[k],name,sub);});
+  return g;
+}
+const pipeEl=stepper('pipe',{title:'Một request đi qua các tầng',vb:'0 0 680 190',steps:buildSteps('ok'),draw:drawPipe,
+  extra:`<div class="scen"><label for="pipeSc">Tình huống</label><select id="pipeSc">${Object.entries(SCEN).map(([k,v])=>`<option value="${k}">${v.name}</option>`).join('')}</select></div>`});
+$('pipeSc').addEventListener('change',e=>pipeEl.set(buildSteps(e.target.value)));
+
+/* ---------- 02: interceptor onion (static) ---------- */
+(function(){
+  let g=DEFS;
+  g+=`<rect class="ring g" x="14" y="14" width="652" height="222" rx="14"/>`+T(26,36,'LoggingInterceptor (global)','start','tb');
+  g+=`<rect class="ring c" x="64" y="48" width="552" height="154" rx="12"/>`+T(76,70,'TimeoutInterceptor (controller)','start','tb');
+  g+=`<rect class="ring r" x="114" y="82" width="452" height="86" rx="10"/>`+T(126,104,'CacheInterceptor (route)','start','tb');
+  g+=`<rect class="core" x="240" y="112" width="200" height="40" rx="6"/>`+T(340,137,'pipe → handler','middle','tb');
+  g+=A('M30 196 C 90 196 150 160 236 136','in')+A('M444 128 C 530 110 590 196 650 196','out');
+  g+=T(40,222,'vào: global, controller, route','start','t')+T(640,222,'ra: route, controller, global','end','t');
+  $('onSvg').innerHTML=g;
+})();
+
+/* ---------- 02: which filter catches ---------- */
+const EXC={
+  dom:{name:'InsufficientFundsError',isa:['DomainError','Error'],http:false},
+  bad:{name:'BadRequestException',isa:['HttpException','Error'],http:true},
+  type:{name:'TypeError',isa:['Error'],http:false},
+  dup:{name:'Error (mysql2, code ER_DUP_ENTRY, errno 1062)',isa:['Error'],http:false}
+};
+function ft(){
+  const e=EXC[$('ftE').value],key=$('ftE').value;
+  const cand=[];
+  if($('ftR').checked)cand.push({lvl:'route',name:'DomainExceptionFilter',cat:'DomainError'});
+  if($('ftC').checked)cand.push({lvl:'controller',name:'HttpFilter',cat:'HttpException'});
+  if($('ftG').checked)cand.push({lvl:'global',name:'AllExceptionsFilter',cat:''});
+  let chosen=-1;
+  cand.forEach((c,i)=>{c.match=!c.cat||e.isa.includes(c.cat);if(c.match&&chosen<0)chosen=i;});
+  let g='';const w=156,gap=12;
+  const all=cand.concat([{lvl:'mặc định',name:'BaseExceptionFilter',cat:'(mọi thứ còn lại)',match:true,def:true}]);
+  if(chosen<0)chosen=all.length-1;
+  all.forEach((c,i)=>{
+    const x=10+i*(w+gap),cls=i===chosen?'hot':(i<chosen?'dim':'dim');
+    g+=B(x,30,w,54,cls,c.name,c.def?'không @Catch':`@Catch(${c.cat})`);
+    g+=T(x+w/2,20,`${i+1}. ${c.lvl}`,'middle','ts');
+    const note=i<chosen?'không khớp, bỏ qua':i===chosen?'chạy':'không tới';
+    g+=T(x+w/2,104,note,'middle','t');
+    if(i<all.length-1)g+=A(`M${x+w} 57 L${x+w+gap-2} 57`);
+  });
+  $('ftSvg').innerHTML=DEFS+g;
+  const c=all[chosen];let msg;
+  if(c.def){
+    msg=e.http?`Không filter tự viết nào khớp. Filter mặc định thấy BadRequestException là HttpException và trả status 400 với body của nó.`
+      :`Không filter tự viết nào khớp. Filter mặc định không biết ${e.name}, nên trả 500 {"statusCode":500,"message":"Internal server error"} và log stack với context ExceptionsHandler.`+(key==='dup'?' Lỗi của mysql2 có code và errno nhưng không có statusCode, nên không đi vào nhánh lỗi kiểu http-errors.':'');
+  }else if(c.name==='DomainExceptionFilter'){
+    msg='DomainExceptionFilter ở route khớp đầu tiên (@Catch(DomainError)). Nó trả 422 và code INSUFFICIENT_FUNDS. Filter ở controller và global không chạy, dù có thể cũng khớp.';
+  }else if(c.name==='HttpFilter'){
+    msg=`HttpFilter ở controller khớp vì ${e.name} kế thừa HttpException. Nó dùng getStatus() = 400 để viết response theo dạng của nó.`+($('ftR').checked?' Filter ở route đứng trước nhưng chỉ bắt DomainError nên bị bỏ qua.':'');
+  }else{
+    msg=`AllExceptionsFilter (@Catch() rỗng) bắt mọi thứ còn lại. Nó phải tự quyết status: giữ status của HttpException, đổi lỗi đã biết (ví dụ 1062 thành 409) và trả 500 với body chung cho phần còn lại.`+(key==='dup'?' Nếu nó không có nhánh cho 1062, client nhận 500 cho một lỗi trùng dữ liệu.':'');
+  }
+  $('ftDesc').textContent=msg;$('ftMeta').textContent=`${c.name} chạy`;
+}
+['ftE','ftR','ftC','ftG'].forEach(id=>$(id).addEventListener('change',ft));ft();
+
+/* ---------- 02: scope bubbling ---------- */
+const NODES={
+  TC:{n:'TransfersController',x:10,y:30},RC:{n:'ReportsController',x:10,y:150},
+  TS:{n:'TransfersService',x:180,y:30},RS:{n:'ReportsService',x:180,y:150},
+  AR:{n:'AccountsRepository',x:360,y:8},LR:{n:'LedgerRepository',x:360,y:62},AS:{n:'AuditService',x:360,y:116},PS:{n:'PricingService',x:360,y:170},
+  TX:{n:'TenantContext',x:530,y:34}
+};
+const DEPS={TC:['TS'],RC:['RS'],TS:['AR','LR','AS','PS'],RS:['LR'],AR:['TX'],LR:['TX'],AS:[],PS:[],TX:[]};
+function sc(){
+  const own={TX:$('scT').checked,AS:$('scA').checked};const dur=$('scD').checked;
+  const q=Math.max(1,Math.min(100000,parseInt($('scQ').value,10)||2000));
+  const memo={},dm={};
+  const req=k=>memo[k]??(memo[k]=!!own[k]||DEPS[k].some(req));
+  const durable=k=>{if(k in dm)return dm[k];let r;
+    if(own[k])r=(k==='TX'&&dur)&&DEPS[k].filter(req).every(durable);
+    else r=DEPS[k].filter(req).every(durable);
+    return dm[k]=r;};
+  let g='';
+  for(const [k,ds] of Object.entries(DEPS))ds.forEach(d=>{const a=NODES[k],b=NODES[d];g+=A(`M${a.x+140} ${a.y+20} L${b.x-2} ${b.y+20}`,req(d)?'on':'');});
+  for(const [k,v] of Object.entries(NODES)){const cls=own[k]?'miss':req(k)?'hot':'row';g+=B(v.x,v.y,140,40,cls,v.n,own[k]?'REQUEST':req(k)?'bị lan':'singleton');}
+  $('scSvg').innerHTML=DEFS+g;
+  // instances per POST /transfers: request-scoped nodes reachable from TC
+  const seen=new Set();(function walk(k){if(seen.has(k))return;seen.add(k);DEPS[k].forEach(walk);})('TC');
+  const per=[...seen].filter(req).length;
+  const reqCount=Object.keys(NODES).filter(req).length;
+  const isDur=per>0&&durable('TC');
+  const perSec=isDur?0:per*q;
+  $('scStats').innerHTML=[['Provider request-scoped',`${reqCount} / ${Object.keys(NODES).length}`,reqCount>2?'bad':''],
+    ['Object tạo cho mỗi POST /transfers',isDur?`${per} (dùng lại theo tenant)`:per,per&&!isDur?'bad':''],
+    ['Object tạo mỗi giây',isDur?`≈ 0 (giữ ${per*50} object cho 50 tenant)`:fmt(perSec),perSec>0?'bad':'good']]
+    .map(([k,v,c])=>`<div class="stat"><span>${k}</span><b${c?` class="${c}"`:''}>${v}</b></div>`).join('');
+  let d;
+  if(!own.TX&&!own.AS)d='Mọi provider là singleton: tạo một lần khi app khởi động, dùng chung cho mọi request. Chi phí theo request bằng 0.';
+  else if(isDur)d='Mọi provider request-scoped trên đường đi đều durable, nên Nest giữ một cây object cho mỗi tenant và dùng lại. Đổi lại, bộ nhớ tăng theo số tenant, và bạn phải viết ContextIdStrategy.';
+  else{const lst=Object.keys(NODES).filter(k=>req(k)&&!own[k]).map(k=>NODES[k].n).join(', ');
+    d=`Provider REQUEST làm các class phụ thuộc vào nó thành request-scoped theo: ${lst}. Mỗi POST /transfers tạo lại ${per} object; ở ${fmt(q)} request mỗi giây là ${fmt(perSec)} object mỗi giây. PricingService không phụ thuộc vào chúng nên vẫn là singleton.`+(own.AS&&dur&&own.TX?' AuditService là REQUEST mà không durable, nên cả cây của TransfersService mất tính durable.':'');}
+  $('scDesc').textContent=d;$('scMeta').textContent=`${per} object / request`;
+}
+['scT','scA','scD','scQ'].forEach(id=>$(id).addEventListener('input',sc));sc();
+</script>
+</body>
+</html>
