@@ -1,0 +1,1021 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Phân trang: offset và keyset</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F2F4F6; --surface:#FFFFFF; --ink:#18203A; --ink-2:#56607A; --ink-3:#8A93A8;
+  --rule:#CCD3DD; --rule-strong:#8C96AB;
+  --struct:#3446B8; --struct-bg:#E6E9FA;            /* cấu trúc index, chrome của trang */
+  --row:#16795F;    --row-bg:#DDF2EA;               /* dữ liệu row thật */
+  --hot:#9A5F00;    --hot-bg:#FCEFD2; --hot-line:#E3A21A;  /* bị ghi, bị chạm, bị lọc */
+  --miss:#B5302B;   --miss-bg:#FBE1DF;              /* đọc từ disk, việc thừa, lỗi */
+  --path:#0B7A8A;   --path-bg:#D8F1F3;              /* đường đi hoặc khoảng đang đọc */
+  --key:#A8327A;    --key-bg:#F8E0EE;               /* con trỏ: PK, TID */
+  --ram:#5B4BB0;    --ram-bg:#E7E3FA;               /* hit trong buffer pool */
+  --grid:rgba(52,70,184,.06);
+  --r-s:4px; --r-m:8px;
+  --sans:"Instrument Sans",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --paper:#0F1320; --surface:#171C2B; --ink:#E6E9F2; --ink-2:#A3ABC0; --ink-3:#6E7790;
+  --rule:#2C3448; --rule-strong:#55607A;
+  --struct:#97A3FF; --struct-bg:#232A55;
+  --row:#5FD0AE;    --row-bg:#123A31;
+  --hot:#F2BE5C;    --hot-bg:#3B2C0E; --hot-line:#E3A21A;
+  --miss:#FF8A84;   --miss-bg:#3E1A1A;
+  --path:#5ED3E0;   --path-bg:#113A40;
+  --key:#F28DC4;    --key-bg:#3E1A2E;
+  --ram:#B7A8FF;    --ram-bg:#2A2350;
+  --grid:rgba(151,163,255,.05);
+}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important;animation:none!important}}
+body{margin:0;color:var(--ink);font:400 17px/1.65 var(--sans);
+  background-color:var(--paper);
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:24px 24px}
+a{color:var(--struct)}
+:focus-visible{outline:2px solid var(--struct);outline-offset:2px}
+
+/* layout */
+.shell{display:grid;grid-template-columns:230px minmax(0,1fr);gap:56px;max-width:1180px;margin:0 auto;padding:0 32px}
+nav.toc{position:sticky;top:0;align-self:start;height:100vh;padding:48px 0;overflow:auto}
+nav.toc p{font-weight:600;margin:0 0 12px;font-size:15px}
+nav.toc ol,.mobile-toc ol{list-style:none;margin:0;padding:0;counter-reset:s}
+nav.toc li,.mobile-toc li{counter-increment:s;margin:0}
+nav.toc a,.mobile-toc a{display:grid;grid-template-columns:28px 1fr;padding:5px 0;color:var(--ink-2);text-decoration:none;font-size:14.5px;line-height:1.4}
+nav.toc a::before,.mobile-toc a::before{content:counter(s,decimal-leading-zero);font:500 12px/1.9 var(--mono);color:var(--ink-3)}
+nav.toc a:hover,nav.toc a.on{color:var(--struct)}
+main{min-width:0;padding:56px 0 120px}
+.prose{max-width:720px}
+section{padding-top:72px}
+section>header{display:grid;grid-template-columns:auto 1fr;gap:0 18px;align-items:baseline;max-width:720px;margin-bottom:12px}
+section>header .num{font:500 15px var(--mono);color:var(--struct);border:1.5px solid var(--struct);border-radius:var(--r-s);padding:2px 7px;transform:translateY(-4px)}
+h1,h2,h3,h4{line-height:1.2;letter-spacing:-.015em;margin:0}
+h1{font-size:clamp(2.3rem,5.4vw,3.9rem);font-weight:700;letter-spacing:-.03em;line-height:1.02;max-width:14ch;margin-bottom:20px}
+.lede{font-size:19px;color:var(--ink-2);max-width:56ch;margin-bottom:28px}
+h2{font-size:clamp(1.6rem,3vw,2.1rem);font-weight:650}
+h3{font-size:1.2rem;font-weight:600;margin:36px 0 8px}
+p{margin:0 0 14px}
+ul,ol.list{margin:0 0 16px;padding-left:22px}
+li{margin:4px 0}
+code{font:0.88em var(--mono);background:var(--struct-bg);color:var(--ink);padding:1px 5px;border-radius:3px}
+pre{font:13.5px/1.6 var(--mono);background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:var(--r-s);padding:14px 16px;overflow-x:auto;margin:0 0 18px;max-width:720px}
+pre code{background:none;padding:0}
+.tablewrap{overflow-x:auto;max-width:720px;margin:0 0 20px}
+table{border-collapse:collapse;width:100%;max-width:720px;margin:0 0 20px;font-size:15px;background:var(--surface)}
+.tablewrap table{margin:0;min-width:560px}
+th,td{text-align:left;padding:9px 12px;border:1px solid var(--rule);vertical-align:top}
+th{font-weight:600;background:var(--struct-bg)}
+
+/* widget frame: styled like a page, header strip = page header */
+.frame{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);margin:22px 0 28px;max-width:920px;overflow:hidden}
+.frame>.ph{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:9px 16px;border-bottom:1px solid var(--rule);background:var(--struct-bg);font-size:14px}
+.frame>.ph strong{font-weight:600}
+.frame>.ph .meta{margin-left:auto;font:500 12.5px var(--mono);color:var(--ink-2)}
+.frame .bd{padding:16px;min-width:0}
+.frame svg{display:block;width:100%;height:auto}
+.st-t{font:600 16px var(--sans);margin:0 0 8px}
+.desc{background:var(--paper);border-radius:var(--r-s);padding:12px 14px;margin-top:12px;min-height:84px;font-size:15.5px;color:var(--ink-2)}
+.desc pre{margin:10px 0 0;font-size:12.5px;border-left-color:var(--rule-strong)}
+.nav{display:flex;gap:8px;margin-top:12px;align-items:center}
+button{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 14px;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--struct);color:var(--struct)}
+button:disabled{opacity:.4;cursor:default}
+button.primary,button[aria-pressed="true"]{background:var(--struct);border-color:var(--struct);color:var(--surface)}
+button.primary:hover:not(:disabled),button[aria-pressed="true"]:hover{color:var(--surface);filter:brightness(1.1)}
+input,select{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 10px}
+input[type=number]{width:84px}
+input[type=range],input[type=checkbox]{accent-color:var(--struct)}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-top:12px}
+.stat{background:var(--paper);border-radius:var(--r-s);padding:8px 12px}
+.stat span{display:block;font-size:13px;color:var(--ink-2)}
+.stat b{font:600 20px var(--sans);font-variant-numeric:tabular-nums}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;color:var(--ink-2);margin-top:12px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:14px;height:14px;border-radius:3px;border:2px solid;display:inline-block}
+.fine{font-size:13.5px;color:var(--ink-2);margin:10px 0 0}  /* chú thích nhỏ dưới widget */
+
+/* svg text */
+.tb{font:600 14px var(--sans)} .t{font:400 13px var(--sans)} .ts{font:400 12px var(--sans)} .tm{font:500 12.5px var(--mono)}
+.lbl{fill:var(--ink-2);font:400 12.5px var(--sans)}
+
+/* callouts */
+.note{border-left:3px solid var(--hot-line);background:var(--hot-bg);padding:12px 16px;border-radius:0 var(--r-s) var(--r-s) 0;margin:18px 0;max-width:720px;font-size:16px}
+.note strong{color:var(--hot)}
+.senior{border:1.5px solid var(--struct);border-radius:var(--r-m);padding:14px 18px;margin:22px 0;max-width:720px;background:var(--surface)}
+.senior h4{font-size:16px;margin-bottom:6px;color:var(--struct)}
+.senior p:last-child,.senior ul:last-child{margin-bottom:0}
+details{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-s);padding:10px 14px;margin:10px 0;max-width:720px}
+details summary{cursor:pointer;font-weight:600}
+details[open] summary{margin-bottom:8px}
+details.answer{background:var(--paper);border-style:dashed;margin:10px 0 0}
+details.answer summary{font-weight:500;color:var(--struct)}
+.tag{display:inline-block;font:500 12px var(--sans);color:var(--ink-2);border:1px solid var(--rule-strong);border-radius:999px;padding:0 8px;margin-right:6px;vertical-align:1px}
+
+/* hero brief: mục tiêu, cần biết trước, trạng thái */
+.brief{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px 24px;background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);padding:14px 18px;max-width:920px;margin:0 0 8px;font-size:15px}
+.brief h4{font-size:14px;color:var(--struct);margin:0 0 4px}
+.brief ul{margin:0;padding-left:18px}
+.brief p{margin:0}
+
+.mobile-toc{display:none}
+@media (max-width:900px){
+  .shell{grid-template-columns:1fr;padding:0 16px;gap:0}
+  nav.toc{display:none}
+  .mobile-toc{display:block;margin-top:20px}
+  main{padding-top:32px}
+  .frame .bd{padding:12px}
+  body{font-size:16px}
+}
+
+
+/* ---- page widgets ---- */
+.n rect{fill:var(--surface);stroke:var(--rule-strong);stroke-width:1}
+.n text{fill:var(--ink)}
+.n.struct rect{fill:var(--struct-bg);stroke:var(--struct)} .n.struct text{fill:var(--struct)}
+.n.row rect{fill:var(--row-bg);stroke:var(--row);stroke-width:1.6} .n.row text{fill:var(--row)}
+.n.hot rect{fill:var(--hot-bg);stroke:var(--hot);stroke-width:2} .n.hot text{fill:var(--hot)}
+.n.miss rect{fill:var(--miss-bg);stroke:var(--miss);stroke-width:2} .n.miss text{fill:var(--miss)}
+.n.path rect{fill:var(--path-bg);stroke:var(--path);stroke-width:2.4} .n.path text{fill:var(--path)}
+.n.key rect{fill:var(--key-bg);stroke:var(--key);stroke-width:2} .n.key text{fill:var(--key)}
+.n.dim rect{fill:var(--paper);stroke:var(--rule)} .n.dim text{fill:var(--ink-3)}
+.edge{stroke:var(--rule-strong);stroke-width:1.2;fill:none}
+.edge.on{stroke:var(--path);stroke-width:2.6}
+.lg-path{border-color:var(--path);background:var(--path-bg)} .lg-row{border-color:var(--row);background:var(--row-bg)}
+.lg-miss{border-color:var(--miss);background:var(--miss-bg)} .lg-hot{border-color:var(--hot);background:var(--hot-bg)}
+.calc{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px 14px;margin-bottom:12px}
+.calc label{display:flex;flex-direction:column;gap:4px;font-size:13.5px;color:var(--ink-2)}
+.calc label.chk{flex-direction:row;align-items:center;gap:8px}
+.calc input[type=text]{width:100%}
+.stat b.bad{color:var(--miss)} .stat b.good{color:var(--row)}
+.log{font:12.5px/1.6 var(--mono);background:var(--paper);border-radius:var(--r-s);padding:8px 12px;margin:10px 0 0;min-height:60px;list-style:none}
+.log li{margin:0}
+.btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:12px 18px;margin-top:12px}
+@media (max-width:640px){.cols{grid-template-columns:1fr}}
+.colh{font-size:14px;font-weight:600;margin:0 0 6px}
+.pg{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin:0 0 6px}
+.pgn{font:500 12px var(--mono);color:var(--ink-3);width:64px}
+.chip{font:500 12.5px var(--mono);padding:2px 7px;border-radius:var(--r-s);border:1.5px solid var(--rule-strong);background:var(--surface)}
+.chip.row{border-color:var(--row);background:var(--row-bg);color:var(--row)}
+.chip.hot{border-color:var(--hot);background:var(--hot-bg);color:var(--hot)}
+.chip.miss{border-color:var(--miss);background:var(--miss-bg);color:var(--miss)}
+.chip.path{border-color:var(--path);background:var(--path-bg);color:var(--path)}
+.bar{stroke:none} .bar.miss{fill:var(--miss)} .bar.hot{fill:var(--hot-line)} .bar.row{fill:var(--row)}
+/* bài toán thực tế: dạng phỏng vấn */
+.case{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:0 var(--r-m) var(--r-m) 0;padding:16px 20px;margin:22px 0;max-width:720px}
+.case>h3{margin:0 0 6px;font-size:1.15rem}
+.case .src{font-size:13.5px;color:var(--ink-2);margin:0 0 12px}
+.case .ctx{background:var(--paper);border:1px solid var(--rule);border-radius:var(--r-m);padding:10px 14px;margin:8px 0 0;font-size:15px}
+.case .ctx-h{margin:0 0 4px;font-weight:600;color:var(--struct)}
+.case .ctx ul{margin:0;padding-left:20px}
+.case .ctx li{margin:2px 0}
+.case .q{margin:10px 0 4px;padding:8px 0 8px 14px;border-left:3px solid var(--key);font-size:1.06rem;font-weight:500;color:var(--ink);max-width:none}
+.case details{max-width:none;margin:12px 0 0}
+.case details.answer[open]{background:var(--surface)}
+.case details.clar>summary,.case details.rubric>summary{color:var(--key)}
+.case .fu{margin:18px 0 0;padding-top:14px;border-top:1px solid var(--rule)}
+.case .fq{margin:0;font-weight:500}
+.case .fq b{color:var(--struct);margin-right:4px}
+.ah{font-size:15.5px;color:var(--struct);margin:20px 0 6px}
+.answer .tablewrap{max-width:none}
+@media (max-width:900px){.case{padding:14px}}
+</style>
+</head>
+<body>
+
+<div class="shell">
+<nav class="toc" aria-label="Mục lục">
+  <p>Phân trang</p>
+  <ol>
+    <li><a href="#s1">Bản chất vấn đề</a></li>
+    <li><a href="#s2">Cơ chế hoạt động</a></li>
+    <li><a href="#s3">Vì sao thiết kế như vậy</a></li>
+    <li><a href="#s4">Ví dụ</a></li>
+    <li><a href="#s5">Thí nghiệm</a></li>
+    <li><a href="#s6">Ảnh hưởng khi chạy production</a></li>
+    <li><a href="#s7">Hiểu lầm thường gặp</a></li>
+    <li><a href="#s8">Câu hỏi ôn tập</a></li>
+    <li><a href="#s9">Bài toán thực tế</a></li>
+    <li><a href="#s10">Câu hỏi còn mở</a></li>
+    <li><a href="#s11">Tài liệu tham khảo</a></li>
+  </ol>
+</nav>
+
+<main>
+<div class="hero">
+<h1>Phân trang: offset và keyset</h1>
+<p class="lede"><code>LIMIT 20 OFFSET 10000</code> trông như "lấy 20 dòng", nhưng MySQL đọc 10.020 dòng rồi bỏ 10.000. Và khi có đơn mới chen vào trong lúc người dùng cuộn, trang sau lặp lại một dòng đã thấy. Bài này so offset với keyset (phân trang theo khoá): chi phí theo độ sâu, vì sao cần tie-breaker, cách viết điều kiện keyset để MySQL thật sự dùng được index, và cách thiết kế cursor cho API. Các con số lấy từ một bảng 200.000 dòng chạy trong sandbox.</p>
+<div class="brief">
+  <div><h4>Mục tiêu</h4><ul>
+    <li>Ước lượng được số dòng một câu <code>OFFSET</code> phải đọc ở độ sâu bất kỳ, và giải thích vì sao keyset đọc số dòng không đổi.</li>
+    <li>Viết đúng điều kiện keyset trên MySQL: thứ tự toàn phần có tie-breaker, dạng <code>OR</code> mở rộng, index khớp với filter và thứ tự sắp xếp.</li>
+    <li>Thiết kế cursor cho API: mờ với client, gắn với filter và sort, đi được hai chiều.</li>
+    <li>Chọn được giữa offset, keyset, deferred join và các cách khác cho từng màn hình.</li>
+  </ul></div>
+  <div><h4>Cần biết trước</h4><ul>
+    <li><a href="../composite-index-query-plan/index.html">Composite index và query plan</a>: leftmost prefix, <code>Using filesort</code>.</li>
+    <li><a href="../clustered-vs-secondary-index/index.html">Clustered và secondary index</a>: secondary index chứa PK, tra ngược về PRIMARY.</li>
+    <li><a href="../validation-error-contracts/index.html">Validation và hợp đồng lỗi</a>: validate query, hợp đồng API.</li>
+  </ul></div>
+  <div><h4>Trạng thái</h4><p>Level 2 (prov.). <code>Handler_read_prev</code>, thời gian và <code>EXPLAIN</code> đo trên sandbox của Claude (MySQL 8.0.46, bảng 200.000 dòng, buffer pool ấm). Chưa đo trên lab 8.4 với 5 triệu dòng (E52–E54).</p></div>
+</div>
+<details class="mobile-toc"><summary>Mục lục</summary><ol><li><a href="#s1">Bản chất vấn đề</a></li><li><a href="#s2">Cơ chế hoạt động</a></li><li><a href="#s3">Vì sao thiết kế như vậy</a></li><li><a href="#s4">Ví dụ</a></li><li><a href="#s5">Thí nghiệm</a></li><li><a href="#s6">Ảnh hưởng khi chạy production</a></li><li><a href="#s7">Hiểu lầm thường gặp</a></li><li><a href="#s8">Câu hỏi ôn tập</a></li><li><a href="#s9">Bài toán thực tế</a></li><li><a href="#s10">Câu hỏi còn mở</a></li><li><a href="#s11">Tài liệu tham khảo</a></li></ol></details>
+</div>
+
+<!-- 1 -->
+<section id="s1">
+<header><span class="num">01</span><h2>Bản chất vấn đề</h2></header>
+<div class="prose">
+<p>Màn hình "Đơn hàng của tôi" hiện đơn mới nhất trước, mỗi trang 20 đơn. Cách viết đầu tiên ai cũng nghĩ ra:</p>
+</div>
+<pre><code>SELECT id, created_at, total_minor FROM orders
+ WHERE user_id = ? ORDER BY created_at DESC, id DESC
+ LIMIT 20 OFFSET ?;          -- trang n: OFFSET = (n − 1) × 20</code></pre>
+<div class="prose">
+<p>Nó có hai vấn đề. Một: <strong>chi phí tăng theo độ sâu</strong>. MySQL không biết dòng thứ 10.000 nằm ở đâu trong index; nó phải đi qua 10.000 entry để tới đó. Hai: <strong>trang trôi</strong>. Offset đếm vị trí, không đánh dấu dòng. Có một đơn mới chen vào đầu danh sách thì mọi dòng lùi một vị trí, và trang sau bắt đầu bằng dòng cuối của trang trước.</p>
+<p>Keyset nhớ dòng cuối cùng đã thấy, rồi hỏi "20 dòng ngay sau dòng này". Giống đánh dấu trang sách bằng một mẩu giấy kẹp vào trang, thay vì nhớ "tôi đang ở trang 37": ai đó thêm vài trang vào đầu sách thì mẩu giấy vẫn đúng chỗ.</p>
+<p>Hai người cùng đọc một danh sách 16 đơn, mỗi trang 4 đơn: một người dùng offset, một người dùng keyset. Bấm "Trang tiếp", rồi thêm hoặc xoá đơn giữa chừng.</p>
+</div>
+<div class="frame" id="drift">
+  <div class="ph"><strong>Hai người đọc cùng một danh sách</strong><span class="meta" id="drMeta"></span></div>
+  <div class="bd">
+    <div class="btns" id="drBtns"></div>
+    <div class="cols">
+      <div><p class="colh">Offset: <code>LIMIT 4 OFFSET 4×(n−1)</code></p><div id="drOff"></div></div>
+      <div><p class="colh">Keyset: <code>WHERE id &lt; cursor LIMIT 4</code></p><div id="drKey"></div></div>
+    </div>
+    <div class="stats" id="drStats"></div>
+    <ul class="log" id="drLog" aria-live="polite"></ul>
+    <div class="legend"><span><i class="lg-row"></i>thấy lần đầu</span><span><i class="lg-hot"></i>thấy lần thứ hai (trùng)</span><span><i class="lg-miss"></i>bị bỏ sót</span><span><i class="lg-path"></i>đơn mới chen vào</span></div>
+    <p class="fine">Đơn sắp theo <code>id</code> giảm dần (id tăng theo thời gian tạo). "Dòng đọc" là số entry index đi qua: offset đọc <code>OFFSET + LIMIT</code>, keyset đọc <code>LIMIT</code>. Mô hình; chưa đo (E54).</p>
+  </div>
+</div>
+</section>
+
+<!-- 2 -->
+<section id="s2">
+<header><span class="num">02</span><h2>Cơ chế hoạt động</h2></header>
+<div class="prose">
+<h3>OFFSET đọc rồi bỏ</h3>
+<p>Ý chính: <code>OFFSET n</code> bắt MySQL đi qua <code>n</code> entry đầu tiên theo thứ tự của index rồi vứt đi. Nếu câu cần cột không có trong index, mỗi entry đó còn tốn một lần tra PRIMARY. Chi phí tăng tuyến tính theo độ sâu.</p>
+<p>Leaf page (page ở tầng dưới cùng của cây, nơi chứa entry thật) của InnoDB không lưu "đây là entry thứ mấy". Muốn tới vị trí thứ 10.000, chỉ có cách đếm. Trên sandbox, với index <code>(user_id, created_at)</code> và người dùng có 20.200 đơn:</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu</th><th><code>Handler_read_prev</code></th><th>Lần đọc page trong buffer pool</th><th>Thời gian</th></tr></thead>
+<tbody>
+<tr><td><code>OFFSET 0</code></td><td>19</td><td></td><td>0,27 ms</td></tr>
+<tr><td><code>OFFSET 1000</code></td><td>1.019</td><td></td><td>1,8 ms</td></tr>
+<tr><td><code>OFFSET 5000</code></td><td>5.019</td><td></td><td>7,9 ms</td></tr>
+<tr><td><code>OFFSET 10000</code></td><td>10.019</td><td>30.419</td><td>19,7 ms</td></tr>
+<tr><td><code>OFFSET 20000</code></td><td>20.019</td><td></td><td>44,6 ms</td></tr>
+<tr><td>Deferred join, <code>OFFSET 10000</code></td><td></td><td>74</td><td>3,3 ms</td></tr>
+<tr><td>Keyset, dạng <code>OR</code> mở rộng</td><td>19</td><td></td><td>0,09 ms</td></tr>
+</tbody></table></div>
+<p class="fine">Sandbox của Claude: MySQL 8.0.46, bảng <code>orders</code> 200.000 dòng, buffer pool ấm, <code>FORCE INDEX(idx_user_created)</code> để plan ổn định, thời gian từ <code>EXPLAIN ANALYZE</code>. Đọc ngược vì <code>ORDER BY … DESC</code> (Backward index scan), nên counter là <code>read_prev</code>. Không phải số đo của lab.</p>
+<div class="prose">
+<p>Deferred join (join trì hoãn) là cách cứu offset khi bắt buộc phải nhảy trang: subquery chỉ lấy <code>id</code> từ index nên không tra PRIMARY cho 10.000 dòng bị bỏ; chỉ 20 dòng cuối được tra. Nó vẫn đi qua 10.020 entry, nhưng rẻ hơn khoảng 400 lần về số page. Thử với các độ sâu khác:</p>
+</div>
+<div class="frame" id="cost">
+  <div class="ph"><strong>Chi phí theo độ sâu</strong><span class="meta" id="coMeta"></span></div>
+  <div class="bd">
+    <div class="calc">
+      <label>Trang số<input id="coP" type="number" min="1" max="1000000" value="500"></label>
+      <label>Kích thước trang<input id="coL" type="number" min="1" max="500" value="20"></label>
+      <label>Cột cần lấy<select id="coC"><option value="row" selected>Cột ngoài index (tra PRIMARY)</option><option value="idx">Chỉ cột trong index</option></select></label>
+    </div>
+    <svg id="coSvg" viewBox="0 0 680 150" role="img" aria-label="Số entry phải đọc của offset, deferred join và keyset ở trang đang chọn"></svg>
+    <div class="stats" id="coStats"></div>
+    <p class="fine">Ước lượng tuyến tính từ số đo sandbox ở trên: khoảng 2 µs mỗi entry khi phải tra PRIMARY, khoảng 0,33 µs khi chỉ đọc index. Trên bảng lớn hơn buffer pool, phần đọc disk làm offset tệ hơn nhiều. Chưa đo trên lab (E52).</p>
+  </div>
+</div>
+
+<div class="prose">
+<h3>Keyset cần thứ tự toàn phần</h3>
+<p>Ý chính: cột dùng để sắp xếp phải xác định duy nhất một vị trí. <code>created_at</code> có thể trùng; thêm <code>id</code> làm tie-breaker (cột phụ phân định khi bằng nhau) thì không còn trùng.</p>
+<p>Trên sandbox, người dùng 7 có từng cặp đơn cùng <code>created_at</code>. Trang trước kết thúc ở đơn <code>id = 101010</code>, <code>created_at = 01:24:10</code>. Đơn <code>101000</code> cùng giây đó, chưa được thấy. Đi qua ba cách viết điều kiện.</p>
+</div>
+<div class="frame" id="ties"></div>
+<div class="legend"><span><i class="lg-path"></i>dòng cuối của trang trước (cursor)</span><span><i class="lg-row"></i>trang sau lấy đúng</span><span><i class="lg-hot"></i>lấy trùng</span><span><i class="lg-miss"></i>bị bỏ sót</span></div>
+<div class="note"><strong>Lỗi hay gặp:</strong> dùng <code>created_at</code> làm cursor vì "hai đơn không thể tạo cùng mili giây". Import hàng loạt, đồng hồ của nhiều server, cột <code>DATETIME</code> không có phần lẻ của giây đều tạo ra trùng. Quy tắc: cursor luôn kết thúc bằng một cột duy nhất (thường là PK), và <code>ORDER BY</code> có đủ các cột đó theo cùng thứ tự.</div>
+
+<div class="prose">
+<h3>Viết điều kiện keyset trên MySQL</h3>
+<p>Ý chính: viết <code>created_at &lt; ? OR (created_at = ? AND id &lt; ?)</code>, không viết <code>(created_at, id) &lt; (?, ?)</code>. Hai câu cùng nghĩa, nhưng trên sandbox 8.0.46 MySQL không biến dạng row constructor (so sánh cả bộ giá trị) thành range trên index, nên nó đọc từ đầu như offset.</p>
+<p>Manual 8.4 (Row Constructor Expression Optimization) cảnh báo rằng optimizer ít dùng index hơn khi row constructor không phủ một prefix của index, và khuyên viết lại thành dạng không có row constructor. Sandbox cho thấy còn hơn thế: kể cả khi row constructor khớp đúng prefix của index <code>(created_at, id)</code>, câu vẫn quét cả index.</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Điều kiện (sau <code>WHERE user_id = 7</code>)</th><th><code>type</code></th><th><code>key_len</code></th><th><code>Handler_read_prev</code></th><th>Thời gian</th></tr></thead>
+<tbody>
+<tr><td><code>AND (created_at, id) &lt; ('…01:24:10', 101000)</code></td><td><code>ref</code></td><td>4 (chỉ <code>user_id</code>)</td><td>10.019</td><td>19,9 ms</td></tr>
+<tr><td><code>AND (created_at &lt; '…01:24:10' OR (created_at = '…01:24:10' AND id &lt; 101000))</code></td><td><code>range</code></td><td>19 (cả ba phần)</td><td>19</td><td>0,09 ms</td></tr>
+<tr><td>Không lọc user, index <code>(created_at, id)</code>: <code>(created_at, id) &lt; (…)</code></td><td><code>index</code> (quét cả index)</td><td>15</td><td>99.020</td><td></td></tr>
+<tr><td>Như trên, dạng <code>OR</code> mở rộng</td><td><code>range</code></td><td></td><td>19</td><td></td></tr>
+</tbody></table></div>
+<p class="fine">Sandbox 8.0.46. <code>key_len</code> 19 = 4 (<code>INT user_id</code>) + 7 (<code>DATETIME(3)</code>) + 8 (<code>BIGINT id</code>, phần PK ẩn trong secondary index). Kiểm tra lại trên 8.4 ở E53 (câu hỏi mở 43).</p>
+
+<div class="prose">
+<h3>Index phải khớp cả filter lẫn thứ tự</h3>
+<p>Ý chính: keyset chỉ rẻ khi MySQL đọc theo đúng thứ tự của index và dừng sau 20 dòng. Điều đó cần index bắt đầu bằng các cột lọc bằng <code>=</code>, rồi tới các cột sắp xếp theo đúng thứ tự. Thiếu một trong hai thì MySQL phải đọc hết các dòng khớp filter rồi sắp xếp (<code>Using filesort</code>).</p>
+<p>Chọn filter, thứ tự và index để xem MySQL dừng sớm được không.</p>
+</div>
+<div class="frame" id="ix">
+  <div class="ph"><strong>Index này có giúp keyset không</strong><span class="meta" id="ixMeta"></span></div>
+  <div class="bd">
+    <div class="calc">
+      <label>Lọc<select id="ixF"><option value="u">user_id = 7</option><option value="us">user_id = 7 AND status = 'paid'</option><option value="none">không lọc (toàn bộ)</option></select></label>
+      <label>Sắp xếp<select id="ixS"><option value="c">created_at DESC, id DESC</option><option value="t">total_minor DESC, id DESC</option></select></label>
+      <label>Index<select id="ixI"><option value="uc">(user_id, created_at)</option><option value="usc">(user_id, status, created_at)</option><option value="c">(created_at)</option><option value="ut">(user_id, total_minor)</option></select></label>
+    </div>
+    <svg id="ixSvg" viewBox="0 0 680 80" role="img" aria-label="Các cột của index, phần dùng cho lọc và phần dùng cho thứ tự được tô màu"></svg>
+    <div class="stats" id="ixStats"></div>
+    <div class="desc" aria-live="polite" id="ixDesc"></div>
+    <p class="fine">Bảng sandbox: 200.000 đơn, người dùng 7 có 20.200 đơn, một phần ba là <code>paid</code>. Số entry đọc cho 20 dòng là ước lượng theo quy tắc của index; ba ô đã đo trên sandbox được đánh dấu "đo".</p>
+  </div>
+</div>
+
+<div class="prose">
+<h3>Cursor trong API</h3>
+<p>Ý chính: client nhận một chuỗi mờ (opaque) và gửi lại nguyên văn. Server giải mã ra giá trị của các cột sắp xếp, kiểm tra nó còn khớp filter và sort hiện tại, rồi dùng làm điều kiện keyset.</p>
+<ul>
+<li><strong>Nội dung:</strong> phiên bản định dạng, tên kiểu sắp xếp, giá trị các cột của dòng cuối, và một hash của filter. Mã hoá base64url. Client không được tự tạo hay sửa cursor.</li>
+<li><strong>Còn trang sau không:</strong> lấy <code>LIMIT 21</code>, trả 20; có dòng thứ 21 thì có <code>nextCursor</code>. Không cần <code>COUNT(*)</code>.</li>
+<li><strong>Trang trước:</strong> đảo dấu so sánh và thứ tự (<code>&gt;</code>, <code>ASC</code>), lấy 21, rồi đảo lại kết quả trước khi trả.</li>
+<li><strong>Đổi filter hay sort:</strong> hash không khớp thì trả 400 <code>CURSOR_MISMATCH</code>; client bắt đầu lại từ trang đầu.</li>
+<li><strong>Tổng số:</strong> chỉ trả khi màn hình thật sự cần, và nói rõ là ước lượng hay chính xác (bài toán C36).</li>
+</ul>
+</div>
+</section>
+
+<!-- 3 -->
+<section id="s3">
+<header><span class="num">03</span><h2>Vì sao thiết kế như vậy</h2></header>
+<div class="prose">
+<p><strong>Vì sao database không nhảy thẳng tới dòng thứ 10.000?</strong> Muốn vậy, mỗi page trong cây phải lưu số entry của các nhánh con (cây có đếm, order-statistic tree). Mọi lần chèn hay xoá sẽ phải cập nhật các số đếm đó tới tận gốc, và các page gần gốc thành điểm tranh chấp. InnoDB và PostgreSQL đều chọn không làm, nên <code>OFFSET</code> luôn là đếm.</p>
+<p><strong>Vì sao keyset không đổi chi phí?</strong> Điều kiện <code>created_at &lt; ? OR (…)</code> là một khoảng trên index. MySQL đi xuống cây tới đúng vị trí đó (vài page) rồi đọc 20 entry. Độ sâu không còn trong công thức.</p>
+<p><strong>Keyset mất gì?</strong> Không nhảy được tới trang 37. Không có "tổng số trang" miễn phí. Cursor gắn với một thứ tự cố định, nên đổi sort là bắt đầu lại. Và nếu cột sắp xếp tự thay đổi giá trị (điểm, lượt thích), một dòng có thể nhảy qua cursor và bị thấy hai lần hoặc không lần nào (bài toán C35).</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Cách</th><th>Chi phí trang sâu</th><th>Ổn định khi dữ liệu đổi</th><th>Nhảy trang, tổng số</th><th>Hợp khi</th></tr></thead>
+<tbody>
+<tr><td>Offset</td><td>Tăng tuyến tính</td><td>Trùng và sót</td><td>Có</td><td>Danh sách nhỏ, trang admin ít dùng</td></tr>
+<tr><td>Offset với deferred join</td><td>Tăng tuyến tính nhưng chỉ đọc index</td><td>Trùng và sót</td><td>Có</td><td>Bắt buộc nhảy trang trên bảng vừa</td></tr>
+<tr><td>Keyset</td><td>Không đổi</td><td>Ổn định nếu cột sắp xếp không đổi giá trị</td><td>Không</td><td>Feed, infinite scroll, API công khai, export</td></tr>
+<tr><td>Snapshot danh sách id</td><td>Không đổi sau lần chụp</td><td>Ổn định tuyệt đối trong phiên</td><td>Có, trong snapshot</td><td>Sort theo giá trị thay đổi, kết quả tìm kiếm</td></tr>
+<tr><td>Search engine (<code>search_after</code>)</td><td>Không đổi</td><td>Tuỳ cấu hình</td><td>Có giới hạn</td><td>Lọc nhiều chiều, tìm kiếm văn bản</td></tr>
+</tbody></table></div>
+<div class="prose"><p>PostgreSQL hiểu row constructor <code>(created_at, id) &lt; ($1, $2)</code> như so sánh theo thứ tự từ điển và dùng được index B-tree cho nó; trên PostgreSQL đó là cách viết khuyên dùng. Trên MySQL thì dùng dạng <code>OR</code> mở rộng.</p></div>
+</section>
+
+<!-- 4 -->
+<section id="s4">
+<header><span class="num">04</span><h2>Ví dụ</h2></header>
+<div class="prose"><p>Các câu SQL đã chạy trên sandbox (MySQL 8.0.46); code TypeScript chưa chạy.</p><h3>Trang đầu, trang sau, trang trước</h3></div>
+<pre><code>-- trang đầu: LIMIT 21 để biết còn trang sau không
+SELECT id, created_at, total_minor FROM orders
+ WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 21;
+
+-- trang sau: cursor = (created_at, id) của dòng cuối
+SELECT id, created_at, total_minor FROM orders
+ WHERE user_id = ?
+   AND (created_at &lt; ? OR (created_at = ? AND id &lt; ?))
+ ORDER BY created_at DESC, id DESC LIMIT 21;
+
+-- trang trước: cursor = dòng đầu của trang hiện tại; đảo dấu và thứ tự, rồi đảo kết quả trong code
+SELECT id, created_at, total_minor FROM orders
+ WHERE user_id = ?
+   AND (created_at &gt; ? OR (created_at = ? AND id &gt; ?))
+ ORDER BY created_at ASC, id ASC LIMIT 21;</code></pre>
+
+<div class="prose"><h3>Deferred join khi buộc phải dùng offset</h3></div>
+<pre><code>SELECT o.id, o.created_at, o.total_minor
+  FROM orders o
+  JOIN (SELECT id FROM orders WHERE user_id = ?
+         ORDER BY created_at DESC, id DESC LIMIT 20 OFFSET ?) t USING (id)
+ ORDER BY o.created_at DESC, o.id DESC;     -- sandbox, OFFSET 10000: 3,3 ms, 74 lần đọc page</code></pre>
+
+<div class="prose"><h3>Cursor mờ trong NestJS</h3></div>
+<pre><code>type Cursor = { v: 1; s: 'created_desc'; k: [string, string]; f: string };   // k: created_at ISO, id dạng chuỗi
+const enc = (c: Cursor) =&gt; Buffer.from(JSON.stringify(c)).toString('base64url');
+function dec(raw: string, sort: string, filterHash: string): Cursor {
+  let c: Cursor;
+  try { c = JSON.parse(Buffer.from(raw, 'base64url').toString()); } catch { throw new ProblemException(400, 'CURSOR_INVALID'); }
+  if (c.v !== 1 || c.s !== sort || c.f !== filterHash) throw new ProblemException(400, 'CURSOR_MISMATCH');
+  return c;
+}
+async listOrders(userId: bigint, q: { limit: number; cursor?: string; status?: string }) {
+  const f = hash({ userId, status: q.status ?? null });
+  const c = q.cursor ? dec(q.cursor, 'created_desc', f) : null;
+  const rows = await this.repo.page(userId, q.status, c?.k ?? null, q.limit + 1);
+  const page = rows.slice(0, q.limit), last = page.at(-1);
+  return {
+    items: page,
+    nextCursor: rows.length &gt; q.limit &amp;&amp; last ? enc({ v: 1, s: 'created_desc', k: [last.createdAt, String(last.id)], f }) : null,
+  };
+}</code></pre>
+<p class="prose"><code>id</code> đi trong cursor dạng chuỗi để không mất chính xác khi lớn hơn 2<sup>53</sup> (trang <a href="../layering-business-invariants/index.html">Phân tầng và bất biến</a>). <code>created_at</code> đi dạng chuỗi ISO có mili giây; làm tròn mất phần lẻ thì cursor không khớp đúng dòng.</p>
+</section>
+
+<!-- 5 -->
+<section id="s5">
+<header><span class="num">05</span><h2>Thí nghiệm</h2></header>
+<div class="prose"><p>Chạy trên lab: MySQL 8.4, bảng <code>orders</code> 5 triệu dòng. Viết dự đoán trước.</p></div>
+<details><summary>E52. Offset theo độ sâu, bảng lớn hơn buffer pool</summary>
+<p><strong>Câu hỏi.</strong> Với một người dùng có 200.000 đơn, ở <code>OFFSET</code> 0, 1.000, 10.000, 100.000, 199.980: <code>Handler_read_prev</code>, số lần đọc page từ disk (<code>Innodb_buffer_pool_reads</code>), thời gian, lần chạy đầu và lần chạy sau. So với deferred join và keyset ở cùng vị trí. Buffer pool 128 MB.</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e52/prediction.md</code></p>
+<p><strong>Chạy.</strong> <code>./lab.sh reads</code> quanh từng câu; khởi động lại server trước loạt "lần đầu".</p>
+<p><strong>Kết quả.</strong> Chưa chạy trên lab. Sandbox 200.000 dòng, buffer pool ấm: bảng ở phần 02.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+<details><summary>E53. Row constructor so với OR mở rộng trên 8.4</summary>
+<p><strong>Câu hỏi.</strong> Trên 8.4, <code>(created_at, id) &lt; (?, ?)</code> có thành range không, với index <code>(user_id, created_at)</code> có lọc user, và với index <code>(created_at, id)</code> không lọc? <code>EXPLAIN</code> (<code>type</code>, <code>key_len</code>) và <code>Handler_read_prev</code> so với dạng <code>OR</code>. Thêm biến thể có điều kiện thừa <code>created_at &lt;= ?</code> đứng trước.</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e53/prediction.md</code></p>
+<p><strong>Chạy.</strong> Bốn câu, mỗi câu <code>FLUSH STATUS</code> rồi đọc <code>Handler_read%</code>; <code>EXPLAIN FORMAT=TREE</code>.</p>
+<p><strong>Kết quả.</strong> Chưa chạy trên 8.4. Sandbox 8.0.46: row constructor không thành range trong cả hai trường hợp (phần 02).</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+<details><summary>E54. Phân trang trong lúc có người ghi</summary>
+<p><strong>Câu hỏi.</strong> Một script đọc hết 10.000 đơn của một người theo trang 50, trong khi script khác chèn 5 đơn và xoá 5 đơn mỗi giây cho người đó. Với offset và keyset: bao nhiêu dòng bị thấy hai lần, bao nhiêu dòng có từ đầu mà không được thấy?</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e54/prediction.md</code></p>
+<p><strong>Chạy.</strong> Hai script Node; đối chiếu danh sách id đã đọc với danh sách id lúc bắt đầu.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+</section>
+
+<!-- 6 -->
+<section id="s6">
+<header><span class="num">06</span><h2>Ảnh hưởng khi chạy production</h2></header>
+<div class="prose">
+<h3>Khi nào dùng gì</h3>
+<ul>
+<li>Danh sách của người dùng, feed, infinite scroll, API công khai, export: keyset.</li>
+<li>Trang admin cần nhảy trang và tổng số, dữ liệu vài nghìn dòng mỗi bộ lọc: offset vẫn ổn. Đặt trần cho offset (ví dụ không quá trang 500) và hướng người dùng dùng bộ lọc.</li>
+<li>Bắt buộc nhảy trang trên bảng lớn: deferred join, hoặc keyset kèm "nhảy tới ngày" thay vì "nhảy tới trang".</li>
+<li>Sắp xếp theo giá trị thay đổi, hoặc lọc nhiều chiều tuỳ ý: snapshot id hoặc search engine.</li>
+</ul>
+<h3>Cái giá</h3>
+<ul>
+<li>Mỗi kiểu sắp xếp keyset cần một index phù hợp: thêm chi phí ghi và dung lượng (trang <a href="../index-write-cost/index.html">Chi phí ghi của index</a>).</li>
+<li>API phải định nghĩa và giữ định dạng cursor như một phần của hợp đồng.</li>
+<li>Không có tổng số miễn phí; <code>COUNT(*)</code> đọc mọi entry khớp filter (sandbox: 20.200 cho một người).</li>
+</ul>
+<h3>Nhận ra trên production bằng gì</h3>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Triệu chứng</th><th>Xem ở đâu</th></tr></thead>
+<tbody>
+<tr><td>Trang sâu chậm, trang đầu nhanh</td><td>Slow log có <code>OFFSET</code> lớn; <code>Rows_examined</code> lớn hơn nhiều so với <code>Rows_sent</code></td></tr>
+<tr><td>Câu đọc nhiều dòng để trả ít dòng</td><td><code>performance_schema.events_statements_summary_by_digest</code>: tỉ lệ <code>SUM_ROWS_EXAMINED / SUM_ROWS_SENT</code></td></tr>
+<tr><td>Keyset vẫn chậm</td><td><code>EXPLAIN</code>: <code>type</code> là <code>ref</code> hay <code>index</code> thay vì <code>range</code>, <code>key_len</code> ngắn, <code>Using filesort</code></td></tr>
+<tr><td>Người dùng báo thấy trùng hoặc thiếu khi cuộn</td><td>Offset trên danh sách đang ghi; cursor thiếu tie-breaker; cột sắp xếp thay đổi giá trị</td></tr>
+<tr><td>Export chạy hàng giờ</td><td>Export dùng offset; mỗi trang chậm hơn trang trước</td></tr>
+</tbody></table></div>
+<div class="senior"><h4>Góc nhìn senior: hỏi màn hình cần gì trước khi chọn cách phân trang</h4><p>Ba câu hỏi quyết định: người dùng có thật sự cần nhảy tới trang 37 không, hay chỉ cần "xem thêm"? Họ cần tổng chính xác hay "hơn 10.000"? Danh sách có đổi trong lúc họ xem không? Phần lớn màn hình trả lời "xem thêm, không cần tổng chính xác, có đổi", và đó là keyset. Senior cũng đặt giới hạn: <code>limit</code> tối đa 100, offset tối đa có trần, để một request không thể bắt database đọc cả triệu dòng.</p></div>
+<div class="prose">
+<h3>Checklist khi review một endpoint danh sách</h3>
+<ul>
+<li><code>ORDER BY</code> có kết thúc bằng một cột duy nhất không?</li>
+<li>Điều kiện keyset viết dạng <code>OR</code> mở rộng, không dùng row constructor?</li>
+<li>Có index bắt đầu bằng các cột lọc <code>=</code> rồi các cột sắp xếp? <code>EXPLAIN</code> có <code>range</code> và không có <code>Using filesort</code>?</li>
+<li><code>limit</code> có trần? Có offset tối đa nếu dùng offset?</li>
+<li>Cursor có gắn với filter và sort, và trả lỗi rõ khi không khớp?</li>
+<li>Có <code>COUNT(*)</code> trên mỗi request không? Có cần thật không?</li>
+</ul>
+</div>
+</section>
+
+<!-- 7 -->
+<section id="s7">
+<header><span class="num">07</span><h2>Hiểu lầm thường gặp</h2></header>
+<div class="prose"><ul>
+<li><strong>Hiểu lầm:</strong> <code>LIMIT 20 OFFSET 10000</code> chỉ đọc 20 dòng. <strong>Vì sao sai:</strong> nó đọc 10.020 entry và có thể tra PRIMARY cho từng cái (<a href="#s2">phần 02</a>). <strong>Quy tắc:</strong> chi phí của offset tỉ lệ với độ sâu.</li>
+<li><strong>Hiểu lầm:</strong> keyset theo <code>created_at</code> là đủ. <strong>Vì sao sai:</strong> giá trị trùng làm sót (<code>&lt;</code>) hoặc trùng dòng (<code>&lt;=</code>). <strong>Quy tắc:</strong> thêm PK làm tie-breaker.</li>
+<li><strong>Hiểu lầm:</strong> <code>(a, b) &lt; (x, y)</code> và dạng <code>OR</code> chạy như nhau. <strong>Vì sao sai:</strong> trên MySQL (sandbox 8.0.46) row constructor không thành range. <strong>Quy tắc:</strong> viết dạng <code>OR</code>, kiểm tra <code>EXPLAIN</code>.</li>
+<li><strong>Hiểu lầm:</strong> có keyset thì không cần nghĩ tới index. <strong>Vì sao sai:</strong> index không khớp thứ tự thì MySQL đọc hết rồi filesort. <strong>Quy tắc:</strong> cột lọc <code>=</code> trước, cột sắp xếp sau.</li>
+<li><strong>Hiểu lầm:</strong> API danh sách phải trả tổng số. <strong>Vì sao sai:</strong> <code>COUNT(*)</code> đọc mọi dòng khớp, mỗi request. <strong>Quy tắc:</strong> dùng <code>LIMIT n + 1</code> để biết còn trang sau; tổng số chỉ khi cần, và có thể ước lượng.</li>
+</ul></div>
+</section>
+
+<!-- 8 -->
+<section id="s8">
+<header><span class="num">08</span><h2>Câu hỏi ôn tập</h2></header>
+<p class="prose">Viết ngày 2026-10-22. Đánh số Q107 đến Q112.</p>
+<details><summary><span class="tag">Dự đoán</span>Q107. Trang 501</summary>
+<p>Index <code>(user_id, created_at)</code>, câu lấy <code>id, created_at, total_minor</code>, sắp <code>created_at DESC, id DESC</code>, 20 dòng mỗi trang. Trang 501 đọc bao nhiêu entry index và tra PRIMARY bao nhiêu lần? Deferred join thì sao?</p>
+<details class="answer"><summary>Xem đáp án</summary><p><code>OFFSET 10000</code>: đọc 10.020 entry; <code>total_minor</code> không có trong index nên tra PRIMARY cho cả 10.020 (sandbox: 30.419 lần đọc page). Deferred join: subquery đọc 10.020 entry nhưng chỉ cần <code>id</code> (có sẵn trong secondary index), rồi tra PRIMARY 20 lần (sandbox: 74 lần đọc page).</p></details></details>
+<details><summary><span class="tag">Dự đoán</span>Q108. Cursor không có tie-breaker</summary>
+<p>Hai đơn cùng <code>created_at = 10:00:00</code>: <code>id</code> 501 và 500. Trang trước kết thúc ở 501. Trang sau dùng <code>WHERE created_at &lt; '10:00:00'</code>. Điều gì xảy ra? Dùng <code>&lt;=</code> thì sao?</p>
+<details class="answer"><summary>Xem đáp án</summary><p><code>&lt;</code> bỏ sót đơn 500. <code>&lt;=</code> lấy lại đơn 501 (trùng). Đúng: <code>created_at &lt; '10:00:00' OR (created_at = '10:00:00' AND id &lt; 501)</code>. Trên sandbox, với cursor <code>(01:24:10, 101010)</code>: <code>&lt;</code> còn 10.200 dòng, <code>&lt;=</code> 10.202, đúng là 10.201.</p></details></details>
+<details><summary><span class="tag">Giải thích</span>Q109. Row constructor</summary>
+<p>Vì sao <code>WHERE user_id = 7 AND (created_at, id) &lt; (?, ?)</code> chậm như offset trên MySQL, dù cùng nghĩa với dạng <code>OR</code>?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Optimizer không biến row constructor với <code>&lt;</code> thành một khoảng trên index. Nó chỉ dùng <code>user_id = 7</code> (<code>type: ref</code>, <code>key_len</code> 4), đọc từ đơn mới nhất trở xuống và kiểm tra điều kiện từng dòng sau khi tra PRIMARY. Đơn càng sâu thì càng nhiều dòng bị đọc rồi bỏ. Dạng <code>OR</code> cho <code>range</code> trên cả ba phần của index.</p></details></details>
+<details><summary><span class="tag">Chẩn đoán</span>Q110. Keyset vẫn chậm</summary>
+<p>Endpoint sắp đơn theo <code>total_minor DESC, id DESC</code>, dùng keyset đúng dạng <code>OR</code>. Index chỉ có <code>(user_id, created_at)</code>. Người dùng có 20.000 đơn. Vì sao mỗi trang vẫn mất vài chục mili giây?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Không có index theo <code>total_minor</code> trong phạm vi một user, nên MySQL đọc cả 20.000 đơn của người đó, áp điều kiện keyset, rồi sắp xếp để lấy 20 (<code>Using filesort</code>). Sandbox với câu không cursor: <code>Handler_read_next</code> 20.200. Cần index <code>(user_id, total_minor)</code> (PK được nối ngầm vào cuối, làm tie-breaker).</p></details></details>
+<details><summary><span class="tag">Giải thích</span>Q111. Có trang sau không</summary>
+<p>Làm sao biết còn trang sau mà không chạy <code>COUNT(*)</code>?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Lấy <code>LIMIT 21</code> khi trang có 20 dòng. Có dòng thứ 21 thì còn trang sau; trả 20 dòng và <code>nextCursor</code> từ dòng thứ 20. Chi phí thêm là một entry.</p></details></details>
+<details><summary><span class="tag">Chẩn đoán</span>Q112. Trùng khi cuộn</summary>
+<p>Feed dùng offset. Người dùng báo thấy cùng một bài hai lần khi cuộn vào giờ cao điểm, giờ thấp điểm thì không. Vì sao?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Giờ cao điểm có nhiều bài mới chen vào đầu feed giữa hai lần tải trang. Mỗi bài mới đẩy mọi bài lùi một vị trí, nên trang sau bắt đầu bằng bài cuối của trang trước. Keyset theo <code>(created_at, id)</code> sửa được, vì cursor là một dòng chứ không phải một vị trí.</p></details></details>
+</section>
+
+<!-- 9 -->
+<section id="s9">
+<header><span class="num">09</span><h2>Bài toán thực tế</h2></header>
+<div class="prose">
+<p>Mỗi bài là một vòng phỏng vấn system design cấp senior, khoảng 30–45 phút. Cách dùng:</p>
+<ol class="list">
+<li>Đọc bối cảnh và câu hỏi của interviewer. Bối cảnh là những gì interviewer nói lúc đầu: hệ thống, cách đang làm, quy mô, chuyện đã xảy ra. Viết ra những gì bạn sẽ hỏi thêm trước khi thiết kế, rồi mới mở "Hỏi lại interviewer" để xem câu hỏi nên hỏi và câu trả lời của interviewer: con số chính xác, yêu cầu, ràng buộc. Các con số ở đó dùng cho những câu sau.</li>
+<li>Với mỗi follow-up, tự trả lời (nói to hoặc viết ra) trong vài phút, rồi mới mở đáp án. Follow-up cuối luôn là triển khai và kiểm chứng: thiết kế đã chọn được làm ra sao, test gì, theo dõi gì, lùi lại thế nào.</li>
+<li>Cuối bài, dùng rubric để tự chấm: câu trả lời của bạn giống cột "mid" hay cột "senior", và có rơi vào red flag nào không.</li>
+</ol>
+<p>Đáp án là lập luận từ tài liệu, không phải số đo; con số trong đó là ước lượng. Viết ngày 2026-10-22.</p>
+</div>
+
+<!-- C34 -->
+<div class="case" id="c34">
+<h3>C34. Export 5 triệu giao dịch mất 6 giờ, file có dòng trùng và thiếu</h3>
+<p class="src">Dựa trên: phần 02 của trang này; <a href="../bullmq-workers-resumable/index.html">BullMQ và checkpoint</a>.</p>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> Cổng thanh toán, bảng <code>transactions</code> khoảng 400 triệu dòng, MySQL 8.4. Khách hàng doanh nghiệp xuất CSV giao dịch theo tháng.</li><li><strong>Đang làm:</strong> Job lặp <code>SELECT … WHERE merchant_id = ? AND created_at BETWEEN ? AND ? ORDER BY created_at LIMIT 1000 OFFSET ?</code> tới khi hết dòng.</li><li><strong>Quy mô:</strong> merchant lớn nhất có khoảng 5 triệu giao dịch mỗi tháng.</li><li><strong>Đã xảy ra:</strong> Export của merchant này mất 6 giờ; file có vài trăm dòng trùng và thiếu một số dòng; replica dùng cho export trễ 20 phút trong lúc chạy.</li></ul></div>
+<blockquote class="q">"Hãy thiết kế lại export."</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>Index trên bảng?</td><td>PK <code>id</code>, index <code>(merchant_id, created_at)</code>.</td><td>Thứ tự có thể đọc rẻ.</td></tr>
+<tr><td><code>created_at</code> có trùng không?</td><td>Có, kiểu <code>DATETIME</code> không phần lẻ; giờ cao điểm hàng trăm giao dịch mỗi giây.</td><td>Offset sắp theo cột có trùng thì thứ tự giữa các dòng trùng không cố định.</td></tr>
+<tr><td>Giao dịch của tháng cũ còn bị sửa không?</td><td>Có: hoàn tiền đổi <code>status</code>; dòng không bị xoá.</td><td>Ảnh chụp tại thời điểm nào?</td></tr>
+<tr><td>Export lấy những cột nào?</td><td>15 cột, phần lớn không có trong index.</td><td>Mỗi dòng bị bỏ qua cũng tốn một lần tra PRIMARY.</td></tr>
+<tr><td>Yêu cầu?</td><td>Đúng từng dòng, đầy đủ; xong trong 30 phút; không làm trễ replica quá 1 phút.</td><td>Ràng buộc về tốc độ và tải.</td></tr>
+<tr><td>Job chết thì sao?</td><td>Hiện chạy lại từ đầu.</td><td>Cần chạy tiếp được.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> hỏi <code>created_at</code> có trùng không. Thiếu và trùng trong file không đến từ "dữ liệu thay đổi" mà từ thứ tự không xác định.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Vì sao chậm, vì sao trùng và thiếu?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li><strong>Chậm:</strong> lần thứ k đọc <code>1000 × k</code> entry. 5.000 lần, tổng là khoảng 1000 × 5000² / 2 ≈ 12,5 tỉ entry, mỗi cái tra PRIMARY (ước lượng). Trang cuối đọc gần 5 triệu entry để lấy 1.000.</li>
+<li><strong>Trùng và thiếu:</strong> <code>ORDER BY created_at</code> không xác định thứ tự giữa các dòng cùng giây. Hai lần chạy câu với offset khác nhau có thể sắp các dòng trùng theo hai thứ tự khác nhau, nên một dòng xuất hiện ở hai trang và dòng khác ở không trang nào. Không cần ai ghi dữ liệu thì lỗi này vẫn xảy ra.</li>
+<li><strong>Replica trễ:</strong> câu đọc dài và nặng trên replica cạnh tranh I/O với luồng áp dụng thay đổi.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> Đề xuất thiết kế. So các cách.</p>
+<details class="answer"><summary>Đáp án</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>A. Thêm <code>id</code> vào <code>ORDER BY</code>, giữ offset</td><td>Hết trùng và thiếu do thứ tự</td><td>Vẫn bậc hai về chi phí</td></tr>
+<tr><td>B. Keyset theo <code>(created_at, id)</code> trên index <code>(merchant_id, created_at)</code>, lô 5.000</td><td>Chi phí mỗi lô không đổi; checkpoint là cursor</td><td>Mỗi dòng vẫn tra PRIMARY (cần cả 15 cột); tháng có sửa thì file là "trong lúc chạy", không phải một thời điểm</td></tr>
+<tr><td>C. B trong một transaction đọc <code>WITH CONSISTENT SNAPSHOT</code></td><td>File đúng tại một thời điểm</td><td>Giữ read view lâu, history list dài trên replica (trang MVCC)</td></tr>
+<tr><td>D. Đọc theo khoảng <code>id</code> (PK) rồi lọc merchant và ngày</td><td>Đọc theo clustered index, không tra ngược</td><td>Quét cả những dòng của merchant khác trong khoảng id: tệ khi merchant chiếm phần nhỏ</td></tr>
+</tbody></table></div>
+<p><strong>Chọn B</strong>, với mốc thời gian rõ: export ghi "dữ liệu tới thời điểm T", và các thay đổi trạng thái sau T đi vào báo cáo điều chỉnh. Không chọn C vì giữ snapshot 30 phút trên replica làm purge dừng. <strong>Khi nào đổi ý:</strong> merchant chiếm phần lớn bảng (một khách hàng gần như duy nhất) thì D rẻ hơn.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> Ước lượng thời gian của B.</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>5 triệu dòng, lô 5.000: 1.000 lô. Mỗi lô: vài page để đi xuống cây, 5.000 entry tuần tự trong secondary index, 5.000 lần tra PRIMARY.</li>
+<li>Lấy tỉ lệ sandbox khoảng 2 µs mỗi dòng khi buffer pool ấm: khoảng 10 giây cho cả 5 triệu dòng. Bảng 400 triệu dòng không nằm hết trong buffer pool, nên phần tra PRIMARY sẽ đọc disk: giả sử 20% dòng cần một lần đọc disk 0,2 ms, thêm khoảng 200 giây. Cộng ghi CSV và mạng: dưới 10 phút. Đây là ước lượng; phải đo trên bản sao thật.</li>
+<li>Để không làm trễ replica: nghỉ giữa các lô khi độ trễ replica vượt 30 giây.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> Job chết ở lô 600. Chạy tiếp thế nào mà không trùng dòng trong file?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Ghi file theo phần: mỗi lô một file phần trên object storage, tên theo số lô (<code>part-00600.csv</code>). Ghi đè cùng tên là idempotent.</li>
+<li>Checkpoint <code>(lô, created_at, id)</code> lưu trong bảng <code>exports</code> sau khi file phần đã ghi xong. Chết giữa hai việc thì lô đó được ghi lại, đè lên file cũ: không trùng.</li>
+<li>Xong hết thì nối các phần (hoặc multipart upload) thành file cuối.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai và kiểm chứng thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ol class="list">
+<li>Câu keyset dạng <code>OR</code> mở rộng; kiểm tra <code>EXPLAIN</code>: <code>range</code> trên <code>(merchant_id, created_at)</code>, <code>key_len</code> đủ ba phần.</li>
+<li>Job BullMQ với checkpoint trong MySQL như trang BullMQ; mỗi lô một file phần.</li>
+<li>Đối soát: số dòng trong file bằng <code>COUNT(*)</code> theo merchant và tháng tại thời điểm T; tổng tiền bằng <code>SUM</code>; không có <code>id</code> trùng trong file.</li>
+<li>Diễn tập: giết job ở lô ngẫu nhiên 3 lần; file cuối giống hệt lần chạy không sự cố.</li>
+<li>Metric: thời gian mỗi lô (phải phẳng, không tăng dần), độ trễ replica, số lần nghỉ vì replica trễ.</li>
+</ol>
+</details>
+</div>
+
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Chẩn đoán</td><td>"Offset chậm"</td><td>Chi phí bậc hai; trùng và thiếu do thứ tự không xác định, không do ghi</td></tr>
+<tr><td>Thiết kế</td><td>Tăng kích thước lô</td><td>Keyset có tie-breaker, mốc thời gian T, file theo phần</td></tr>
+<tr><td>Ước lượng</td><td>Không có</td><td>Tính theo số dòng và tỉ lệ đọc disk; nói rõ là ước lượng</td></tr>
+<tr><td>Bảo vệ hệ thống</td><td>Không nhắc</td><td>Theo dõi độ trễ replica, nghỉ giữa lô</td></tr>
+<tr><td>Kiểm chứng</td><td>Mở file xem thử</td><td>Đối soát số dòng, tổng tiền, id duy nhất; diễn tập giết job</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> giữ offset và chỉ tăng <code>LIMIT</code>; dùng row constructor rồi tưởng đã là keyset; mở một transaction snapshot 30 phút trên replica mà không nghĩ tới purge.</p>
+</details>
+</div>
+
+<!-- C35 -->
+<div class="case" id="c35">
+<h3>C35. Feed sắp theo điểm nổi bật, người dùng cuộn thấy bài lặp lại</h3>
+<p class="src">Dựa trên: phần 02 và 03 của trang này; <a href="../caching-invalidation/index.html">Caching và invalidation</a>.</p>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> Mạng xã hội nhỏ, feed "Nổi bật" sắp theo <code>score</code>, một cột được job cập nhật mỗi phút từ lượt thích và tuổi bài.</li><li><strong>Đang làm:</strong> Keyset theo <code>(score, id)</code> với index <code>(score, id)</code>.</li><li><strong>Quy mô:</strong> 2 triệu bài đang hoạt động, 300.000 người dùng mỗi ngày, trung bình cuộn 8 trang mỗi lần mở app.</li><li><strong>Đã xảy ra:</strong> Người dùng báo thấy bài lặp lại và có bài "biến mất" khi cuộn, dù đã dùng keyset có tie-breaker.</li></ul></div>
+<blockquote class="q">"Keyset đúng rồi mà sao vẫn lặp? Bạn thiết kế lại thế nào?"</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td><code>score</code> đổi nhanh cỡ nào?</td><td>Mỗi phút, với khoảng 15% bài đang hoạt động.</td><td>Cột sắp xếp tự đổi giá trị.</td></tr>
+<tr><td>Một lần cuộn kéo dài bao lâu?</td><td>Trung bình 4 phút, 8 trang.</td><td>Trong lúc cuộn có khoảng 4 lần cập nhật điểm.</td></tr>
+<tr><td>Feed có cá nhân hoá không?</td><td>Chưa; mọi người cùng một danh sách.</td><td>Một snapshot dùng chung được.</td></tr>
+<tr><td>Người dùng có cần thấy điểm mới nhất khi đang cuộn không?</td><td>Không; quan trọng là không lặp và cảm giác "mới".</td><td>Cho phép đóng băng thứ tự trong một phiên.</td></tr>
+<tr><td>Hạ tầng?</td><td>MySQL 8.4, Redis.</td><td>Chỗ để giữ snapshot.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> hỏi cột sắp xếp có đổi giá trị trong lúc cuộn không. Keyset chỉ đúng khi vị trí của một dòng trong thứ tự không đổi.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Giải thích vì sao lặp và mất.</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Cursor là <code>(score = 812, id = 9001)</code>. Trang sau lấy bài có <code>(score, id) &lt; (812, 9001)</code>.</li>
+<li>Một bài ở trang 1 có điểm 900 bị giảm xuống 700 trong phút đó: giờ nó nằm sau cursor và xuất hiện lại ở trang 3. Lặp.</li>
+<li>Một bài chưa thấy có điểm 600 được tăng lên 950: giờ nó nằm trước cursor; người dùng không bao giờ thấy. Mất.</li>
+<li>Tie-breaker giải quyết giá trị bằng nhau, không giải quyết giá trị di chuyển.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> So các cách sửa.</p>
+<details class="answer"><summary>Đáp án</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>A. Client lọc bỏ bài đã thấy</td><td>Dễ</td><td>Không chữa được bài bị mất; trang có thể gần rỗng</td></tr>
+<tr><td>B. Snapshot thứ tự: mỗi phút chụp top 2.000 id theo điểm vào Redis (một danh sách chung); cursor là (phiên bản snapshot, vị trí)</td><td>Thứ tự cố định trong phiên; trang nào cũng rẻ; nhảy vị trí được</td><td>Điểm trong phiên là điểm lúc chụp; cần giữ vài phiên bản snapshot</td></tr>
+<tr><td>C. Snapshot theo từng người khi mở feed</td><td>Cá nhân hoá được</td><td>300.000 danh sách; tốn bộ nhớ</td></tr>
+<tr><td>D. Sắp theo cột không đổi (thời gian), điểm chỉ dùng để lọc</td><td>Keyset đúng tuyệt đối</td><td>Không còn là "nổi bật"</td></tr>
+</tbody></table></div>
+<p><strong>Chọn B.</strong> Feed chưa cá nhân hoá, nên một snapshot dùng chung mỗi phút là đủ. Cursor mang phiên bản snapshot; phiên bản đó được giữ 15 phút để người đang cuộn đi hết. <strong>Khi nào đổi ý:</strong> khi feed cá nhân hoá, chuyển sang C với giới hạn độ dài và thời gian sống.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> Ước lượng bộ nhớ Redis cho B.</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Một snapshot: 2.000 id kiểu số 8 byte; trong Redis dạng list hoặc sorted set, cỡ vài chục KB (ước lượng, phụ thuộc kiểu mã hoá).</li>
+<li>Giữ 15 phiên bản (15 phút): dưới 1 MB. Không đáng kể.</li>
+<li>Người cuộn quá 2.000 bài: trang cuối của snapshot chuyển sang keyset theo <code>created_at</code> cho phần "cũ hơn", hoặc trả hết.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> Snapshot cũ hết hạn khi người dùng đang ở trang 6. Xử lý thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p>Server nhận cursor có phiên bản không còn. Không trả lỗi. Dùng snapshot mới nhất, bắt đầu từ vị trí tương ứng, và loại các id có trong một bộ lọc nhỏ của những gì client đã nhận (client gửi kèm, hoặc server giữ theo phiên). Người dùng có thể thấy thứ tự hơi khác nhưng không lặp. Ghi metric số lần xảy ra để chỉnh thời gian giữ snapshot.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai và kiểm chứng thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ol class="list">
+<li>Job mỗi phút: chụp top 2.000 vào <code>feed:hot:{version}</code>, hết hạn sau 15 phút; <code>feed:hot:current</code> trỏ tới bản mới nhất.</li>
+<li>Cursor <code>{v, version, pos}</code> mã hoá base64url; trang lấy id từ Redis theo vị trí rồi đọc bài từ MySQL bằng <code>WHERE id IN (…)</code> và sắp lại theo thứ tự của snapshot.</li>
+<li>Test: mô phỏng 8 trang trong lúc job đổi điểm 4 lần; không id nào lặp, mọi id trong snapshot ban đầu đều được thấy.</li>
+<li>Metric: tỉ lệ cursor gặp snapshot hết hạn, số bài lặp do client báo (nên về 0), thời gian một trang.</li>
+<li>Lùi lại: cờ cấu hình quay về keyset cũ.</li>
+</ol>
+</details>
+</div>
+
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Chẩn đoán</td><td>"Thiếu tie-breaker"</td><td>Cột sắp xếp tự đổi giá trị; keyset chỉ đúng với vị trí cố định</td></tr>
+<tr><td>Thiết kế</td><td>Client lọc trùng</td><td>Snapshot thứ tự có phiên bản; cursor mang phiên bản</td></tr>
+<tr><td>Ước lượng</td><td>Không có</td><td>Bộ nhớ snapshot, số phiên bản cần giữ</td></tr>
+<tr><td>Biên</td><td>Không nghĩ tới</td><td>Snapshot hết hạn, người cuộn quá dài</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> đổi sang offset; ngừng cập nhật điểm; tạo một snapshot cho mỗi người dùng mà không tính bộ nhớ.</p>
+</details>
+</div>
+
+<!-- C36 -->
+<div class="case" id="c36">
+<h3>C36. Trang admin cần "trang 1 / 48.213" và nút nhảy trang</h3>
+<p class="src">Dựa trên: phần 02, 03 và 06 của trang này; <a href="../capacity-estimation/index.html">Ước lượng capacity</a>.</p>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> Công cụ hỗ trợ khách hàng, màn hình danh sách đơn có 6 bộ lọc tuỳ chọn (trạng thái, khoảng ngày, cửa hàng, phương thức thanh toán, số tiền từ, số tiền đến).</li><li><strong>Đang làm:</strong> Mỗi lần mở trang chạy <code>SELECT … LIMIT 20 OFFSET ?</code> và <code>SELECT COUNT(*)</code> với cùng bộ lọc. Bảng <code>orders</code> 60 triệu dòng.</li><li><strong>Đã xảy ra:</strong> Không lọc gì thì <code>COUNT(*)</code> mất 9 giây; 40 nhân viên mở trang cùng lúc lúc 9 giờ sáng làm primary lên 90% CPU.</li></ul></div>
+<blockquote class="q">"Sản phẩm muốn giữ nguyên số tổng và nút nhảy trang. Bạn làm gì?"</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>Nhân viên dùng số tổng để làm gì?</td><td>Ước lượng khối lượng việc; không ai cần chính xác tới từng đơn.</td><td>Ước lượng là đủ.</td></tr>
+<tr><td>Có ai thật sự nhảy tới trang 30.000?</td><td>Log cho thấy 98% lượt xem ở 5 trang đầu; nhảy trang chủ yếu tới trang cuối để xem đơn cũ nhất.</td><td>"Trang cuối" là sort ngược, không phải offset sâu.</td></tr>
+<tr><td>Bộ lọc nào hay dùng?</td><td>Trạng thái và khoảng ngày chiếm 80%.</td><td>Index cho trường hợp phổ biến.</td></tr>
+<tr><td>Màn hình đọc từ đâu?</td><td>Primary.</td><td>Có thể chuyển sang replica.</td></tr>
+<tr><td>Dữ liệu cần mới tới mức nào?</td><td>Trễ vài phút là được.</td><td>Cho phép cache và replica.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> hỏi số tổng dùng để làm gì. Yêu cầu "giữ nguyên" thường là "cho tôi biết cỡ bao nhiêu".</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Vì sao <code>COUNT(*)</code> chậm, và 40 người mở cùng lúc thì sao?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>InnoDB không lưu số dòng chính xác của bảng (mỗi transaction có thể thấy một số khác nhau theo MVCC), nên <code>COUNT(*)</code> đi qua một index (thường là secondary index nhỏ nhất) và đếm. 60 triệu entry là vài giây.</li>
+<li>Có bộ lọc mà không có index phù hợp thì quét bảng.</li>
+<li>40 người, mỗi người vài lần tải trang mỗi phút, mỗi lần 9 giây CPU: nhiều luồng chạy song song, primary quá tải và ảnh hưởng tới mọi người dùng thật.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> Đề xuất cho số tổng.</p>
+<details class="answer"><summary>Đáp án</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>A. Cache kết quả <code>COUNT(*)</code> theo bộ lọc 5 phút</td><td>Ít thay đổi</td><td>Lần đầu của mỗi bộ lọc vẫn 9 giây; tổ hợp bộ lọc nhiều</td></tr>
+<tr><td>B. Đếm có trần: <code>SELECT COUNT(*) FROM (SELECT 1 … LIMIT 10001) t</code>, hiện "hơn 10.000"</td><td>Tối đa 10.001 entry mỗi lần</td><td>Không có con số lớn chính xác</td></tr>
+<tr><td>C. Ước lượng từ <code>EXPLAIN</code> (<code>rows</code>) hoặc bảng thống kê theo ngày và trạng thái</td><td>Tức thì; bảng thống kê chính xác cho bộ lọc phổ biến</td><td><code>EXPLAIN</code> có thể sai nhiều; bảng thống kê phải duy trì</td></tr>
+<tr><td>D. Đưa danh sách admin sang search engine</td><td>Đếm và lọc nhiều chiều tốt</td><td>Thêm hệ thống, đồng bộ dữ liệu</td></tr>
+</tbody></table></div>
+<p><strong>Chọn B cộng C.</strong> Bộ lọc phổ biến (trạng thái, ngày) đọc từ bảng đếm theo ngày và trạng thái, cập nhật bởi job hoặc khi ghi đơn. Các bộ lọc khác dùng đếm có trần và hiện "hơn 10.000". Màn hình ghi rõ "khoảng". <strong>Khi nào đổi ý:</strong> bộ lọc tự do ngày càng nhiều, nhu cầu tìm văn bản: D.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> Còn nút nhảy trang?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>"Trang cuối" thật ra là "cũ nhất trước": đảo thứ tự sắp xếp và lấy trang đầu, rẻ như trang 1.</li>
+<li>Nhảy trong 5 trang đầu: offset nhỏ, không có vấn đề.</li>
+<li>Nhảy sâu hiếm: deferred join với trần offset (ví dụ 10.000); quá trần thì gợi ý thêm bộ lọc ngày.</li>
+<li>Thay "nhảy tới trang N" bằng "nhảy tới ngày": khoảng ngày là điều kiện trên index, rẻ ở mọi độ sâu.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> Ước lượng tải sau thay đổi.</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Trước: mỗi lần tải trang tốn khoảng 9 giây CPU cho đếm (không lọc), cộng trang dữ liệu.</li>
+<li>Sau: đếm có trần đọc tối đa 10.001 entry. Lấy tỉ lệ sandbox khoảng 0,3 µs mỗi entry khi chỉ đọc index: khoảng 3 ms; bảng đếm: một câu đọc vài chục dòng. Trang dữ liệu: vài mili giây.</li>
+<li>Thêm: chuyển màn hình sang replica, vì trễ vài phút được chấp nhận. Primary gần như không còn chịu tải từ admin. Mọi con số là ước lượng; đo bằng digest của <code>performance_schema</code> trước và sau.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai và kiểm chứng thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ol class="list">
+<li>Index cho bộ lọc phổ biến: <code>(status, created_at)</code>; kiểm tra <code>EXPLAIN</code> cho 5 tổ hợp phổ biến nhất lấy từ log.</li>
+<li>Bảng <code>order_counts_daily (day, status, n)</code>, cập nhật trong cùng transaction khi đổi trạng thái, cộng job đối soát hằng đêm.</li>
+<li>API trả <code>{ total: { value, exact: boolean } }</code>; giao diện hiện "khoảng" hoặc "hơn 10.000".</li>
+<li>Kết nối đọc của công cụ admin trỏ tới replica.</li>
+<li>Theo dõi: CPU primary lúc 9 giờ, <code>SUM_TIMER_WAIT</code> và <code>SUM_ROWS_EXAMINED</code> của digest đếm, p95 tải trang admin. Hỏi lại nhân viên sau hai tuần.</li>
+</ol>
+</details>
+</div>
+
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Yêu cầu</td><td>Làm đúng như sản phẩm nói</td><td>Hỏi số tổng dùng để làm gì; nhảy trang thật sự là gì</td></tr>
+<tr><td>Đếm</td><td>Cache <code>COUNT(*)</code></td><td>Đếm có trần, bảng đếm cho bộ lọc phổ biến, nói rõ là ước lượng</td></tr>
+<tr><td>Nhảy trang</td><td>Giữ offset</td><td>"Trang cuối" là sort ngược; nhảy theo ngày; trần offset</td></tr>
+<tr><td>Bảo vệ primary</td><td>Không nhắc</td><td>Replica cho admin, đo bằng digest</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> thêm index cho mọi tổ hợp 6 bộ lọc; chạy <code>COUNT(*)</code> trên primary mỗi lần tải trang; tin <code>rows</code> của <code>EXPLAIN</code> là số chính xác.</p>
+</details>
+</div>
+</section>
+
+<!-- 10 -->
+<section id="s10">
+<header><span class="num">10</span><h2>Câu hỏi còn mở</h2></header>
+<p class="prose">Số thứ tự trùng với Open questions trong <code>.claude/docs/LEARNING_LOG.md</code>. Log là bản gốc.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>#</th><th>Câu hỏi</th><th>Trạng thái</th></tr></thead>
+<tbody>
+<tr><td>43</td><td>Trên MySQL 8.4, <code>(created_at, id) &lt; (?, ?)</code> có được range optimizer dùng không, kể cả khi khớp đúng prefix của index <code>(created_at, id)</code>? Sandbox 8.0.46 nói không (quét 99.020 entry thay vì 19).</td><td>Mở. E53.</td></tr>
+<tr><td>44</td><td>Trên sandbox, cùng câu <code>WHERE user_id = 7 ORDER BY created_at DESC, id DESC LIMIT 20</code> mà không có <code>FORCE INDEX</code> mất khoảng 4–6 ms và khoảng 11.000 lần đọc page, so với 0,3 ms khi có <code>FORCE INDEX</code>, dù <code>EXPLAIN</code> cùng một plan. Phần việc thêm nằm ở đâu?</td><td>Mở. Optimizer trace cho thấy plan được chọn lại cho <code>ORDER BY</code>; cần đo lại trên 8.4.</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- 11 -->
+<section id="s11">
+<header><span class="num">11</span><h2>Tài liệu tham khảo</h2></header>
+<div class="prose"><ul>
+<li><a href="https://dev.mysql.com/doc/refman/8.4/en/row-constructor-optimization.html">MySQL 8.4 Reference Manual, Row Constructor Expression Optimization</a></li>
+<li>MySQL 8.4 Reference Manual: LIMIT Query Optimization, ORDER BY Optimization, Range Optimization</li>
+<li>MySQL 8.4 Reference Manual: Server Status Variables (<code>Handler_read_next</code>, <code>Handler_read_prev</code>), <code>events_statements_summary_by_digest</code></li>
+<li>Markus Winand, <em>Use The Index, Luke</em>: Paging Through Results, "seek method"</li>
+<li>PostgreSQL documentation: Row Constructor Comparison</li>
+</ul></div>
+<h3>Mức kiểm chứng</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>Khẳng định</th><th>Nguồn</th></tr></thead>
+<tbody>
+<tr><td>Offset đọc <code>OFFSET + LIMIT</code> entry; số đọc và thời gian theo độ sâu</td><td>sandbox 8.0.46, 200.000 dòng, buffer pool ấm; chưa đo trên lab (E52)</td></tr>
+<tr><td>Deferred join: 74 so với 30.419 lần đọc page</td><td>sandbox 8.0.46</td></tr>
+<tr><td>Row constructor <code>&lt;</code> không thành range, kể cả khi khớp prefix</td><td>sandbox 8.0.46; manual 8.4 chỉ nói "ít dùng index hơn" khi không phủ prefix; E53</td></tr>
+<tr><td>Cursor chỉ theo <code>created_at</code> bỏ sót hoặc lặp dòng</td><td>sandbox 8.0.46 (10.200, 10.201, 10.202 dòng)</td></tr>
+<tr><td>Trùng và sót khi có người ghi trong lúc phân trang</td><td>mô hình; chưa đo (E54)</td></tr>
+<tr><td>PostgreSQL dùng index cho row constructor so sánh</td><td>tài liệu PostgreSQL; không chạy</td></tr>
+</tbody></table></div>
+</section>
+</main>
+
+</div>
+
+<script>
+const DEFS=`<defs><marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>`;
+function B(x,y,w,h,cls,t,sub){
+  const tx=x+w/2;
+  return `<g class="n ${cls||''}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="5"/>`+
+  `<text class="tb" x="${tx}" y="${y+(sub?h/2-8:h/2)}" text-anchor="middle" dominant-baseline="central">${t}</text>`+
+  (sub?`<text class="ts" x="${tx}" y="${y+h/2+10}" text-anchor="middle" dominant-baseline="central">${sub}</text>`:'')+`</g>`;
+}
+const A=(d,cls)=>`<path d="${d}" class="edge ${cls||''}" marker-end="url(#arw)"/>`;
+const T=(x,y,t,anchor,cls)=>`<text class="${cls||'lbl'}" x="${x}" y="${y}" text-anchor="${anchor||'start'}">${t}</text>`;
+const $=id=>document.getElementById(id);
+const fmt=n=>Math.round(n).toLocaleString('vi-VN');
+const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+// Mounts a stepper into <div class="frame" id="ID"></div>; steps may be replaced via the returned set().
+function stepper(id,{title,vb,steps,draw,after,extra}){
+  const el=document.getElementById(id);
+  el.innerHTML=`<div class="ph"><strong>${title}</strong><span class="meta"></span></div><div class="bd">
+  ${extra||''}<h4 class="st-t"></h4>
+  <svg viewBox="${vb}" role="img"></svg>
+  <div class="desc" aria-live="polite"><div class="st-d"></div><pre hidden></pre></div>
+  <div class="nav"><button data-d="-1">Trước</button><button data-d="1" class="primary">Tiếp</button></div></div>`;
+  const svg=el.querySelector('svg'),t=el.querySelector('.st-t'),d=el.querySelector('.st-d'),pre=el.querySelector('pre'),meta=el.querySelector('.meta');
+  const [pv,nx]=el.querySelectorAll('.nav button');let i=0;
+  function render(){const s=steps[i];svg.innerHTML=DEFS+draw(s,i);svg.setAttribute('aria-label',s.t);t.textContent=s.t;d.textContent=s.d;
+    pre.hidden=!s.c;pre.textContent=s.c||'';meta.textContent=`bước ${i+1} / ${steps.length}`;pv.disabled=i===0;nx.disabled=i===steps.length-1;after&&after(s,el);}
+  function go(k){i=Math.max(0,Math.min(steps.length-1,i+k));render();}
+  pv.onclick=()=>go(-1);nx.onclick=()=>go(1);
+  el.tabIndex=0;el.addEventListener('keydown',e=>{if(e.target.closest('select,input'))return;if(e.key==='ArrowRight')go(1);if(e.key==='ArrowLeft')go(-1);});
+  render();
+  return {set(ns){steps=ns;i=0;render();},el};
+}
+
+/* ---------- 01: drift simulator ---------- */
+const PS=4;let DR;
+function drReset(){
+  const rows=[];for(let id=116;id>=101;id--)rows.push(id);
+  DR={rows,next:117,init:new Set(rows),newIds:new Set(),deleted:new Set(),
+    off:{page:0,pages:[],seen:new Map(),read:0,dup:0},key:{cursor:null,pages:[],seen:new Map(),read:0,dup:0},log:['16 đơn, id 116 tới 101, mới nhất trước.']};
+  drDraw();
+}
+function take(r,ids){const pg=ids.map(id=>{const n=(r.seen.get(id)||0)+1;r.seen.set(id,n);if(n>1)r.dup++;return {id,cls:n>1?'hot':'row'};});r.pages.push(pg);return pg;}
+function drAct(k){
+  if(k==='reset'){drReset();return;}
+  if(k==='next'){
+    const st=DR.off.page*PS,o=DR.rows.slice(st,st+PS);
+    const prev=DR.key.cursor,ko=DR.rows.filter(id=>prev===null||id<prev).slice(0,PS);
+    if(!o.length&&!ko.length){DR.log.push('Hết dữ liệu ở cả hai cách.');drDraw();return;}
+    DR.off.read+=st+PS;DR.off.page++;DR.key.read+=PS;
+    if(ko.length)DR.key.cursor=ko[ko.length-1];
+    take(DR.off,o);take(DR.key,ko);
+    DR.log.push(`Trang ${DR.off.page}: offset đọc ${st+PS} entry (OFFSET ${st}); keyset đọc ${PS} entry (${prev===null?'không có cursor':'id < '+prev}).`);
+  }
+  if(k==='ins'){const id=DR.next++;DR.rows.unshift(id);DR.newIds.add(id);DR.log.push(`Đơn mới id ${id} chen vào đầu danh sách.`);}
+  if(k==='del'){
+    const both=DR.rows.find(id=>DR.off.seen.has(id)&&DR.key.seen.has(id));
+    if(both===undefined){DR.log.push('Chưa có đơn nào cả hai người đã xem để xoá.');}
+    else{DR.rows=DR.rows.filter(x=>x!==both);DR.deleted.add(both);DR.log.push(`Đơn ${both} (cả hai đã xem) bị huỷ và xoá khỏi danh sách.`);}
+  }
+  drDraw();
+}
+function missed(r){
+  const seenIds=[...r.seen.keys()];if(!seenIds.length)return [];
+  const lo=Math.min(...seenIds);
+  return DR.rows.filter(id=>DR.init.has(id)&&id>lo&&!r.seen.has(id));
+}
+function panel(r){
+  const ms=missed(r);
+  let h=r.pages.map((pg,i)=>`<div class="pg"><span class="pgn">trang ${i+1}</span>${pg.map(c=>`<span class="chip ${c.cls}">${c.id}</span>`).join('')||'<span class="fine">rỗng</span>'}</div>`).join('');
+  if(!r.pages.length)h='<p class="fine">Chưa đọc trang nào.</p>';
+  if(ms.length)h+=`<div class="pg"><span class="pgn">bị sót</span>${ms.map(id=>`<span class="chip miss">${id}</span>`).join('')}</div>`;
+  return h;
+}
+function drDraw(){
+  if(!$('drBtns').children.length){
+    $('drBtns').innerHTML=[['next','Trang tiếp','primary'],['ins','Đơn mới chen vào đầu',''],['del','Xoá một đơn đã xem',''],['reset','Đặt lại','']]
+      .map(([k,t,c])=>`<button data-k="${k}"${c?` class="${c}"`:''}>${t}</button>`).join('');
+    $('drBtns').querySelectorAll('button').forEach(b=>b.onclick=()=>drAct(b.dataset.k));
+  }
+  $('drOff').innerHTML=panel(DR.off);$('drKey').innerHTML=panel(DR.key);
+  const nw=[...DR.newIds];
+  if(nw.length){$('drOff').insertAdjacentHTML('afterbegin',`<div class="pg"><span class="pgn">đơn mới</span>${nw.map(id=>`<span class="chip path">${id}</span>`).join('')}</div>`);}
+  const mo=missed(DR.off).length,mk=missed(DR.key).length;
+  $('drStats').innerHTML=[['Offset: entry đã đọc',DR.off.read,''],['Offset: trùng / sót',`${DR.off.dup} / ${mo}`,DR.off.dup+mo?'bad':'good'],['Keyset: entry đã đọc',DR.key.read,''],['Keyset: trùng / sót',`${DR.key.dup} / ${mk}`,DR.key.dup+mk?'bad':'good']]
+    .map(([k,v,c])=>`<div class="stat"><span>${k}</span><b${c?` class="${c}"`:''}>${v}</b></div>`).join('');
+  $('drLog').innerHTML=DR.log.slice(-6).reverse().map(x=>`<li>${esc(x)}</li>`).join('');
+  $('drMeta').textContent=`đã đọc ${DR.off.page} trang`;
+}
+drReset();
+
+/* ---------- 02: cost by depth ---------- */
+function co(){
+  const P=Math.max(1,Math.min(1000000,parseInt($('coP').value,10)||1)),L=Math.max(1,Math.min(500,parseInt($('coL').value,10)||20)),C=$('coC').value;
+  const off=(P-1)*L,ent=off+L;
+  const tOff=ent*(C==='row'?0.00197:0.00033),tDef=ent*0.00033+L*0.002,tKey=0.04+L*0.0025;
+  const items=[['Offset',ent,tOff,'miss'],['Deferred join',ent,tDef,'hot'],['Keyset',L,tKey,'row']];
+  const mx=Math.log10(Math.max(ent,10)+1);
+  let g='';
+  items.forEach(([n,e,t,cls],i)=>{const y=12+i*44,w=Math.max(6,Math.log10(e+1)/mx*300);
+    g+=T(8,y+20,n,'start','tb');g+=`<rect class="bar ${cls}" x="130" y="${y+4}" width="${w}" height="24" rx="3"/>`;
+    g+=T(136+w,y+21,`${fmt(e)} entry, ~${t<1?t.toFixed(2):fmt(t)} ms`,'start','t');});
+  $('coSvg').innerHTML=g;
+  $('coStats').innerHTML=[['OFFSET',fmt(off),''],['Offset chậm hơn keyset',`~${fmt(tOff/tKey)} lần`,tOff/tKey>10?'bad':''],['Tra PRIMARY (offset)',C==='row'?fmt(ent):'0',C==='row'&&ent>1000?'bad':'']]
+    .map(([k,v,c])=>`<div class="stat"><span>${k}</span><b${c?` class="${c}"`:''}>${v}</b></div>`).join('');
+  $('coMeta').textContent=`trang ${fmt(P)}`;
+}
+['coP','coL','coC'].forEach(id=>$(id).addEventListener('input',co));co();
+
+/* ---------- 02: ties stepper ---------- */
+const TROWS=[[101030,'01:24:11'],[101020,'01:24:11'],[101010,'01:24:10'],[101000,'01:24:10'],[100990,'01:24:09'],[100980,'01:24:09']];
+const TSTEPS=[
+ {t:'Dòng cuối của trang trước',d:'Ý chính: hai đơn 101010 và 101000 cùng created_at. Trang trước dừng ở 101010, nên cursor là created_at = 01:24:10.000, id = 101010. Đơn 101000 chưa được thấy.',m:{101010:'path'},c:'-- cursor của trang trước\n(created_at, id) = (\'2026-01-01 01:24:10.000\', 101010)'},
+ {t:'Chỉ dùng created_at với dấu <',d:'Mọi đơn ở giây 01:24:10 bị loại, kể cả 101000 chưa từng được thấy. Trên sandbox, điều kiện này còn 10.200 dòng thay vì 10.201: mất đúng một dòng.',m:{101010:'path',101000:'miss',100990:'row',100980:'row'},c:"WHERE user_id = 7 AND created_at < '2026-01-01 01:24:10'\n-- sandbox: 10.200 dòng còn lại (đúng là 10.201)"},
+ {t:'Chỉ dùng created_at với dấu <=',d:'Lần này 101000 có mặt, nhưng 101010 cũng quay lại: người dùng thấy nó hai lần. Sandbox: 10.202 dòng, thừa một.',m:{101010:'hot',101000:'row',100990:'row',100980:'row'},c:"WHERE user_id = 7 AND created_at <= '2026-01-01 01:24:10'\n-- sandbox: 10.202 dòng"},
+ {t:'Thêm id làm tie-breaker',d:'Trong cùng giây, so tiếp id. 101000 có id nhỏ hơn 101010 nên được lấy, 101010 thì không. Sandbox: đúng 10.201 dòng. ORDER BY phải có cả hai cột theo cùng thứ tự: created_at DESC, id DESC.',m:{101010:'path',101000:'row',100990:'row',100980:'row'},c:"WHERE user_id = 7\n  AND (created_at < '2026-01-01 01:24:10'\n       OR (created_at = '2026-01-01 01:24:10' AND id < 101010))\nORDER BY created_at DESC, id DESC LIMIT 20\n-- sandbox: 10.201 dòng"}
+];
+stepper('ties',{title:'Cursor tại một giá trị bị trùng',vb:'0 0 680 230',steps:TSTEPS,draw:(s)=>{
+  let g=T(20,16,'đơn của user 7, mới nhất trước','start','ts');
+  TROWS.forEach(([id,ts],i)=>{const cls=s.m[id]||(i<2?'dim':'dim');const y=24+i*34;
+    g+=B(20,y,330,28,cls,`id ${id} · ${ts}.000`);
+    if(i===2)g+=`<line x1="10" y1="${y+31}" x2="360" y2="${y+31}" class="edge on"/>`+T(370,y+35,'ranh giới trang','start','ts');});
+  g+=T(400,60,'trang trước','start','t')+T(400,170,'trang sau','start','t');
+  return g;}});
+
+/* ---------- 02: index fit ---------- */
+const IDX={uc:['user_id','created_at'],usc:['user_id','status','created_at'],c:['created_at'],ut:['user_id','total_minor']};
+const MATCH={u:20200,us:6733,none:200000},EQ={u:['user_id'],us:['user_id','status'],none:[]},SEL={u:20200/200000,us:6733/200000,none:1};
+const MEAS={'u|c|uc':19,'us|c|uc':58,'u|t|uc':20200};
+function ix(){
+  const f=$('ixF').value,s=$('ixS').value,i=$('ixI').value;
+  const cols=IDX[i],eq=EQ[f],sortCol=s==='c'?'created_at':'total_minor';
+  let k=0;while(k<cols.length&&eq.includes(cols[k]))k++;
+  const restEq=eq.filter(c=>!cols.slice(0,k).includes(c));
+  const ordered=cols[k]===sortCol;
+  let read,sort,desc;
+  if(ordered){
+    const frac=restEq.length?MATCH[f]/(k?MATCH.u:200000):1;
+    read=Math.round(20/frac);sort=false;
+    desc=`MySQL dùng ${k?k+' cột đầu của index cho điều kiện bằng':'thẳng thứ tự của index'}, rồi đọc theo ${sortCol} đúng thứ tự cần và dừng khi đủ 20 dòng.`;
+    if(restEq.length)desc+=` Điều kiện trên ${restEq.join(', ')} không nằm trong phần đầu của index, nên MySQL tra PRIMARY cho từng entry rồi lọc: khoảng ${fmt(read)} entry cho 20 dòng.`;
+  }else{
+    read=k?MATCH[eq.slice(0,k).includes('status')?'us':'u']:200000;sort=true;
+    desc=`Sau ${k?'các cột bằng ('+cols.slice(0,k).join(', ')+')':'gốc của index'}, cột tiếp theo không phải ${sortCol}. MySQL phải đọc mọi dòng khớp (${fmt(read)}) rồi sắp xếp để lấy 20 (Using filesort). Keyset không cứu được: điều kiện cursor chỉ bớt dòng, không tránh được việc đọc và sắp.`;
+  }
+  const key=`${f}|${s}|${i}`;const meas=MEAS[key];
+  let g='';const all=cols.concat(['id (PK ẩn)']);let x=10;
+  all.forEach((c,j)=>{const w=Math.max(120,c.length*9+30);const cls=j<k?'path':(c===sortCol&&ordered&&j===k)?'row':(c.startsWith('id')?'key':'dim');
+    g+=B(x,16,w,44,cls,c,j<k?'lọc =':(c===sortCol&&ordered&&j===k)?'thứ tự':c.startsWith('id')?'tie-breaker':'không dùng');x+=w+10;});
+  $('ixSvg').innerHTML=g;
+  $('ixStats').innerHTML=[['Entry đọc cho 20 dòng',meas!==undefined?`${fmt(meas)} (đo)`:`~${fmt(read)}`,sort||read>200?'bad':'good'],['Using filesort',sort?'có':'không',sort?'bad':'good'],['Dừng sớm',sort?'không':'có',sort?'bad':'good']]
+    .map(([a,b,c])=>`<div class="stat"><span>${a}</span><b${c?` class="${c}"`:''}>${b}</b></div>`).join('');
+  $('ixDesc').textContent=desc+(meas!==undefined?` Sandbox đo được ${fmt(meas)}.`:'');
+  $('ixMeta').textContent=sort?'filesort':'dừng sớm';
+}
+['ixF','ixS','ixI'].forEach(id=>$(id).addEventListener('change',ix));ix();
+</script>
+</body>
+</html>

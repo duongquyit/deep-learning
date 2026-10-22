@@ -102,6 +102,9 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 | NestJS `ValidationPipe` behaviour: `whitelist`, `forbidNonWhitelisted`, `transform`, implicit conversion; when the handler receives the original value; coercion traps (`"false"` → true, `+value` → NaN); `@IsOptional` and null | 2 (prov.) | [validation-error-contracts](../topics/validation-error-contracts/index.html) §01–§02 | 2026-10-22 | Exercise E50 over HTTP; then set the pipe options and per-field query coercion for the Month 2 lab service |
 | Error model: shape / auth / business-state / infrastructure classes, status codes (400, 401, 403, 404, 409, 422, 429, 5xx), which errors are retryable, mapping MySQL 1062/1205/1213 | 2 (prov.) | same, §02, §04 | 2026-10-22 | Exercise E51; then write the error-code catalogue and contract tests for the lab service |
 | Response contracts: Problem Details (RFC 9457) with a stable `code`, field errors with JSON Pointer, no leaked internals; which API changes break clients | 2 (prov.) | same, §02–§03 | 2026-10-22 | Review the error responses of one API at work against the page's checklist |
+| Offset pagination cost (entries read = OFFSET + LIMIT, PRIMARY lookups per skipped row), deferred join, page drift under concurrent writes | 2 (prov.) | [pagination-keyset](../topics/pagination-keyset/index.html) §01–§02 | 2026-10-22 | Exercise E52 on 5M rows, cold and warm; E54 for drift |
+| Keyset pagination on MySQL: total order with a tie-breaker, expanded `OR` form vs row constructor, index matching equality filters then sort columns | 2 (prov.) | same, §02, §04 | 2026-10-22 | Exercise E53 on 8.4; then convert one list endpoint at work and show `EXPLAIN` before and after |
+| Cursor API design: opaque cursor bound to sort and filter, `LIMIT n + 1`, previous page, totals (capped counts, count tables); snapshots for mutable sort keys | 2 (prov.) | same, §02–§03, §06 | 2026-10-22 | Implement the cursor endpoint in the Month 2 lab service with tests for ties and mismatched cursors |
 
 "(prov.)" = provisional. Every row above rests on one artifact I wrote myself, with no measurement behind it. Week 1 of Month 1 includes a baseline assessment (TECHNICAL_GROWTH.md Section 11) that should confirm or cut these.
 
@@ -149,6 +152,8 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 40. Where is it cleanest to turn MySQL `BIGINT` into JavaScript `BigInt` with mysql2: a per-column `typeCast`, `bigNumberStrings` plus conversion in the repository, or strings all the way to JSON? What does each cost for 10,000 rows? E49.
 41. How many milliseconds of event loop does `ValidationPipe` take for a body with 10,000 nested items, and how large is the error response when every item is invalid (the pipe cuts at 1,000,000 characters by default)? Should body size and item count be limited before the pipe? E50.
 42. NestJS 12's `StandardSchemaValidationPipe` with Zod vs class-validator: what do the error messages look like, how does coercion differ, and does switching break the error contract if codes are already mapped?
+43. On MySQL 8.4, does the range optimizer use `(created_at, id) < (?, ?)`, even when it matches the prefix of an index `(created_at, id)` exactly? Claude's sandbox (8.0.46) says no: 99,020 entries read instead of 19. E53.
+44. On the sandbox, the same `WHERE user_id = 7 ORDER BY created_at DESC, id DESC LIMIT 20` without `FORCE INDEX` took about 4–6 ms and about 11,000 buffer-pool page reads, against 0.3 ms with `FORCE INDEX`, although `EXPLAIN` shows the same plan. Where does the extra work go? The optimizer trace shows the access path reconsidered for `ORDER BY`; recheck on 8.4.
 
 ## Pending verification (from the session's own exercise list)
 
@@ -232,8 +237,40 @@ These are written in the page as exercises; none have been run yet.
 - **E51** — The page's `ProblemFilter` under real errors on MySQL 8.4 (malformed JSON, 1062, 1213, 1205, `TypeError`): status, `code`, `Retry-After`, no leaked internals, what 1205 leaves committed.
 - **Q101–Q106** — The six recall questions in section 08 of the validation and error contracts page.
 - **C31–C33** — The three real-world cases in section 09 of the validation and error contracts page (a library upgrade breaking mobile error messages, mass assignment of a transfer limit through `PATCH /me`, every database error returned as 500 and retried by an SDK). Solve in writing before opening the answers.
+- **E52** — Offset at depths 0 to 199,980 for a 200k-order user on the 5M-row lab table, cold and warm: entries read, disk reads, latency; deferred join and keyset at the same positions.
+- **E53** — Row constructor vs expanded `OR` keyset conditions on 8.4: `EXPLAIN` and `Handler_read_prev`, with and without a user filter, and with a redundant leading range.
+- **E54** — Paging through 10,000 orders while another script inserts and deletes 5 per second: duplicates and misses for offset, keyset with a tie-breaker, and keyset on a non-unique timestamp.
+- **Q107–Q112** — The six recall questions in section 08 of the pagination page.
+- **C34–C36** — The three real-world cases in section 09 of the pagination page (a 5M-row CSV export with offset taking 6 hours and producing duplicates, a feed sorted by a changing score, an admin screen that wants exact totals and page jumps). Solve in writing before opening the answers.
 - **Q11–Q16** — The six recall questions in section 08 of the composite-index page (answers are on the page, hidden).
 - **Q1–Q5** — The five check questions at the end of the page (leftmost prefix, `COUNT(*)` and the visibility map, full scan polluting the cache, TOAST, a `sessions` table updated 5,000×/sec). Answer in writing before looking anything up, then verify.
+
+---
+
+## 2026-10-22 — Pagination: offset and keyset
+
+**Topic and objective.** Month 2 topic, written ahead as documentation only (Phase 2 of the documentation plan, 4 of 5): what `OFFSET` really costs, why pages drift, how to write keyset conditions MySQL can use, which index a keyset query needs, and how to design cursors and totals for an API.
+
+**Output.** [topics/pagination-keyset/index.html](../topics/pagination-keyset/index.html) — 11 sections, including section 09 with cases C34–C36. Widgets: a drift simulator (two readers on the same 16-row list, offset vs keyset, with inserts at the top and deletes of seen rows: entries read, duplicates, misses); a cost-by-depth calculator (offset, deferred join, keyset); a tie stepper (cursor on a duplicated timestamp with `<`, `<=` and a tie-breaker); an index-fit playground (filter, sort and index → stops early or filesort). Prediction templates for E52–E54.
+
+**What it covers.**
+
+- Run in Claude's sandbox (MySQL 8.0.46, 200,000-row `orders`, warm buffer pool, `FORCE INDEX` for a stable plan; not the lab): `Handler_read_prev` = OFFSET + 19 at every depth, 0.27 ms at OFFSET 0 to 44.6 ms at OFFSET 20,000; deferred join at OFFSET 10,000 in 3.3 ms and 74 page reads vs 19.7 ms and 30,419; keyset in 0.09 ms with 19 entries.
+- The row-constructor form `(created_at, id) < (?, ?)` is not a range on the sandbox: with a user filter it uses only `user_id` (`ref`, `key_len` 4, 10,019 entries); without a filter, even on an exact `(created_at, id)` index it scans the index (99,020 entries). The expanded `OR` form gives `range` and 19 entries. The 8.4 manual only warns about row constructors that do not cover an index prefix.
+- Ties on the sandbox: a `created_at`-only cursor leaves 10,200 rows with `<` and 10,202 with `<=`, against the correct 10,201.
+- Index rules for keyset (equality columns, then sort columns), `COUNT(*)` cost, cursor format, `LIMIT n + 1`, previous page; snapshots for mutable sort keys.
+
+**Initial understanding.** TODO — what did I believe about pagination before this page? No prior belief was stated in the session.
+
+**Mistakes and misconceptions corrected.** TODO — only I know which. Traps the page writes down: `OFFSET` reads only `LIMIT` rows; a timestamp cursor is enough; row constructor and expanded `OR` behave the same; keyset needs no particular index; list APIs must return a total.
+
+**Experiments and results.** None on the lab. The sandbox numbers are examples on a small table with a warm buffer pool, not evidence for a level; E52–E54 measure on the lab.
+
+**Competency level.** Level 2 provisional on three new matrix rows.
+
+**Remaining questions.** Open questions 43 and 44.
+
+**Next step.** Write the test strategy page (Phase 2, 5 of 5).
 
 ---
 
