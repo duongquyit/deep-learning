@@ -1,0 +1,1019 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ước lượng capacity: QPS, dữ liệu và hàng đợi</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F2F4F6; --surface:#FFFFFF; --ink:#18203A; --ink-2:#56607A; --ink-3:#8A93A8;
+  --rule:#CCD3DD; --rule-strong:#8C96AB;
+  --struct:#3446B8; --struct-bg:#E6E9FA;            /* cấu trúc index, chrome của trang */
+  --row:#16795F;    --row-bg:#DDF2EA;               /* dữ liệu row thật */
+  --hot:#9A5F00;    --hot-bg:#FCEFD2; --hot-line:#E3A21A;  /* bị ghi, bị chạm, bị lọc */
+  --miss:#B5302B;   --miss-bg:#FBE1DF;              /* đọc từ disk, việc thừa, lỗi */
+  --path:#0B7A8A;   --path-bg:#D8F1F3;              /* đường đi hoặc khoảng đang đọc */
+  --key:#A8327A;    --key-bg:#F8E0EE;               /* con trỏ: PK, TID */
+  --ram:#5B4BB0;    --ram-bg:#E7E3FA;               /* hit trong buffer pool */
+  --grid:rgba(52,70,184,.06);
+  --r-s:4px; --r-m:8px;
+  --sans:"Instrument Sans",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --paper:#0F1320; --surface:#171C2B; --ink:#E6E9F2; --ink-2:#A3ABC0; --ink-3:#6E7790;
+  --rule:#2C3448; --rule-strong:#55607A;
+  --struct:#97A3FF; --struct-bg:#232A55;
+  --row:#5FD0AE;    --row-bg:#123A31;
+  --hot:#F2BE5C;    --hot-bg:#3B2C0E; --hot-line:#E3A21A;
+  --miss:#FF8A84;   --miss-bg:#3E1A1A;
+  --path:#5ED3E0;   --path-bg:#113A40;
+  --key:#F28DC4;    --key-bg:#3E1A2E;
+  --ram:#B7A8FF;    --ram-bg:#2A2350;
+  --grid:rgba(151,163,255,.05);
+}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important;animation:none!important}}
+body{margin:0;color:var(--ink);font:400 17px/1.65 var(--sans);
+  background-color:var(--paper);
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:24px 24px}
+a{color:var(--struct)}
+:focus-visible{outline:2px solid var(--struct);outline-offset:2px}
+
+/* layout */
+.shell{display:grid;grid-template-columns:230px minmax(0,1fr);gap:56px;max-width:1180px;margin:0 auto;padding:0 32px}
+nav.toc{position:sticky;top:0;align-self:start;height:100vh;padding:48px 0;overflow:auto}
+nav.toc p{font-weight:600;margin:0 0 12px;font-size:15px}
+nav.toc ol,.mobile-toc ol{list-style:none;margin:0;padding:0;counter-reset:s}
+nav.toc li,.mobile-toc li{counter-increment:s;margin:0}
+nav.toc a,.mobile-toc a{display:grid;grid-template-columns:28px 1fr;padding:5px 0;color:var(--ink-2);text-decoration:none;font-size:14.5px;line-height:1.4}
+nav.toc a::before,.mobile-toc a::before{content:counter(s,decimal-leading-zero);font:500 12px/1.9 var(--mono);color:var(--ink-3)}
+nav.toc a:hover,nav.toc a.on{color:var(--struct)}
+main{min-width:0;padding:56px 0 120px}
+.prose{max-width:720px}
+section{padding-top:72px}
+section>header{display:grid;grid-template-columns:auto 1fr;gap:0 18px;align-items:baseline;max-width:720px;margin-bottom:12px}
+section>header .num{font:500 15px var(--mono);color:var(--struct);border:1.5px solid var(--struct);border-radius:var(--r-s);padding:2px 7px;transform:translateY(-4px)}
+h1,h2,h3,h4{line-height:1.2;letter-spacing:-.015em;margin:0}
+h1{font-size:clamp(2.3rem,5.4vw,3.9rem);font-weight:700;letter-spacing:-.03em;line-height:1.02;max-width:14ch;margin-bottom:20px}
+.lede{font-size:19px;color:var(--ink-2);max-width:56ch;margin-bottom:28px}
+h2{font-size:clamp(1.6rem,3vw,2.1rem);font-weight:650}
+h3{font-size:1.2rem;font-weight:600;margin:36px 0 8px}
+p{margin:0 0 14px}
+ul,ol.list{margin:0 0 16px;padding-left:22px}
+li{margin:4px 0}
+code{font:0.88em var(--mono);background:var(--struct-bg);color:var(--ink);padding:1px 5px;border-radius:3px}
+pre{font:13.5px/1.6 var(--mono);background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:var(--r-s);padding:14px 16px;overflow-x:auto;margin:0 0 18px;max-width:720px}
+pre code{background:none;padding:0}
+.tablewrap{overflow-x:auto;max-width:720px;margin:0 0 20px}
+table{border-collapse:collapse;width:100%;max-width:720px;margin:0 0 20px;font-size:15px;background:var(--surface)}
+.tablewrap table{margin:0;min-width:560px}
+th,td{text-align:left;padding:9px 12px;border:1px solid var(--rule);vertical-align:top}
+th{font-weight:600;background:var(--struct-bg)}
+
+/* widget frame: styled like a page, header strip = page header */
+.frame{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);margin:22px 0 28px;max-width:920px;overflow:hidden}
+.frame>.ph{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:9px 16px;border-bottom:1px solid var(--rule);background:var(--struct-bg);font-size:14px}
+.frame>.ph strong{font-weight:600}
+.frame>.ph .meta{margin-left:auto;font:500 12.5px var(--mono);color:var(--ink-2)}
+.frame .bd{padding:16px;min-width:0}
+.frame svg{display:block;width:100%;height:auto}
+.st-t{font:600 16px var(--sans);margin:0 0 8px}
+.desc{background:var(--paper);border-radius:var(--r-s);padding:12px 14px;margin-top:12px;min-height:84px;font-size:15.5px;color:var(--ink-2)}
+.desc pre{margin:10px 0 0;font-size:12.5px;border-left-color:var(--rule-strong)}
+.nav{display:flex;gap:8px;margin-top:12px;align-items:center}
+button{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 14px;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--struct);color:var(--struct)}
+button:disabled{opacity:.4;cursor:default}
+button.primary,button[aria-pressed="true"]{background:var(--struct);border-color:var(--struct);color:var(--surface)}
+button.primary:hover:not(:disabled),button[aria-pressed="true"]:hover{color:var(--surface);filter:brightness(1.1)}
+input,select{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 10px}
+input[type=number]{width:84px}
+input[type=range],input[type=checkbox]{accent-color:var(--struct)}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-top:12px}
+.stat{background:var(--paper);border-radius:var(--r-s);padding:8px 12px}
+.stat span{display:block;font-size:13px;color:var(--ink-2)}
+.stat b{font:600 20px var(--sans);font-variant-numeric:tabular-nums}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;color:var(--ink-2);margin-top:12px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:14px;height:14px;border-radius:3px;border:2px solid;display:inline-block}
+.fine{font-size:13.5px;color:var(--ink-2);margin:10px 0 0}  /* chú thích nhỏ dưới widget */
+
+/* svg text */
+.tb{font:600 14px var(--sans)} .t{font:400 13px var(--sans)} .ts{font:400 12px var(--sans)} .tm{font:500 12.5px var(--mono)}
+.lbl{fill:var(--ink-2);font:400 12.5px var(--sans)}
+
+/* callouts */
+.note{border-left:3px solid var(--hot-line);background:var(--hot-bg);padding:12px 16px;border-radius:0 var(--r-s) var(--r-s) 0;margin:18px 0;max-width:720px;font-size:16px}
+.note strong{color:var(--hot)}
+.senior{border:1.5px solid var(--struct);border-radius:var(--r-m);padding:14px 18px;margin:22px 0;max-width:720px;background:var(--surface)}
+.senior h4{font-size:16px;margin-bottom:6px;color:var(--struct)}
+.senior p:last-child,.senior ul:last-child{margin-bottom:0}
+details{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-s);padding:10px 14px;margin:10px 0;max-width:720px}
+details summary{cursor:pointer;font-weight:600}
+details[open] summary{margin-bottom:8px}
+details.answer{background:var(--paper);border-style:dashed;margin:10px 0 0}
+details.answer summary{font-weight:500;color:var(--struct)}
+.tag{display:inline-block;font:500 12px var(--sans);color:var(--ink-2);border:1px solid var(--rule-strong);border-radius:999px;padding:0 8px;margin-right:6px;vertical-align:1px}
+
+/* hero brief: mục tiêu, cần biết trước, trạng thái */
+.brief{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px 24px;background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);padding:14px 18px;max-width:920px;margin:0 0 8px;font-size:15px}
+.brief h4{font-size:14px;color:var(--struct);margin:0 0 4px}
+.brief ul{margin:0;padding-left:18px}
+.brief p{margin:0}
+
+.mobile-toc{display:none}
+@media (max-width:900px){
+  .shell{grid-template-columns:1fr;padding:0 16px;gap:0}
+  nav.toc{display:none}
+  .mobile-toc{display:block;margin-top:20px}
+  main{padding-top:32px}
+  .frame .bd{padding:12px}
+  body{font-size:16px}
+}
+
+
+/* bài toán thực tế: dạng phỏng vấn */
+.case{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:0 var(--r-m) var(--r-m) 0;padding:16px 20px;margin:22px 0;max-width:720px}
+.case>h3{margin:0 0 6px;font-size:1.15rem}
+.case .src{font-size:13.5px;color:var(--ink-2);margin:0 0 12px}
+.case .ctx{background:var(--paper);border:1px solid var(--rule);border-radius:var(--r-m);padding:10px 14px;margin:8px 0 0;font-size:15px}
+.case .ctx-h{margin:0 0 4px;font-weight:600;color:var(--struct)}
+.case .ctx ul{margin:0;padding-left:20px}
+.case .ctx li{margin:2px 0}
+.case .q{margin:10px 0 4px;padding:8px 0 8px 14px;border-left:3px solid var(--key);font-size:1.06rem;font-weight:500;color:var(--ink);max-width:none}
+.case details{max-width:none;margin:12px 0 0}
+.case details.answer[open]{background:var(--surface)}
+.case details.clar>summary,.case details.rubric>summary{color:var(--key)}
+.case .fu{margin:18px 0 0;padding-top:14px;border-top:1px solid var(--rule)}
+.case .fq{margin:0;font-weight:500}
+.case .fq b{color:var(--struct);margin-right:4px}
+.ah{font-size:15.5px;color:var(--struct);margin:20px 0 6px}
+.answer .tablewrap{max-width:none}
+@media (max-width:900px){.case{padding:14px}}
+
+/* ---- page widgets ---- */
+.n rect{fill:var(--surface);stroke:var(--rule-strong);stroke-width:1}
+.n text{fill:var(--ink)}
+.n.struct rect{fill:var(--struct-bg);stroke:var(--struct)} .n.struct text{fill:var(--struct)}
+.n.row rect{fill:var(--row-bg);stroke:var(--row);stroke-width:1.6} .n.row text{fill:var(--row)}
+.n.hot rect{fill:var(--hot-bg);stroke:var(--hot);stroke-width:2} .n.hot text{fill:var(--hot)}
+.n.miss rect{fill:var(--miss-bg);stroke:var(--miss);stroke-width:2} .n.miss text{fill:var(--miss)}
+.n.path rect{fill:var(--path-bg);stroke:var(--path);stroke-width:2} .n.path text{fill:var(--path)}
+.n.ram rect{fill:var(--ram-bg);stroke:var(--ram);stroke-width:2} .n.ram text{fill:var(--ram)}
+.axis{stroke:var(--rule-strong);stroke-width:1}
+.gridl{stroke:var(--rule);stroke-width:1;stroke-dasharray:2 4}
+.curve{fill:none;stroke:var(--path);stroke-width:2.4}
+.curve.p99{stroke:var(--miss);stroke-dasharray:6 4}
+.dot{fill:var(--struct)}
+.band{fill:var(--row-bg)}
+.lg-ram{border-color:var(--ram);background:var(--ram-bg)} .lg-row{border-color:var(--row);background:var(--row-bg)}
+.lg-path{border-color:var(--path);background:var(--path-bg)} .lg-hot{border-color:var(--hot);background:var(--hot-bg)}
+.lg-miss{border-color:var(--miss);background:var(--miss-bg)}
+.lg-line{border-color:var(--path);background:var(--path)} .lg-p99{border-color:var(--miss);background:transparent;border-style:dashed}
+.calc{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px 14px;margin-bottom:12px}
+.calc label{display:flex;flex-direction:column;gap:4px;font-size:13.5px;color:var(--ink-2)}
+.calc input[type=range]{width:100%}
+.calc input[type=number]{width:100%;max-width:170px}
+.stat b.bad{color:var(--miss)} .stat b.good{color:var(--row)} .stat b.warn{color:var(--hot)}
+.work{font:12.5px/1.75 var(--mono);background:var(--paper);border-radius:var(--r-s);padding:10px 12px;margin:12px 0 0;white-space:pre-wrap;overflow-x:auto}
+</style>
+</head>
+<body>
+
+<div class="shell">
+<nav class="toc" aria-label="Mục lục">
+  <p>Ước lượng capacity</p>
+  <ol>
+    <li><a href="#s1">Bản chất vấn đề</a></li>
+    <li><a href="#s2">Cơ chế hoạt động</a></li>
+    <li><a href="#s3">Vì sao thiết kế như vậy</a></li>
+    <li><a href="#s4">Ví dụ</a></li>
+    <li><a href="#s5">Thí nghiệm</a></li>
+    <li><a href="#s6">Ảnh hưởng khi chạy production</a></li>
+    <li><a href="#s7">Hiểu lầm thường gặp</a></li>
+    <li><a href="#s8">Câu hỏi ôn tập</a></li>
+    <li><a href="#s9">Bài toán thực tế</a></li>
+    <li><a href="#s10">Câu hỏi còn mở</a></li>
+    <li><a href="#s11">Tài liệu tham khảo</a></li>
+  </ol>
+</nav>
+
+<main>
+<div class="hero">
+<h1>Ước lượng capacity: QPS, dữ liệu và hàng đợi</h1>
+<p class="lede">"Nếu tải tăng 10 lần thì hệ thống có chịu nổi không?" Câu hỏi này cần trả lời trong 10 phút, trước khi có ai viết dòng code nào. Bài này dạy cách ước lượng theo bậc độ lớn: đổi số người dùng thành request mỗi giây, dung lượng và băng thông; dùng định luật Little để tính số connection; và hiểu vì sao một hệ thống chạy ở 90% CPU thì đã chậm từ trước khi hết CPU.</p>
+<div class="brief">
+  <div><h4>Mục tiêu</h4><ul>
+    <li>Từ số người dùng và hành vi, ước lượng được QPS trung bình, QPS đỉnh, dung lượng và băng thông, với giả định ghi rõ ràng.</li>
+    <li>Dùng định luật Little để tính số request đang xử lý cùng lúc và số connection database cần.</li>
+    <li>Giải thích được vì sao độ trễ tăng vọt khi mức sử dụng gần 100%, và chọn được mức dự phòng.</li>
+    <li>Nói được một bảng MySQL có vừa buffer pool không, và chỗ nào sẽ nghẽn trước.</li>
+  </ul></div>
+  <div><h4>Cần biết trước</h4><ul>
+    <li><a href="../btree-index-internals/index.html">B+tree index</a>: page 16KB, fan-out, chiều cao cây.</li>
+    <li><a href="../innodb-buffer-pool-redo-undo/index.html">Buffer pool, redo, undo</a>: đọc từ RAM hay từ disk.</li>
+    <li><a href="../concurrency-control-strategies/index.html">Kiểm soát ghi đồng thời</a>: row nóng và thời gian giữ khoá.</li>
+  </ul></div>
+  <div><h4>Trạng thái</h4><p>Level 2 (prov.). Công thức là toán cơ bản và lý thuyết hàng đợi; các con số độ trễ lấy từ bảng tham khảo khoảng năm 2012. Chưa đo trên lab (E36–E37).</p></div>
+</div>
+<details class="mobile-toc"><summary>Mục lục</summary><ol><li><a href="#s1">Bản chất vấn đề</a></li><li><a href="#s2">Cơ chế hoạt động</a></li><li><a href="#s3">Vì sao thiết kế như vậy</a></li><li><a href="#s4">Ví dụ</a></li><li><a href="#s5">Thí nghiệm</a></li><li><a href="#s6">Ảnh hưởng khi chạy production</a></li><li><a href="#s7">Hiểu lầm thường gặp</a></li><li><a href="#s8">Câu hỏi ôn tập</a></li><li><a href="#s9">Bài toán thực tế</a></li><li><a href="#s10">Câu hỏi còn mở</a></li><li><a href="#s11">Tài liệu tham khảo</a></li></ol></details>
+</div>
+
+<!-- 1 -->
+<section id="s1">
+<header><span class="num">01</span><h2>Bản chất vấn đề</h2></header>
+<div class="prose">
+<p>Product manager hỏi: "Tháng sau marketing chạy chiến dịch, số người dùng hằng ngày dự kiến từ 200.000 lên 2 triệu. Database có chịu được không?" Câu trả lời "chắc được" hay "chắc không" đều vô dụng. Câu trả lời có ích là một con số kèm giả định: "Ghi đỉnh khoảng 1.200 lần mỗi giây, primary hiện chịu được khoảng 2.000, tức 60%. Chịu được, nhưng chỉ còn ít dự phòng."</p>
+<p>Ước lượng nhanh (back-of-the-envelope) là làm phép tính đó trong vài phút, trên giấy. Mục tiêu không phải là chính xác tới chữ số cuối, mà là đúng bậc độ lớn: 100 hay 1.000 hay 10.000 request mỗi giây. Ba thói quen giúp tính nhanh:</p>
+<ul>
+<li><strong>Làm tròn mạnh:</strong> một ngày có 86.400 giây, cứ coi là 100.000 (10<sup>5</sup>). Sai số 15% không đổi được kết luận.</li>
+<li><strong>Tách giả định khỏi phép tính:</strong> viết ra "mỗi người mở app 10 lần một ngày" để người khác có thể sửa giả định mà không phải tính lại từ đầu.</li>
+<li><strong>Luôn tính đỉnh, không chỉ trung bình:</strong> hệ thống sập vào giờ cao điểm, không sập vào lúc trung bình.</li>
+</ul>
+<p>Giống như ước lượng tiền xăng cho chuyến đi: quãng đường chia mức tiêu hao nhân giá xăng. Không ai cần biết tới từng lít, nhưng phải biết là 500 nghìn hay 5 triệu. Thử máy tính dưới đây với các giả định của bạn.</p>
+</div>
+
+<div class="frame" id="est">
+  <div class="ph"><strong>Từ người dùng ra QPS, dung lượng và băng thông</strong><span class="meta" id="esMeta"></span></div>
+  <div class="bd">
+    <div class="calc">
+      <label>Người dùng hoạt động mỗi ngày (DAU)<input id="esU" type="number" min="1000" max="1000000000" value="2000000"></label>
+      <label>Lượt đọc mỗi người mỗi ngày<input id="esR" type="number" min="0" max="10000" value="40"></label>
+      <label>Lượt ghi mỗi người mỗi ngày<input id="esW" type="number" min="0" max="10000" value="3"></label>
+      <label>Hệ số đỉnh (đỉnh ÷ trung bình)<input id="esP" type="number" min="1" max="50" step="0.5" value="5"></label>
+      <label>Kích thước một bản ghi (byte)<input id="esS" type="number" min="10" max="10000000" value="800"></label>
+      <label>Giữ dữ liệu (năm)<input id="esY" type="number" min="0.1" max="20" step="0.1" value="3"></label>
+      <label>Hệ số index và phần dư (×)<input id="esX" type="number" min="1" max="10" step="0.1" value="2"></label>
+      <label>Kích thước response đọc (KB)<input id="esB" type="number" min="0.1" max="100000" step="0.1" value="15"></label>
+      <label>Primary chịu được (ghi/giây, đo trên lab)<input id="esC" type="number" min="1" max="1000000" value="2000"></label>
+    </div>
+    <div class="stats" id="esStats"></div>
+    <div class="work" id="esWork" aria-live="polite"></div>
+    <div class="desc" aria-live="polite" id="esDesc"></div>
+    <p class="fine">"Hệ số đỉnh" là tỉ lệ giữa giờ cao điểm và trung bình cả ngày; app tiêu dùng thường 3–10, hệ thống B2B ít dao động hơn. "Primary chịu được" là con số phải đo trên chính hệ thống của bạn (E36), không lấy từ bài viết trên mạng. Mọi kết quả ở đây là ước lượng.</p>
+  </div>
+</div>
+</section>
+
+<!-- 2 -->
+<section id="s2">
+<header><span class="num">02</span><h2>Cơ chế hoạt động</h2></header>
+<div class="prose">
+<h3>Các con số độ trễ cần nhớ</h3>
+<p>Ý chính: các thao tác cách nhau nhiều bậc độ lớn. Đọc RAM tính bằng nano giây, đi một vòng mạng trong datacenter tính bằng trăm micro giây, đi qua đại dương tính bằng trăm mili giây. Chỉ cần nhớ bậc, không cần nhớ số lẻ.</p>
+<p>Bảng nổi tiếng nhất là "Latency numbers every programmer should know", gắn với tên Jeff Dean và Peter Norvig, số liệu khoảng năm 2012. Phần cứng hôm nay nhanh hơn ở nhiều dòng, nhất là SSD NVMe, nhưng thứ tự giữa các dòng gần như không đổi. Thang dưới đây là thang log: mỗi vạch là gấp 10 lần.</p>
+</div>
+<div class="frame" id="lat">
+  <div class="ph"><strong>Độ trễ theo bậc độ lớn (số liệu khoảng 2012)</strong><span class="meta">thang log</span></div>
+  <div class="bd">
+    <svg id="latSvg" viewBox="0 0 680 400" role="img" aria-label="Thanh độ trễ trên thang log của các thao tác phổ biến"></svg>
+    <div class="legend"><span><i class="lg-ram"></i>CPU và RAM</span><span><i class="lg-row"></i>lưu trữ</span><span><i class="lg-path"></i>mạng</span></div>
+    <p class="fine">Nguồn: bảng "Latency Comparison Numbers (~2012)", ghi công Jeff Dean, Peter Norvig. Số trên máy và cloud của bạn sẽ khác; dùng bảng để nhớ thứ tự, đo khi cần con số.</p>
+  </div>
+</div>
+<div class="prose">
+<p>Ba điều suy ra từ bảng này dùng hằng ngày:</p>
+<ul>
+<li>Một request gọi database 10 lần nối tiếp trong cùng datacenter tốn ít nhất 10 vòng mạng, cỡ 5 ms, trước khi database làm gì. Gộp câu lệnh thường rẻ hơn tối ưu từng câu.</li>
+<li>Đọc từ RAM (buffer pool hit) và đọc từ disk khác nhau 1.000 lần trở lên. Bảng có vừa buffer pool hay không quyết định độ trễ nhiều hơn mọi tối ưu câu lệnh.</li>
+<li>Gọi sang region khác là 100 ms trở lên. Một thiết kế cần đồng bộ giữa hai region ở mỗi lần ghi sẽ không bao giờ có p99 dưới 100 ms.</li>
+</ul>
+</div>
+
+<div class="prose">
+<h3>Định luật Little: có bao nhiêu request đang chạy cùng lúc</h3>
+<p>Ý chính: số việc đang nằm trong hệ thống bằng tốc độ việc đến nhân thời gian mỗi việc ở lại. Viết gọn: L = λ × W.</p>
+<p>Ví dụ: API nhận 2.000 request mỗi giây, mỗi request mất 50 ms. Trung bình có 2.000 × 0,05 = 100 request đang được xử lý cùng lúc. Nếu mỗi request giữ một connection database trong 8 ms, thì trung bình có 2.000 × 0,008 = 16 connection đang bận. Định luật này đúng với mọi hệ thống ổn định, không cần biết request đến theo phân phối nào.</p>
+<p>Từ đó tính được pool cần bao nhiêu connection, và tổng số connection mọi pod mở tới database có vượt giới hạn không.</p>
+</div>
+<div class="frame" id="little">
+  <div class="ph"><strong>Định luật Little cho pool connection</strong><span class="meta" id="lmMeta"></span></div>
+  <div class="bd">
+    <div class="calc">
+      <label>Request mỗi giây ở đỉnh (λ)<input id="lmL" type="number" min="1" max="1000000" value="2000"></label>
+      <label>Thời gian giữ connection mỗi request (ms)<input id="lmD" type="number" min="0.1" max="10000" step="0.1" value="8"></label>
+      <label>Độ trễ toàn request (ms)<input id="lmW" type="number" min="0.1" max="100000" step="0.1" value="50"></label>
+      <label>Số pod<input id="lmN" type="number" min="1" max="1000" value="12"></label>
+      <label>Pool mỗi pod (connection)<input id="lmP" type="number" min="1" max="1000" value="20"></label>
+      <label>max_connections của MySQL (đọc trên server)<input id="lmM" type="number" min="1" max="100000" value="500"></label>
+    </div>
+    <svg id="lmSvg" viewBox="0 0 680 150" role="img" aria-label="So sánh connection đang bận, pool và max_connections"></svg>
+    <div class="stats" id="lmStats"></div>
+    <div class="desc" aria-live="polite" id="lmDesc"></div>
+    <p class="fine">L = λ × W là trung bình. Ở giây đông nhất, số connection bận có thể gấp đôi trung bình hoặc hơn, nên pool cần chừa dư. Đọc <code>max_connections</code> bằng <code>SHOW VARIABLES LIKE 'max_connections'</code>; giá trị mặc định ở đây chỉ là giả định.</p>
+  </div>
+</div>
+<div class="note"><strong>Lỗi hay gặp:</strong> đặt pool mỗi pod 50 cho "chắc", rồi autoscale lên 30 pod: 1.500 connection mở tới một MySQL. Mỗi connection tốn bộ nhớ và luồng ở server, và có thể vượt <code>max_connections</code>, khiến pod mới không kết nối được đúng lúc tải cao. Quy tắc: tính số connection bận bằng định luật Little, đặt pool khoảng 2–3 lần số đó chia cho số pod, và kiểm tra tổng ở số pod tối đa.</div>
+
+<div class="prose">
+<h3>Vì sao 90% CPU đã là quá tải</h3>
+<p>Ý chính: khi mức sử dụng (utilization) tiến gần 100%, thời gian chờ trong hàng tăng không tuyến tính mà vọt lên. Ở 50% chờ ít, ở 90% thời gian phản hồi gấp 10 lần lúc rảnh, ở 99% gấp 100 lần.</p>
+<p>Mô hình đơn giản nhất là hàng đợi M/M/1: request đến ngẫu nhiên, một bộ xử lý, thời gian xử lý trung bình S. Mức sử dụng ρ = λ × S. Thời gian phản hồi trung bình là S / (1 − ρ), và phân vị p của thời gian phản hồi là S × ln(1/(1 − p)) / (1 − ρ). Hệ thống thật có nhiều bộ xử lý nên đường cong dốc muộn hơn một chút, nhưng hình dạng giống nhau. Kéo thanh trượt để xem.</p>
+</div>
+<div class="frame" id="queue">
+  <div class="ph"><strong>Độ trễ theo mức sử dụng (hàng đợi M/M/1)</strong><span class="meta" id="quMeta"></span></div>
+  <div class="bd">
+    <div class="calc">
+      <label>Thời gian xử lý một request (ms)<input id="quS" type="number" min="0.1" max="10000" step="0.1" value="10"></label>
+      <label>Mức sử dụng: <span id="quRv">70%</span><input id="quR" type="range" min="5" max="98" value="70"></label>
+    </div>
+    <svg id="quSvg" viewBox="0 0 680 250" role="img" aria-label="Đường cong thời gian phản hồi trung bình và p99 theo mức sử dụng"></svg>
+    <div class="stats" id="quStats"></div>
+    <div class="desc" aria-live="polite" id="quDesc"></div>
+    <div class="legend"><span><i class="lg-line"></i>trung bình</span><span><i class="lg-p99"></i>p99</span><span><i class="lg-row"></i>vùng nên chạy ở giờ đỉnh (dưới khoảng 70%)</span></div>
+    <p class="fine">M/M/1 giả định request đến theo phân phối Poisson và thời gian xử lý theo phân phối mũ. Đây là mô hình để hiểu hình dạng, không phải để dự báo chính xác; E37 kiểm tra trên lab.</p>
+  </div>
+</div>
+
+<div class="prose">
+<h3>Ước lượng dữ liệu trong MySQL</h3>
+<p>Ý chính: dung lượng quyết định hai việc. Thứ nhất, phần dữ liệu hay đọc (working set) có vừa buffer pool không. Thứ hai, các thao tác trên cả bảng (thêm index, sao lưu, dựng replica) mất bao lâu.</p>
+<ul>
+<li><strong>Kích thước row:</strong> cộng kích thước các cột, cộng khoảng 20 byte phần đầu của mỗi row trong InnoDB. Page 16KB thường chỉ đầy khoảng 70–90%.</li>
+<li><strong>Mỗi secondary index</strong> chứa cột của nó cộng khoá chính. Bảng có 4 secondary index thường có tổng index cỡ bằng hoặc hơn dữ liệu (xem <a href="../index-write-cost/index.html">chi phí ghi của index</a>). Vì vậy máy tính ở phần 01 có "hệ số index" mặc định là 2.</li>
+<li><strong>Working set</strong> thường nhỏ hơn nhiều so với toàn bảng: dữ liệu 3 năm nhưng người dùng chỉ xem 30 ngày gần nhất. Nếu working set vừa buffer pool, đọc gần như toàn là hit trong RAM.</li>
+<li><strong>Thao tác trên cả bảng</strong> tỉ lệ với kích thước. Đọc tuần tự ở vài trăm MB mỗi giây, một bảng 500 GB mất cỡ nửa giờ chỉ để đọc qua một lần.</li>
+</ul>
+</div>
+</section>
+
+<!-- 3 -->
+<section id="s3">
+<header><span class="num">03</span><h2>Vì sao thiết kế như vậy</h2></header>
+<div class="prose">
+<p><strong>Vì sao chỉ cần đúng bậc độ lớn?</strong> Các quyết định thiết kế thay đổi theo bậc: 100 ghi mỗi giây thì một MySQL thừa sức; 10.000 thì phải nghĩ tới gom lô, chia shard hoặc hàng đợi; 1.000.000 thì là một hệ thống khác hẳn. Sai 30% hiếm khi đổi quyết định; sai 10 lần thì luôn đổi.</p>
+<p><strong>Vì sao tính theo đỉnh?</strong> Tài nguyên phải đủ cho giây đông nhất. Trung bình cả ngày có thể chỉ là 20% của đỉnh. Một hệ thống "đủ cho trung bình" sẽ sập mỗi ngày vào giờ cao điểm.</p>
+<p><strong>Vì sao chừa dự phòng 30–50%?</strong> Vì đường cong hàng đợi ở phần 02: gần 100% thì độ trễ vọt lên, và mọi dao động nhỏ (một deploy, một node mất, một lần retry dồn) đẩy hệ thống qua ngưỡng. Còn vì ước lượng có sai số, và vì cần thời gian để mở rộng khi tải tăng.</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Con số</th><th>Dùng để quyết định</th><th>Bẫy</th></tr></thead>
+<tbody>
+<tr><td>QPS trung bình</td><td>Chi phí, dung lượng mỗi ngày</td><td>Không dùng để chọn cấu hình máy</td></tr>
+<tr><td>QPS đỉnh</td><td>Số máy, số connection, có cần cache hay hàng đợi</td><td>Đỉnh của từng tính năng có thể lệch giờ nhau</td></tr>
+<tr><td>QPS trên một key</td><td>Có row nóng hay key nóng không</td><td>Tổng QPS thấp vẫn có thể dồn hết vào một row (xem C15)</td></tr>
+<tr><td>p99, p999</td><td>Trải nghiệm người dùng, timeout</td><td>Một request gọi 10 service thì gần như chắc chắn gặp p99 của ít nhất một service</td></tr>
+<tr><td>Dung lượng</td><td>Disk, thời gian sao lưu, thêm index, có cần chia bảng</td><td>Quên index, bản sao và log (binlog, undo)</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- 4 -->
+<section id="s4">
+<header><span class="num">04</span><h2>Ví dụ</h2></header>
+<div class="prose"><h3>Một lần ước lượng viết ra giấy</h3><p>Tính năng: lịch sử đơn hàng cho ứng dụng giao đồ ăn.</p></div>
+<pre><code>Giả định
+  DAU                       2.000.000
+  mở lịch sử đơn            2 lần / người / ngày
+  đặt đơn                   0,5 đơn / người / ngày
+  hệ số đỉnh (giờ trưa)     6
+  một đơn trong DB          ~1 KB, giữ 3 năm, index ×2
+
+Đọc
+  2.000.000 × 2 / 100.000   ≈ 40 req/s trung bình
+  × 6                       ≈ 240 req/s đỉnh
+
+Ghi
+  2.000.000 × 0,5           = 1.000.000 đơn / ngày
+  / 100.000 × 6             ≈ 60 ghi/s đỉnh
+
+Dữ liệu
+  1.000.000 × 1 KB          ≈ 1 GB / ngày
+  × 365 × 3 × 2             ≈ 2,2 TB sau 3 năm
+
+Kết luận
+  QPS nhỏ, một primary thừa sức.
+  Dung lượng mới là vấn đề: 2,2 TB trên một bảng làm thêm index, sao lưu
+  và dựng replica mất hàng giờ. Cần chia theo thời gian (partition theo tháng)
+  hoặc lưu trữ đơn cũ sang chỗ khác ngay từ thiết kế.</code></pre>
+
+<div class="prose"><h3>Đo con số thật trên MySQL</h3></div>
+<pre><code>-- QPS theo loại câu lệnh: đọc hai lần cách nhau 60 giây, lấy hiệu chia 60
+SHOW GLOBAL STATUS WHERE Variable_name IN
+  ('Com_select','Com_insert','Com_update','Com_delete','Questions');
+
+-- số câu đang thật sự chạy lúc này (L trong định luật Little, phía database)
+SHOW GLOBAL STATUS LIKE 'Threads_running';
+SHOW GLOBAL STATUS LIKE 'Threads_connected';
+
+-- dung lượng từng bảng (ước lượng, theo thống kê)
+SELECT table_name,
+       ROUND(data_length  / 1024 / 1024 / 1024, 2) AS data_gb,
+       ROUND(index_length / 1024 / 1024 / 1024, 2) AS index_gb,
+       table_rows
+  FROM information_schema.tables
+ WHERE table_schema = DATABASE()
+ ORDER BY data_length + index_length DESC;
+
+-- buffer pool có đủ không: tỉ lệ đọc phải xuống disk
+SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_read%';</code></pre>
+<p class="prose"><code>table_rows</code> và kích thước trong <code>information_schema.tables</code> là ước lượng từ thống kê của InnoDB, có thể lệch đáng kể. Đủ cho ước lượng bậc độ lớn; không dùng cho báo cáo chính xác.</p>
+</section>
+
+<!-- 5 -->
+<section id="s5">
+<header><span class="num">05</span><h2>Thí nghiệm</h2></header>
+<div class="prose"><p>Chạy trên lab MySQL 8.4. Viết dự đoán trước. Hai thí nghiệm này cho con số "primary chịu được bao nhiêu" mà mọi ước lượng khác cần.</p></div>
+<details><summary>E36. Primary của lab chịu được bao nhiêu ghi mỗi giây</summary>
+<p><strong>Câu hỏi.</strong> Với một <code>INSERT</code> một row 1 KB, autocommit, <code>innodb_flush_log_at_trx_commit = 1</code>: ở 1, 8, 32, 128 client, đạt bao nhiêu ghi mỗi giây và p99 bao nhiêu? Gom 100 row mỗi transaction thì sao? Đỉnh nằm ở số client nào, và giới hạn là CPU, disk hay fsync?</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e36/prediction.md</code></p>
+<p><strong>Chạy.</strong> Script Node với mysql2, mỗi cấu hình 60 giây; ghi <code>Innodb_os_log_fsyncs</code>, CPU, <code>iostat</code>.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+<details><summary>E37. Định luật Little và đường cong hàng đợi trên lab</summary>
+<p><strong>Câu hỏi.</strong> Gửi request đọc theo tốc độ cố định (không phải "nhiều nhất có thể") ở 20%, 50%, 70%, 85%, 95% mức tối đa đo được. Ở mỗi mức: p50, p99, <code>Threads_running</code> trung bình. <code>Threads_running</code> có xấp xỉ λ × W không? Đường p99 có giống hình dạng M/M/1 không, và vỡ ở mức nào?</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e37/prediction.md</code></p>
+<p><strong>Chạy.</strong> Công cụ tạo tải theo tốc độ mở (open-loop), ví dụ k6 với executor <code>constant-arrival-rate</code>; lấy mẫu <code>Threads_running</code> mỗi giây.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+</section>
+
+<!-- 6 -->
+<section id="s6">
+<header><span class="num">06</span><h2>Ảnh hưởng khi chạy production</h2></header>
+<div class="prose">
+<h3>Khi nào ước lượng</h3>
+<ul>
+<li>Trước khi thiết kế một tính năng có lưu dữ liệu mới, hoặc tải dự kiến tăng 3 lần trở lên.</li>
+<li>Trước một sự kiện biết trước (khuyến mãi, ra mắt), so với con số đo được từ lần trước.</li>
+<li>Khi chọn giữa các phương án: ước lượng thường loại được một nửa số phương án mà không cần thử.</li>
+</ul>
+<h3>Cái giá của ước lượng sai</h3>
+<ul>
+<li>Thấp quá: sập lúc cao điểm, sửa gấp trên production.</li>
+<li>Cao quá: tốn tiền máy, và hay hơn cả là tốn công xây hệ thống phức tạp (shard, hàng đợi) mà không cần.</li>
+</ul>
+<h3>Nhận ra trên production bằng gì</h3>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu hỏi</th><th>Xem ở đâu</th></tr></thead>
+<tbody>
+<tr><td>QPS thật theo giờ, đỉnh so với trung bình</td><td>Metric request rate của API; <code>Com_*</code> của MySQL lấy hiệu theo thời gian</td></tr>
+<tr><td>Còn bao nhiêu dự phòng</td><td>CPU, <code>Threads_running</code>, độ trễ p99 ở giờ đỉnh so với giờ thấp điểm</td></tr>
+<tr><td>Pool có đủ không</td><td>Thời gian chờ lấy connection từ pool; <code>Threads_connected</code> so với <code>max_connections</code></td></tr>
+<tr><td>Buffer pool có đủ không</td><td><code>Innodb_buffer_pool_reads</code> chia <code>Innodb_buffer_pool_read_requests</code></td></tr>
+<tr><td>Dữ liệu tăng nhanh cỡ nào</td><td>Kích thước bảng theo ngày, từ <code>information_schema.tables</code></td></tr>
+</tbody></table></div>
+<div class="senior"><h4>Góc nhìn senior: ghi giả định thành bảng và để người khác sửa</h4><p>Một ước lượng tốt không phải là con số cuối, mà là bảng giả định cùng phép tính, để PM sửa "3 lần mỗi ngày" thành "10 lần" và thấy ngay kết luận đổi ra sao. Senior luôn kèm hai thứ: chỗ nào sẽ nghẽn đầu tiên (thường là một row nóng, một bảng không vừa RAM, hoặc số connection), và con số nào cần đo để thay giả định bằng dữ liệu thật.</p></div>
+<div class="prose">
+<h3>Checklist khi review một bản ước lượng</h3>
+<ul>
+<li>Có tách giả định ra khỏi phép tính không? Mỗi giả định có nguồn (số đo, số của tính năng tương tự, hay đoán)?</li>
+<li>Có tính đỉnh không, và hệ số đỉnh lấy từ đâu?</li>
+<li>Có xét tải dồn vào một key, một row, một partition không?</li>
+<li>Dung lượng có tính index, bản sao, log và tăng trưởng không?</li>
+<li>Mức sử dụng ở đỉnh có dưới khoảng 70% không? Nếu một node chết thì các node còn lại có chịu được không?</li>
+<li>Tổng connection ở số pod tối đa có dưới <code>max_connections</code> không?</li>
+</ul>
+</div>
+</section>
+
+<!-- 7 -->
+<section id="s7">
+<header><span class="num">07</span><h2>Hiểu lầm thường gặp</h2></header>
+<div class="prose"><ul>
+<li><strong>Hiểu lầm:</strong> tính theo trung bình là đủ. <strong>Vì sao sai:</strong> giờ cao điểm có thể gấp 5–10 lần trung bình. <strong>Quy tắc:</strong> luôn nhân hệ số đỉnh.</li>
+<li><strong>Hiểu lầm:</strong> CPU 80% nghĩa là còn 20% để dùng. <strong>Vì sao sai:</strong> độ trễ đã tăng mạnh từ trước 100% (<a href="#s2">phần 02</a>). <strong>Quy tắc:</strong> nhắm dưới khoảng 70% ở giờ đỉnh.</li>
+<li><strong>Hiểu lầm:</strong> pool càng lớn càng nhanh. <strong>Vì sao sai:</strong> số connection bận do λ × thời gian giữ quyết định; pool thừa chỉ thêm connection nhàn rỗi và rủi ro vượt <code>max_connections</code>. <strong>Quy tắc:</strong> tính bằng định luật Little.</li>
+<li><strong>Hiểu lầm:</strong> tổng QPS thấp thì không có điểm nóng. <strong>Vì sao sai:</strong> tải có thể dồn hết vào một row hoặc một key. <strong>Quy tắc:</strong> ước lượng cả QPS trên key nóng nhất.</li>
+<li><strong>Hiểu lầm:</strong> ước lượng phải chính xác mới có giá trị. <strong>Vì sao sai:</strong> quyết định đổi theo bậc độ lớn. <strong>Quy tắc:</strong> làm tròn, ghi giả định, đo sau.</li>
+<li><strong>Hiểu lầm:</strong> dung lượng chỉ là dữ liệu. <strong>Vì sao sai:</strong> index, bản sao, binlog, undo và phần trống trong page có thể gấp đôi hoặc hơn. <strong>Quy tắc:</strong> nhân hệ số.</li>
+</ul></div>
+</section>
+
+<!-- 8 -->
+<section id="s8">
+<header><span class="num">08</span><h2>Câu hỏi ôn tập</h2></header>
+<p class="prose">Viết ngày 2026-10-20. Đánh số Q65 đến Q70.</p>
+<details><summary><span class="tag">Dự đoán</span>Q65. Từ DAU ra QPS</summary>
+<p>5 triệu DAU, mỗi người 20 lượt đọc và 2 lượt ghi mỗi ngày, hệ số đỉnh 4. Ước lượng QPS đọc và ghi ở đỉnh.</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Đọc: 5.000.000 × 20 / 100.000 ≈ 1.000 mỗi giây trung bình, × 4 ≈ 4.000 ở đỉnh. Ghi: 5.000.000 × 2 / 100.000 ≈ 100 trung bình, × 4 ≈ 400 ở đỉnh. Dùng 86.400 thay cho 100.000 thì các số cao hơn khoảng 15%; kết luận không đổi.</p></details></details>
+<details><summary><span class="tag">Dự đoán</span>Q66. Định luật Little</summary>
+<p>API nhận 3.000 request mỗi giây, mỗi request giữ connection database 6 ms. Có 10 pod. Trung bình bao nhiêu connection bận? Pool mỗi pod nên khoảng bao nhiêu?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>3.000 × 0,006 = 18 connection bận trung bình trên cả cụm, khoảng 1,8 mỗi pod. Chừa 2–3 lần cho giây đông nhất thì cả cụm cần khoảng 40–55, tức pool khoảng 5 mỗi pod. Một pool 50 mỗi pod (500 tổng) là thừa gấp mười.</p></details></details>
+<details><summary><span class="tag">Giải thích</span>Q67. Vì sao 90% là quá cao</summary>
+<p>Theo M/M/1, thời gian phản hồi trung bình ở 50%, 80% và 90% mức sử dụng là bao nhiêu lần thời gian xử lý S? Điều đó nói gì về dự phòng?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>S / (1 − ρ): 2S ở 50%, 5S ở 80%, 10S ở 90%. Từ 80% lên 90% tải chỉ tăng 12,5% mà độ trễ gấp đôi. Mọi dao động nhỏ quanh 90% gây độ trễ lớn, nên giờ đỉnh nên dưới khoảng 70%, và một node chết thì các node còn lại vẫn phải dưới mức nguy hiểm.</p></details></details>
+<details><summary><span class="tag">Chẩn đoán</span>Q68. Autoscale làm database sập</summary>
+<p>Lúc cao điểm, Kubernetes tăng từ 10 lên 40 pod, mỗi pod pool 30. Ngay sau đó các pod mới báo "Too many connections", và p99 của pod cũ cũng tăng. Vì sao?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>40 × 30 = 1.200 connection, có thể vượt <code>max_connections</code>. Kể cả khi chưa vượt, mỗi connection tốn bộ nhớ ở server, và nhiều câu chạy cùng lúc làm tăng tranh chấp trong InnoDB, nên mọi câu đều chậm hơn. Số connection bận thật do λ × thời gian giữ quyết định, không tăng theo số pod. Sửa: pool nhỏ hơn mỗi pod, kiểm tra tổng ở số pod tối đa, hoặc đặt proxy gom connection trước MySQL.</p></details></details>
+<details><summary><span class="tag">Dự đoán</span>Q69. Dung lượng</summary>
+<p>Mỗi ngày 2 triệu bản ghi, mỗi bản ghi 500 byte, 3 secondary index, giữ 2 năm. Ước lượng dung lượng.</p>
+<details class="answer"><summary>Xem đáp án</summary><p>2.000.000 × 500 B = 1 GB mỗi ngày dữ liệu thô. Với 3 secondary index và page không đầy, nhân khoảng 2: 2 GB mỗi ngày. Hai năm: 2 × 730 ≈ 1,5 TB, chưa tính binlog và bản sao. Kết luận: cần chiến lược dọn hoặc chia theo thời gian ngay từ đầu.</p></details></details>
+<details><summary><span class="tag">Giải thích</span>Q70. Một request gọi 10 service</summary>
+<p>Mỗi service có p99 bằng 200 ms và p50 bằng 20 ms. Một request gọi song song 10 service và chờ đủ cả 10. Vì sao p99 của request gần như chắc chắn xấu hơn p99 của từng service?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Xác suất cả 10 lời gọi cùng nhanh hơn p99 là 0,99<sup>10</sup> ≈ 0,90. Tức khoảng 10% request gặp ít nhất một lời gọi chậm cỡ 200 ms, nên p90 của request đã khoảng bằng p99 của từng service. Khi gọi nhiều service, đuôi của từng service trở thành phần thân của request.</p></details></details>
+</section>
+
+<!-- 9 -->
+<section id="s9">
+<header><span class="num">09</span><h2>Bài toán thực tế</h2></header>
+<div class="prose">
+<p>Mỗi bài là một vòng phỏng vấn system design cấp senior, khoảng 30–45 phút. Cách dùng:</p>
+<ol class="list">
+<li>Đọc bối cảnh và câu hỏi của interviewer. Bối cảnh là những gì interviewer nói lúc đầu: hệ thống, cách đang làm, quy mô, chuyện đã xảy ra. Viết ra những gì bạn sẽ hỏi thêm trước khi thiết kế, rồi mới mở "Hỏi lại interviewer" để xem câu hỏi nên hỏi và câu trả lời của interviewer: con số chính xác, yêu cầu, ràng buộc. Các con số ở đó dùng cho những câu sau.</li>
+<li>Với mỗi follow-up, tự trả lời (nói to hoặc viết ra) trong vài phút, rồi mới mở đáp án. Follow-up cuối luôn là triển khai và kiểm chứng: thiết kế đã chọn được làm ra sao, test gì, theo dõi gì, lùi lại thế nào.</li>
+<li>Cuối bài, dùng rubric để tự chấm: câu trả lời của bạn giống cột "mid" hay cột "senior", và có rơi vào red flag nào không.</li>
+</ol>
+<p>Đáp án là lập luận từ tài liệu, không phải số đo; con số trong đó là ước lượng. Viết ngày 2026-10-21.</p>
+</div>
+
+<!-- C13 -->
+<div class="case" id="c13">
+<h3>C13. Lịch sử giao dịch của ví: 5 năm dữ liệu trên một MySQL?</h3>
+<p class="src">Dựa trên: phần 02 và 04 của trang này; <a href="../index-write-cost/index.html">Chi phí ghi của index</a>; <a href="../innodb-buffer-pool-redo-undo/index.html">Buffer pool</a>.</p>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> Ví điện tử, 3 triệu người dùng hoạt động mỗi ngày. Mọi giao dịch nằm trong một bảng <code>ledger</code> trên một MySQL 8.4 primary (64 GB RAM, disk 2 TB).</li><li><strong>Cách dùng:</strong> Màn "Lịch sử" hiện 20 giao dịch gần nhất, lọc theo tháng; phần lớn người dùng chỉ xem 30 ngày gần nhất.</li><li><strong>Yêu cầu mới:</strong> Luật yêu cầu giữ lịch sử 5 năm. Team không muốn tự quản lý shard trong năm nay.</li></ul></div>
+<blockquote class="q">"Một MySQL có trụ được không? Nếu không thì bạn làm gì?"</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>Bao nhiêu người dùng, bao nhiêu giao dịch?</td><td>3 triệu người dùng hoạt động mỗi ngày, trung bình 4 giao dịch mỗi người mỗi ngày. Mỗi giao dịch 2 row (nợ và có), mỗi row khoảng 300 byte. Hệ số đỉnh 5.</td><td>Đầu vào cho QPS và dung lượng.</td></tr>
+<tr><td>Bảng có những index nào?</td><td>Khoá chính BIGINT tự tăng; 3 secondary index: <code>(wallet_id, created_at)</code>, <code>(transfer_id)</code>, <code>(created_at)</code>.</td><td>Index thường chiếm nhiều chỗ ngang dữ liệu.</td></tr>
+<tr><td>Ai đọc, đọc gì?</td><td>Màn hình "Lịch sử": 20 giao dịch gần nhất, lọc theo tháng; 90% lượt xem chỉ xem 30 ngày gần nhất. Mỗi người mở 3 lần mỗi ngày.</td><td>Xác định working set.</td></tr>
+<tr><td>"Giữ 5 năm" có cần xem được trong app?</td><td>12 tháng gần nhất xem được trong app; cũ hơn chỉ cần trích xuất trong vài giờ khi kiểm toán yêu cầu.</td><td>Dữ liệu cũ không cần nằm ở primary.</td></tr>
+<tr><td>Phần cứng?</td><td>64 GB RAM, buffer pool 48 GB, disk 2 TB.</td><td>Hai trần: RAM và disk.</td></tr>
+<tr><td>Giới hạn?</td><td>MySQL 8.4. p99 lịch sử dưới 100 ms. Sửa schema không gián đoạn quá vài phút. Team không muốn tự quản lý shard năm nay.</td><td>Loại sharding khỏi lựa chọn đầu tiên.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> hỏi "giữ 5 năm" nghĩa là gì về truy cập. Luật yêu cầu giữ, không yêu cầu truy vấn trong 100 ms; câu trả lời này quyết định 80% thiết kế.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Ước lượng QPS đọc, ghi ở đỉnh, dung lượng sau 1 và 5 năm, và working set.</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li><strong>Ghi:</strong> 3.000.000 × 4 × 2 = 24 triệu row mỗi ngày; / 100.000 giây ≈ 240 row mỗi giây trung bình; × 5 ≈ 1.200 ở đỉnh, tức khoảng 600 transaction mỗi giây.</li>
+<li><strong>Đọc:</strong> 3.000.000 × 3 / 100.000 ≈ 90 mỗi giây; × 5 ≈ 450 ở đỉnh. Mỗi lần là range scan 20 entry cộng 20 lần tra PRIMARY.</li>
+<li><strong>Dữ liệu:</strong> 24 triệu × 300 B ≈ 7,2 GB thô mỗi ngày. Ba secondary index và page không đầy: nhân khoảng 2, tức khoảng 14 GB mỗi ngày. Một năm khoảng 5 TB; 5 năm khoảng 25 TB nếu không tăng.</li>
+<li><strong>Working set 30 ngày:</strong> 30 × 14 GB ≈ 420 GB. Buffer pool 48 GB chứa được khoảng 3 ngày.</li>
+</ul>
+<p><strong>Kết luận:</strong> QPS không phải vấn đề. Disk hết sau khoảng 5 tháng, và working set gấp gần 10 lần buffer pool. Đó là hai chỗ nghẽn trước.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> QPS nhỏ vậy thì mua disk lớn hơn là xong, đúng không?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p><strong>Không.</strong> Disk chỉ là một trong các vấn đề của một bảng 25 TB:</p>
+<ul>
+<li>Thêm index, đổi schema, sao lưu, dựng replica mới: mỗi việc tính bằng ngày. Yêu cầu "không gián đoạn quá vài phút" khó giữ.</li>
+<li>Xoá dữ liệu quá hạn bằng <code>DELETE … WHERE created_at &lt; …</code> trên bảng vài TB là hàng giờ ghi nặng và replica trễ.</li>
+<li>Working set vẫn không vừa RAM.</li>
+</ul>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>A. Một bảng, disk lớn hơn</td><td>Không đổi code</td><td>Như trên</td></tr>
+<tr><td>B. Partition theo tháng</td><td>Xoá cũ bằng <code>DROP PARTITION</code> gần như tức thì; truy vấn theo tháng chạm một partition</td><td>Khoá chính và mọi unique index phải chứa cột partition; không có foreign key</td></tr>
+<tr><td>C. Bảng nóng 13 tháng, phần cũ sang kho lưu trữ</td><td>Primary có trần dung lượng; phần cũ ở storage rẻ</td><td>Truy vấn phần cũ chậm, qua đường khác; cần job chuyển</td></tr>
+<tr><td>D. Giảm kích thước row và index</td><td>Rẻ; tác động lên mọi con số</td><td>Có giới hạn; đổi schema</td></tr>
+<tr><td>E. Shard theo <code>wallet_id</code></td><td>Mở rộng gần như vô hạn</td><td>Team không muốn; truy vấn chéo shard khó</td></tr>
+</tbody></table></div>
+<p><strong>Chọn B + C + D, chưa cần E.</strong></p>
+<ul>
+<li>D trước: bỏ index <code>(created_at)</code> trên primary (báo cáo chạy trên replica có index riêng). Rà kiểu cột. Giảm 20–30% là hợp lý, nhưng phải đo.</li>
+<li>B: partition theo tháng; khoá chính <code>(id, created_at)</code>. Câu lịch sử luôn có điều kiện thời gian nên chỉ chạm 1–2 partition.</li>
+<li>C: giữ 13 tháng; mỗi tháng xuất partition cũ nhất, kiểm tra số row và tổng tiền, rồi <code>DROP PARTITION</code>. Primary còn khoảng 13 × 420 GB ≈ 5,5 TB nếu không tăng: vẫn cần disk khoảng 8 TB, hoặc làm D tốt hơn.</li>
+</ul>
+<p><strong>Khi nào đổi ý:</strong> giao dịch tăng hơn 3 lần mỗi năm, hoặc ghi đỉnh vượt khoảng 60% mức primary chịu được (đo bằng E36): lên kế hoạch shard.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> Working set 420 GB, buffer pool 48 GB. Màn hình lịch sử có giữ được p99 dưới 100 ms không?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p><strong>Có thể, vì mỗi lần xem chỉ cần vài page.</strong> "Working set" của cả bảng không vừa RAM, nhưng mỗi ví chỉ cần các page chứa 20 giao dịch gần nhất của nó.</p>
+<ul>
+<li>Nhờ index <code>(wallet_id, created_at)</code>: khoảng 1–2 lần đọc page từ disk cho index, và tối đa 20 lần cho PRIMARY nếu row nằm rải rác (row của một ví được chèn xen với hàng triệu ví khác theo thời gian).</li>
+<li>450 lượt xem mỗi giây × khoảng 20 lần đọc ngẫu nhiên là cỡ vài nghìn IOPS: SSD chịu được, mỗi lần đọc dưới 1 ms.</li>
+<li>Giảm số lần tra PRIMARY: index phủ cho các cột màn hình cần, hoặc khoá chính <code>(wallet_id, created_at, id)</code> để row của một ví nằm cạnh nhau. Cái giá của cách thứ hai: khoá chính không tăng dần, nên mỗi lần chèn tách page nhiều hơn, ghi đắt hơn. Đây là đánh đổi đọc với ghi, phải đo bằng tải thật.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> Đổi bảng đang chạy sang partition thế nào mà không gián đoạn?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li><code>ALTER TABLE … PARTITION BY</code> trên bảng có sẵn dựng lại cả bảng; với vài TB là hàng giờ và không online. Không làm thế.</li>
+<li>Cách online: tạo bảng mới có partition, chép dữ liệu bằng công cụ như gh-ost hoặc ghi kép rồi backfill, kiểm tra, rồi đổi tên trong vài giây. Đây là chủ đề Month 4 (migration online).</li>
+<li>Dễ hơn: vì chỉ cần giữ 13 tháng trên primary, bảng mới chỉ cần nhận dữ liệu mới và backfill 13 tháng; phần cũ hơn xuất thẳng từ bảng cũ sang kho lưu trữ, rồi bỏ bảng cũ.</li>
+<li>Bảng có partition trong MySQL không hỗ trợ foreign key: nếu <code>ledger</code> đang có, phải bỏ và kiểm tra ở tầng ứng dụng hoặc bằng đối soát.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai và kiểm chứng thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
+<pre><code>CREATE TABLE ledger (
+  id          BIGINT NOT NULL AUTO_INCREMENT,
+  created_at  DATETIME NOT NULL,
+  wallet_id   BIGINT NOT NULL,
+  transfer_id BIGINT NOT NULL,
+  delta       BIGINT NOT NULL,
+  kind        TINYINT NOT NULL,
+  PRIMARY KEY (id, created_at),
+  KEY idx_wallet_time (wallet_id, created_at),
+  KEY idx_transfer (transfer_id)
+)
+PARTITION BY RANGE COLUMNS (created_at) (
+  PARTITION p2026_10 VALUES LESS THAN ('2026-11-01'),
+  PARTITION p2026_11 VALUES LESS THAN ('2026-12-01'),
+  PARTITION pmax     VALUES LESS THAN (MAXVALUE)
+);
+-- job hằng tháng: REORGANIZE PARTITION pmax thành tháng mới + pmax; xuất rồi DROP partition cũ nhất</code></pre>
+<ul>
+<li>Đo kích thước thật sau một tuần (<code>information_schema</code>), thay giả định 300 byte và hệ số 2.</li>
+<li><code>EXPLAIN</code> câu lịch sử: cột <code>partitions</code> chỉ có 1–2 partition.</li>
+<li>Theo dõi <code>Innodb_buffer_pool_reads</code> và p99 màn hình lịch sử ở giờ đỉnh.</li>
+<li>Diễn tập job lưu trữ trên bản sao: xuất, đối soát số row và tổng <code>delta</code>, khôi phục thử một tháng. Một bản lưu trữ chưa từng khôi phục thử là chưa có bản lưu trữ.</li>
+<li>Cảnh báo khi job tạo partition tháng mới thất bại; nếu quên, mọi row mới rơi vào <code>pmax</code> và việc dọn tháng sau sẽ khó.</li>
+</ul>
+</details>
+</div>
+
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Làm rõ</td><td>Hỏi số người dùng</td><td>Hỏi "giữ" khác "truy vấn được" thế nào</td></tr>
+<tr><td>Ước lượng</td><td>Chỉ tính QPS</td><td>QPS, dung lượng kể cả index, working set; chỉ ra chỗ nghẽn thật</td></tr>
+<tr><td>Lưu trữ</td><td>Mua disk hoặc shard ngay</td><td>Partition, bảng nóng có trần, kho lưu trữ; shard khi có ngưỡng</td></tr>
+<tr><td>Đọc</td><td>"Tăng RAM"</td><td>Tính số page mỗi lần xem; đánh đổi khoá chính theo ví</td></tr>
+<tr><td>Vận hành</td><td><code>ALTER</code> trực tiếp</td><td>Chuyển online; diễn tập khôi phục lưu trữ</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> thấy QPS nhỏ rồi kết luận "một MySQL là đủ"; tính dung lượng quên index; muốn cả 5 năm nằm trong buffer pool; xoá dữ liệu cũ bằng <code>DELETE</code> trên bảng vài TB.</p>
+</details>
+</div>
+
+<!-- C14 -->
+<div class="case" id="c14">
+<h3>C14. Black Friday: tải gấp 8 lần trong 2 giờ</h3>
+<p class="src">Dựa trên: phần 02 của trang này (Little, hàng đợi); <a href="../idempotency-retries/index.html">Idempotency và retry</a> (C6).</p>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> Service checkout chạy 10 pod, gọi một MySQL primary và một service thanh toán bên ngoài. HPA cho phép tối đa 80 pod.</li><li><strong>Hiện tại:</strong> Giờ cao điểm bình thường 600 request mỗi giây, p99 120 ms, CPU pod 40%, CPU MySQL 35%.</li><li><strong>Sắp tới:</strong> Marketing dự báo Black Friday tải gấp 8 lần trong 2 giờ, mở bán lúc 0:00. Còn 3 tuần.</li></ul></div>
+<blockquote class="q">"Chúng tôi có ổn không? Nếu không, kế hoạch 3 tuần của bạn là gì?"</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>Tải và độ trễ hiện tại ở giờ cao điểm?</td><td>600 request mỗi giây, p50 40 ms, p99 120 ms. Mục tiêu Black Friday: p99 dưới 500 ms, không mất đơn.</td><td>Mốc để nhân lên.</td></tr>
+<tr><td>Service chạy trên gì?</td><td>10 pod, mỗi pod 2 vCPU; CPU trung bình 40%.</td><td>Trần CPU của app.</td></tr>
+<tr><td>Kết nối database?</td><td>Mỗi request giữ connection khoảng 12 ms; pool 25 mỗi pod.</td><td>Little's law cho số connection bận.</td></tr>
+<tr><td>MySQL đang thế nào?</td><td>Primary CPU 35%, <code>Threads_running</code> khoảng 8, <code>max_connections</code> 600. Có thể tăng cấu hình một bậc (gấp đôi CPU) với một lần chuyển đổi ngắn.</td><td>Trần không tăng được bằng cách thêm pod.</td></tr>
+<tr><td>Phụ thuộc bên ngoài?</td><td>Service thanh toán: p99 300 ms, giới hạn hợp đồng 3.000 request mỗi giây. Chỉ bước cuối, khoảng 1/3 request, gọi tới nó.</td><td>Giới hạn của bên thứ ba.</td></tr>
+<tr><td>Hình dạng của tải?</td><td>Mở bán 0:00; đỉnh nhọn ở phút đầu khoảng gấp 1,5 mức 2 giờ.</td><td>Thiết kế cho đỉnh nhọn, không cho trung bình.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> liệt kê mọi tài nguyên có giới hạn (CPU pod, connection, CPU database, bên thứ ba) và hỏi số "đang dùng" của từng cái. HPA chỉ tăng một trong số đó.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Chỗ nào vỡ đầu tiên? Theo thứ tự.</p>
+<details class="answer"><summary>Đáp án</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tài nguyên</th><th>Hiện tại</th><th>× 8</th><th>Giới hạn</th><th>Kết luận</th></tr></thead>
+<tbody>
+<tr><td>CPU pod</td><td>10 pod × 40%</td><td>tương đương 32 pod ở 100%</td><td>80 pod</td><td>Cần khoảng 50–60 pod để dưới 60%: được</td></tr>
+<tr><td>Connection bận (Little)</td><td>600 × 0,012 ≈ 7</td><td>4.800 × 0,012 ≈ 58</td><td>–</td><td>Nhỏ; khớp <code>Threads_running</code> 8</td></tr>
+<tr><td>Tổng pool</td><td>10 × 25 = 250</td><td>80 × 25 = 2.000</td><td><code>max_connections</code> 600</td><td>Vỡ khi vượt 24 pod</td></tr>
+<tr><td>CPU MySQL</td><td>35%</td><td>gần 280% nếu tuyến tính</td><td>100%</td><td>Vỡ; gấp đôi cấu hình vẫn khoảng 140%</td></tr>
+<tr><td>Thanh toán ngoài</td><td>khoảng 200 req/s</td><td>khoảng 1.600, đỉnh nhọn 2.400</td><td>3.000</td><td>Được, nhưng sát (80%)</td></tr>
+</tbody></table></div>
+<p><strong>Thứ tự vỡ:</strong> tổng connection (ngay khi HPA vượt 24 pod, nghĩa là chính HPA gây ra sự cố), rồi CPU MySQL. Pod và thanh toán chịu được.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> Vậy tăng <code>max_connections</code> lên 2.000 là xong phần connection?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p><strong>Không.</strong> Little's law nói chỉ khoảng 58 connection bận cùng lúc. 2.000 connection mở mà gần hết nhàn rỗi tốn RAM ở server, và khi có sự cố (một câu chậm), cả 2.000 cùng bận, làm tranh chấp bên trong MySQL tệ hơn. Tăng giới hạn chỉ dời chỗ vỡ.</p>
+<p><strong>Làm ngược lại:</strong> pool nhỏ theo Little. 58 bận × 2–3 lần dư ≈ 150 tổng, tức khoảng 2–3 mỗi pod ở 80 pod. Chọn 3 mỗi pod, tổng 240, dưới 600. Thêm metric thời gian chờ pool: pool nhỏ ở một pod nóng thì request chờ, và đó là tín hiệu cần biết.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> CPU MySQL sẽ khoảng 280%. Gấp đôi cấu hình chỉ còn 140%. Bạn làm gì?</p>
+<details class="answer"><summary>Đáp án</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>C. Giảm việc mỗi checkout trên MySQL</td><td>Tác động thẳng lên CPU</td><td>Cần profiling</td></tr>
+<tr><td>D. Nâng cấu hình gấp đôi</td><td>Chắc chắn thêm CPU</td><td>Một mình không đủ</td></tr>
+<tr><td>E. Đọc chỉ để hiển thị sang replica</td><td>Giảm tải primary</td><td>Đọc có độ trễ; phần cần đúng vẫn ở primary</td></tr>
+<tr><td>F. Hàng chờ ảo ở cửa vào</td><td>Giới hạn tải vào ở mức đã kiểm chứng</td><td>Khách phải chờ; mất doanh thu nếu chờ lâu</td></tr>
+</tbody></table></div>
+<ul>
+<li><strong>C trước:</strong> top câu lệnh theo tổng thời gian từ <code>events_statements_summary_by_digest</code>. Một câu đọc giỏ hàng 3 lần trong một request, hay một <code>SELECT</code> thiếu index, thường giảm được 30–50% CPU. Đây là phỏng đoán, phải đo.</li>
+<li><strong>E</strong> cho trang chỉ đọc, kèm read-your-writes sau khi vừa ghi (trang replication).</li>
+<li><strong>D</strong> nếu sau C và E, phép tính vẫn cho trên 60% CPU ở đỉnh.</li>
+<li><strong>F</strong> làm lưới an toàn: chỉ bật khi p99 vượt ngưỡng, giới hạn ở mức đã kiểm chứng.</li>
+</ul>
+<p>Điểm senior: "CPU MySQL tăng tuyến tính" là giả định có thể sai cả hai chiều (tranh chấp khoá làm tệ hơn, cache làm đỡ hơn). Chỉ test tải mới trả lời được, nên kế hoạch phải có test tải sớm.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> Test tải thế nào để tin được kết quả?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li><strong>Open-loop:</strong> gửi tải theo tốc độ cố định (ví dụ 5.000 request mỗi giây), không phụ thuộc phản hồi. Closed-loop ("N user ảo, gửi request tiếp khi nhận trả lời") tự giảm tải khi hệ thống chậm, nên che mất đường cong độ trễ thật.</li>
+<li>Dữ liệu giống thật: kích thước bảng, phân bố sản phẩm, tỉ lệ giỏ hàng; không phải database rỗng.</li>
+<li>Đo đỉnh nhọn: 7.200 request mỗi giây trong vài phút, không chỉ mức 2 giờ.</li>
+<li>Giả lập bên thứ ba ở đúng độ trễ (p99 300 ms) và giới hạn (3.000).</li>
+<li>Đạt khi: p99 dưới 500 ms, thời gian chờ pool thấp, CPU MySQL dưới 60%, 0 lỗi mất đơn.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Kế hoạch triển khai 3 tuần, cách kiểm chứng, và ngày diễn ra?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li><strong>Tuần 1:</strong> pool 3 mỗi pod, HPA tối đa 80; profiling, sửa 3 câu tốn nhất.</li>
+<li><strong>Tuần 2:</strong> đọc hiển thị sang replica; test tải 1 ở 5.000 request mỗi giây.</li>
+<li><strong>Tuần 3:</strong> nâng cấu hình MySQL nếu cần; test tải 2 ở 7.200 request mỗi giây; diễn tập bật hàng chờ ảo; đóng băng deploy.</li>
+<li>Báo trước nhà cung cấp thanh toán về 2.400 request mỗi giây; hỏi tạm nâng giới hạn.</li>
+<li><strong>Ngày diễn ra:</strong> dashboard request rate, p99, thời gian chờ pool, <code>Threads_running</code>, CPU MySQL, lỗi thanh toán, độ trễ replica. Kế hoạch lùi: hàng chờ ảo với ngưỡng đã thử; tắt tính năng không thiết yếu (gợi ý sản phẩm) bằng feature flag.</li>
+</ul>
+</details>
+</div>
+
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Phân tích</td><td>"HPA lo được"</td><td>Bảng tài nguyên × 8 so với từng giới hạn; thứ tự vỡ</td></tr>
+<tr><td>Connection</td><td>Tăng <code>max_connections</code></td><td>Little's law, pool nhỏ, thấy HPA gây vỡ</td></tr>
+<tr><td>Database</td><td>Nâng cấu hình</td><td>Profiling, replica, nâng cấu hình khi phép tính đòi; nghi ngờ giả định tuyến tính</td></tr>
+<tr><td>Test</td><td>"Chạy load test"</td><td>Open-loop, dữ liệu thật, đỉnh nhọn, tiêu chí đạt</td></tr>
+<tr><td>Ngày diễn ra</td><td>Không nhắc</td><td>Dashboard, hàng chờ ảo, feature flag, đóng băng deploy</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> chỉ nhìn CPU pod; quên rằng thêm pod làm tăng tổng connection; test closed-loop; không tính giới hạn của bên thứ ba.</p>
+</details>
+</div>
+
+<!-- C15 -->
+<div class="case" id="c15">
+<h3>C15. Đếm lượt xem: tổng tải nhỏ, một bài viral làm sập</h3>
+<p class="src">Dựa trên: phần 03 của trang này; <a href="../concurrency-control-strategies/index.html">Kiểm soát ghi đồng thời</a> (row nóng); <a href="../transactional-outbox/index.html">Transactional outbox</a>.</p>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> Trang tin tức, MySQL 8.4 và Redis. Lượt xem dùng để hiển thị trên bài và để tính doanh thu quảng cáo cuối ngày.</li><li><strong>Đang làm:</strong> Mỗi lượt xem chạy <code>UPDATE articles SET views = views + 1 WHERE id = ?</code>.</li><li><strong>Quy mô:</strong> 1,5 triệu lượt xem mỗi ngày, khoảng 17 lượt mỗi giây.</li><li><strong>Đã xảy ra:</strong> Hôm qua một bài viral nhận khoảng 3.000 lượt xem mỗi giây trong 40 phút. Request vào bài đó timeout, rồi lỗi lan sang cả các trang khác.</li></ul></div>
+<blockquote class="q">"Vì sao chỉ 17 lượt mỗi giây mà vẫn sập? Hãy thiết kế lại cách đếm lượt xem."</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>Mỗi lượt xem làm gì với database?</td><td><code>UPDATE articles SET views = views + 1 WHERE id = ?</code>.</td><td>Mọi lượt xem một bài ghi vào một row.</td></tr>
+<tr><td>Bài viral nhận bao nhiêu?</td><td>3.000 lượt xem mỗi giây trong 40 phút.</td><td>Tải trên một key, không phải tổng tải.</td></tr>
+<tr><td>Triệu chứng?</td><td>Request vào bài đó timeout; lỗi lan sang trang khác; <code>Innodb_row_lock_waits</code> tăng vọt.</td><td>Lan sang trang khác nghĩa là tài nguyên chung bị giữ.</td></tr>
+<tr><td>Số lượt xem dùng để làm gì?</td><td>Hiển thị (được trễ tới 1 phút, sai vài phần trăm) và báo cáo doanh thu quảng cáo cuối ngày (phải chính xác).</td><td>Hai yêu cầu khác nhau.</td></tr>
+<tr><td>Có cần đếm người duy nhất? Chống bot?</td><td>Không; chỉ đếm lượt. Chống bot là bài khác.</td><td>Giữ phạm vi.</td></tr>
+<tr><td>Hạ tầng?</td><td>MySQL 8.4 và Redis; không thêm hệ thống mới. Có access log của web server.</td><td>Nguồn dữ liệu sẵn cho báo cáo.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> hỏi số lượt xem dùng cho ai. "Hiển thị" và "tính tiền" có yêu cầu nhất quán khác nhau, và thường cần hai cơ chế khác nhau.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Giải thích bằng con số vì sao 17 lượt mỗi giây vẫn sập.</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Tổng tải che mất tải trên một key. Mọi lượt xem bài viral ghi vào cùng một row; InnoDB chỉ cho một transaction giữ khoá X trên row đó tại một thời điểm.</li>
+<li>Một <code>UPDATE</code> autocommit giữ khoá khoảng bằng thời gian commit, giả sử 1 ms: trần khoảng 1.000 lần mỗi giây trên một row.</li>
+<li>3.000 lần mỗi giây gấp 3 lần trần. Hàng chờ khoá tăng thêm khoảng 2.000 request mỗi giây; sau 30 giây đã có hàng chục nghìn request chờ, vượt <code>innodb_lock_wait_timeout</code>, giữ hết connection trong pool.</li>
+<li>Các trang khác dùng chung pool nên chết theo. Đây là lý do một bài làm sập cả site.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> Tăng cấu hình MySQL có giúp không? Các phương án khác?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p>Không. Trần của một row đến từ việc các commit trên nó phải đi lần lượt, không từ CPU.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>A. Tăng cấu hình MySQL</td><td>Không đổi code</td><td>Trần của một row không tăng theo CPU</td></tr>
+<tr><td>B. Chia bộ đếm thành 16 row</td><td>Trần gấp 16 lần; vẫn chính xác</td><td>Đọc cộng 16 row; bài lớn hơn nữa lại thiếu</td></tr>
+<tr><td>C. Redis <code>INCR</code>, flush định kỳ về MySQL</td><td>Không còn row nóng; trễ tối đa 30 giây</td><td>Redis mất dữ liệu thì mất lượt chưa flush; flush không được cộng trùng</td></tr>
+<tr><td>D. Ghi log mỗi lượt xem, tổng hợp theo lô</td><td>Chính xác, kiểm toán được</td><td>Nhiều row; tổng hợp tốn công</td></tr>
+<tr><td>E. Đếm ở CDN</td><td>Không chạm hệ thống</td><td>Phụ thuộc CDN; trễ vài phút</td></tr>
+</tbody></table></div>
+<p><strong>Hai yêu cầu, hai cơ chế:</strong> hiển thị dùng C (Redis xử lý cỡ 100.000 lệnh đơn giản mỗi giây trên một luồng, 3.000 là 3%; ước lượng). Báo cáo dùng D theo lô từ access log có sẵn: không thêm ghi trên đường xử lý request.</p>
+<p><strong>Khi nào đổi ý:</strong> không có access log đáng tin (app di động gửi sự kiện riêng) thì ghi sự kiện vào hàng đợi và tổng hợp theo lô; không ghi MySQL từng lượt.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> Flush từ Redis về MySQL thế nào để không mất lượt xem đến giữa chừng, và không cộng trùng khi job chết?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li><strong>Không mất:</strong> <code>GET</code> rồi <code>SET 0</code> mất các lượt đến giữa hai lệnh. Đổi tên key (<code>RENAMENX views:pending views:flush:&lt;ts&gt;</code>) để lấy trọn một mẻ không còn bị ghi thêm; lượt mới đi vào key <code>views:pending</code> mới.</li>
+<li><strong>Không cộng trùng:</strong> job chết sau khi ghi MySQL và trước khi <code>DEL</code> thì mẻ cũ vẫn nằm trong Redis. Ghi tên mẻ vào bảng <code>view_batches</code> (khoá chính) trong cùng transaction với câu cộng; gặp lại tên đã có thì chỉ xoá key. Đúng mẫu "dấu đã xử lý" ở trang idempotency.</li>
+<li><strong>Mẻ sót:</strong> mỗi lần chạy, xử lý trước các key <code>views:flush:*</code> còn sót (tìm bằng <code>SCAN</code>, không dùng <code>KEYS</code>).</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> Ngoài bộ đếm, bạn sửa gì để lần sau một điểm nóng không làm chết cả site?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Tách bảng đếm (<code>article_views</code>) khỏi <code>articles</code>, để cập nhật đếm không tranh khoá với việc sửa bài.</li>
+<li>Không để một loại việc giữ hết pool chung: pool riêng hoặc giới hạn số connection cho các thao tác không thiết yếu (bulkhead).</li>
+<li><code>innodb_lock_wait_timeout</code> ngắn cho các thao tác không thiết yếu (đặt theo session), để chúng thất bại nhanh thay vì giữ connection 50 giây.</li>
+<li>Theo dõi <code>Innodb_row_lock_waits</code> và thời gian chờ pool, cảnh báo sớm khi một key nóng lên.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai và kiểm chứng thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
+<pre><code>// mỗi lượt xem: một lệnh Redis, không chạm MySQL
+await redis.hincrby('views:pending', articleId, 1);
+// mỗi 30 giây: đổi tên key để lấy trọn một "mẻ" không bị ghi thêm vào
+const batch = `views:flush:${Date.now()}`;
+const moved = await redis.renamenx('views:pending', batch).catch(() =&gt; 0); // key chưa có thì bỏ qua
+if (moved) {
+  const counts = await redis.hgetall(batch);
+  await mysql.query(
+    'INSERT INTO article_views (article_id, views) VALUES ? AS new ' +
+    'ON DUPLICATE KEY UPDATE views = article_views.views + new.views',
+    [Object.entries(counts).map(([id, n]) =&gt; [id, Number(n)])]);
+  await redis.del(batch);
+}</code></pre>
+<ul>
+<li>Code dùng alias cho row mới (<code>AS new</code>), vì <code>VALUES(col)</code> trong <code>ON DUPLICATE KEY UPDATE</code> đã deprecated từ MySQL 8.0.20. (Đoạn trên lược bớt bảng <code>view_batches</code> ở Follow-up 3 cho gọn.)</li>
+<li>Test tải: 5.000 lượt mỗi giây vào một bài; <code>Innodb_row_lock_waits</code> không đổi, p99 các trang khác không đổi.</li>
+<li>Redis khởi động lại mất tối đa 30 giây lượt xem: chấp nhận cho hiển thị; báo cáo lấy từ access log nên không ảnh hưởng.</li>
+<li>Đối soát: tổng <code>article_views</code> trong ngày so với <code>daily_views</code> từ log. Lệch vài phần trăm là chấp nhận; lệch lớn là dấu hiệu job flush có lỗi.</li>
+</ul>
+</details>
+</div>
+
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Chẩn đoán</td><td>"Database chậm"</td><td>Tải trên một key; trần khoảng 1.000 lần mỗi giây một row; pool chung lan lỗi</td></tr>
+<tr><td>Yêu cầu</td><td>Một cơ chế cho mọi thứ</td><td>Tách hiển thị và báo cáo</td></tr>
+<tr><td>Bộ đếm</td><td>Redis <code>INCR</code></td><td>Redis với flush không mất, không cộng trùng</td></tr>
+<tr><td>Cô lập</td><td>Không nhắc</td><td>Tách bảng, pool riêng, timeout ngắn cho việc không thiết yếu</td></tr>
+<tr><td>Kiểm chứng</td><td>Không có</td><td>Test tải một bài, đối soát với log</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> nhìn tổng QPS thấp rồi kết luận không có vấn đề; tăng cấu hình MySQL cho vấn đề của một row; flush bằng <code>GET</code> rồi <code>SET 0</code>.</p>
+</details>
+</div>
+</section>
+
+<!-- 10 -->
+<section id="s10">
+<header><span class="num">10</span><h2>Câu hỏi còn mở</h2></header>
+<p class="prose">Số thứ tự trùng với Open questions trong <code>.claude/docs/LEARNING_LOG.md</code>. Log là bản gốc.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>#</th><th>Câu hỏi</th><th>Trạng thái</th></tr></thead>
+<tbody>
+<tr><td>29</td><td>Trên phần cứng của lab, đường cong p99 theo mức sử dụng của MySQL giống M/M/1 hay giống hàng đợi nhiều bộ xử lý (M/M/c)? Từ mức nào thì p99 tăng gấp đôi so với lúc rảnh?</td><td>Mở. E37.</td></tr>
+<tr><td>30</td><td>Hệ số "index và phần dư" thật của các bảng ở chỗ làm là bao nhiêu? Giả định 2 trên trang này có quá thấp với bảng nhiều secondary index không?</td><td>Mở. Đo bằng <code>information_schema.tables</code> trên dữ liệu thật.</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- 11 -->
+<section id="s11">
+<header><span class="num">11</span><h2>Tài liệu tham khảo</h2></header>
+<div class="prose"><ul>
+<li><a href="https://gist.github.com/jboner/2841832">Latency Numbers Every Programmer Should Know</a>: bảng "Latency Comparison Numbers (~2012)", ghi công Jeff Dean và Peter Norvig</li>
+<li>John D. C. Little, "A Proof for the Queuing Formula: L = λW", Operations Research, 1961</li>
+<li>Leonard Kleinrock, <em>Queueing Systems, Volume 1: Theory</em>: hàng đợi M/M/1</li>
+<li>Jeffrey Dean, Luiz André Barroso, "The Tail at Scale", Communications of the ACM, 2013: đuôi độ trễ khi gọi nhiều service</li>
+<li>MySQL 8.4 Reference Manual: <a href="https://dev.mysql.com/doc/refman/8.4/en/server-status-variables.html">Server Status Variables</a> (<code>Com_*</code>, <code>Threads_running</code>), <a href="https://dev.mysql.com/doc/refman/8.4/en/information-schema-tables-table.html">INFORMATION_SCHEMA.TABLES</a>, <a href="https://dev.mysql.com/doc/refman/8.4/en/partitioning-limitations.html">Restrictions and Limitations on Partitioning</a></li>
+<li>Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, chương 1 (mô tả tải và hiệu năng)</li>
+</ul></div>
+<h3>Mức kiểm chứng</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>Khẳng định</th><th>Nguồn</th></tr></thead>
+<tbody>
+<tr><td>Bảng độ trễ và năm số liệu</td><td>gist của jboner, đã đọc</td></tr>
+<tr><td>L = λW đúng với mọi hệ thống ổn định</td><td>định lý của Little</td></tr>
+<tr><td>Công thức M/M/1 cho trung bình và phân vị</td><td>lý thuyết hàng đợi; hình dạng trên MySQL chưa đo (E37)</td></tr>
+<tr><td>Số ghi mỗi giây một primary chịu được</td><td>phải đo trên lab (E36); 2.000 trên trang là giả định</td></tr>
+<tr><td>Bảng partition không hỗ trợ foreign key; khoá chính phải chứa cột partition</td><td>manual 8.4 (giới hạn của partitioning)</td></tr>
+<tr><td>Các con số trong bài toán C13–C15</td><td>ước lượng; chưa đo</td></tr>
+</tbody></table></div>
+</section>
+</main>
+
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const T=(x,y,t,anchor,cls)=>`<text class="${cls||'lbl'}" x="${x}" y="${y}" text-anchor="${anchor||'start'}">${t}</text>`;
+const vi=(n,d=0)=>Number(n).toLocaleString('vi-VN',{maximumFractionDigits:d});
+function human(n){ // số lớn đọc được
+  const a=Math.abs(n);
+  if(a>=1e9)return vi(n/1e9,1)+' tỉ';
+  if(a>=1e6)return vi(n/1e6,1)+' triệu';
+  if(a>=1e4)return vi(Math.round(n));
+  return vi(n,a<10?1:0);
+}
+function bytes(b){const u=['B','KB','MB','GB','TB','PB'];let i=0;while(b>=1024&&i<u.length-1){b/=1024;i++;}return vi(b,b<10?1:0)+' '+u[i];}
+const num=(id,a,b,d)=>{let v=parseFloat($(id).value);return isNaN(v)?d:Math.max(a,Math.min(b,v));};
+
+/* ---------- 01: estimator ---------- */
+function es(){
+  const U=num('esU',1000,1e9,2e6),R=num('esR',0,1e4,40),W=num('esW',0,1e4,3),P=num('esP',1,50,5),S=num('esS',10,1e7,800),Y=num('esY',0.1,20,3),X=num('esX',1,10,2),B=num('esB',0.1,1e5,15),C=num('esC',1,1e6,2000);
+  const D=86400;
+  const rAvg=U*R/D,rPk=rAvg*P,wAvg=U*W/D,wPk=wAvg*P;
+  const perDay=U*W*S, total=perDay*365*Y*X, bw=rPk*B*1024;
+  const util=wPk/C;
+  $('esStats').innerHTML=[
+    ['Đọc đỉnh (req/s)',human(rPk),''],['Ghi đỉnh (req/s)',human(wPk),''],
+    ['Dữ liệu thô mỗi ngày',bytes(perDay),''],['Tổng sau '+vi(Y,1)+' năm',bytes(total),''],
+    ['Băng thông đọc đỉnh',bytes(bw)+'/s',''],
+    ['Primary ở đỉnh',vi(util*100)+'%',util>0.7?'bad':util>0.5?'warn':'good']
+  ].map(([k,v,c])=>`<div class="stat"><span>${k}</span><b${c?` class="${c}"`:''}>${v}</b></div>`).join('');
+  $('esWork').textContent=
+`đọc TB  = ${vi(U)} × ${vi(R)} / 86.400        ≈ ${human(rAvg)} req/s
+đọc đỉnh = × ${vi(P,1)}                          ≈ ${human(rPk)} req/s
+ghi TB   = ${vi(U)} × ${vi(W)} / 86.400         ≈ ${human(wAvg)} req/s
+ghi đỉnh = × ${vi(P,1)}                          ≈ ${human(wPk)} req/s
+dữ liệu  = ${vi(U)} × ${vi(W)} × ${vi(S)} B       ≈ ${bytes(perDay)} / ngày
+tổng     = × 365 × ${vi(Y,1)} năm × ${vi(X,1)}          ≈ ${bytes(total)}
+băng thông = ${human(rPk)} × ${vi(B,1)} KB         ≈ ${bytes(bw)}/s
+primary  = ${human(wPk)} / ${vi(C)}              ≈ ${vi(util*100)}%`;
+  let d=`Ở đỉnh, primary dùng khoảng ${vi(util*100)}% sức ghi đã đo. `;
+  d+=util>0.7?'Quá cao: vượt khoảng 70% là độ trễ bắt đầu vọt lên, và không còn dự phòng khi một node chết. Cần gom lô, giảm ghi, hoặc chia tải trước khi tải này đến.':util>0.5?'Chịu được nhưng dự phòng mỏng. Mọi sai lệch của giả định hệ số đỉnh đều có thể đẩy qua ngưỡng.':'Còn nhiều dự phòng cho ghi.';
+  d+=total>4*1024**4?` Dữ liệu sau ${vi(Y,1)} năm là ${bytes(total)}: thêm index, sao lưu và dựng replica trên bảng cỡ này sẽ mất hàng giờ; nên tính tới chia theo thời gian hoặc lưu trữ phần cũ.`:'';
+  $('esDesc').textContent=d;
+  $('esMeta').textContent=`${vi(U)} DAU`;
+}
+['esU','esR','esW','esP','esS','esY','esX','esB','esC'].forEach(id=>$(id).addEventListener('input',es));es();
+
+/* ---------- 02: latency ladder ---------- */
+(function(){
+  const rows=[
+    ['Tham chiếu L1 cache',0.5,'ram'],['Tham chiếu L2 cache',7,'ram'],['Khoá/mở mutex',25,'ram'],['Đọc RAM',100,'ram'],
+    ['Nén 1 KB',3e3,'ram'],['Gửi 1 KB qua mạng 1 Gbps',1e4,'path'],['Đọc ngẫu nhiên 4 KB từ SSD',1.5e5,'row'],
+    ['Đọc tuần tự 1 MB từ RAM',2.5e5,'ram'],['Một vòng mạng trong datacenter',5e5,'path'],['Đọc tuần tự 1 MB từ SSD',1e6,'row'],
+    ['Seek ổ cứng quay',1e7,'row'],['Đọc tuần tự 1 MB từ ổ quay',2e7,'row'],['Gói tin California → Hà Lan → California',1.5e8,'path']
+  ];
+  const L=250,W=330,top=18,rh=27,lo=-1,hi=9;
+  const x=v=>L+(Math.log10(v)-lo)/(hi-lo)*W;
+  const fmt=v=>v<1e3?vi(v,1)+' ns':v<1e6?vi(v/1e3,1)+' µs':vi(v/1e6,1)+' ms';
+  let g='';
+  for(let e=lo;e<=hi;e++){const X=L+(e-lo)/(hi-lo)*W;g+=`<line class="gridl" x1="${X}" y1="${top-6}" x2="${X}" y2="${top+rows.length*rh}"/>`;
+    if(e%3===0)g+=T(X,top+rows.length*rh+16,e===0?'1 ns':e===3?'1 µs':e===6?'1 ms':'1 s','middle','ts');}
+  rows.forEach(([t,v,c],i)=>{const y=top+i*rh;g+=T(L-8,y+15,t,'end','t');
+    g+=`<g class="n ${c}"><rect x="${L}" y="${y+3}" width="${Math.max(2,x(v)-L)}" height="18" rx="3"/></g>`;
+    g+=T(x(v)+6,y+16,fmt(v),'start','tm');});
+  const H=top+rows.length*rh+26;$('latSvg').setAttribute('viewBox',`0 0 680 ${H}`);$('latSvg').innerHTML=g;
+})();
+
+/* ---------- 02: Little's law ---------- */
+function lm(){
+  const L=num('lmL',1,1e6,2000),D=num('lmD',0.1,1e4,8),W=num('lmW',0.1,1e5,50),N=Math.round(num('lmN',1,1000,12)),P=Math.round(num('lmP',1,1000,20)),M=Math.round(num('lmM',1,1e5,500));
+  const busy=L*D/1000, inflight=L*W/1000, pool=N*P, rec=Math.ceil(busy*2.5);
+  const mx=Math.max(busy,pool,M)*1.08,X0=170,Wd=440,sx=v=>X0+v/mx*Wd;
+  const bar=(y,lab,v,cls)=>T(10,y+16,lab,'start','t')+`<g class="n ${cls}"><rect x="${X0}" y="${y}" width="${Math.max(2,sx(v)-X0)}" height="22" rx="3"/></g>`+T(Math.min(sx(v)+6,640),y+16,vi(v,busy<10?1:0),'start','tm');
+  let g=bar(10,'Connection bận (TB)',busy,'path')+bar(52,'Tổng pool các pod',pool,pool>M?'miss':'row')+bar(94,'max_connections',M,'hot');
+  $('lmSvg').innerHTML=g;
+  $('lmStats').innerHTML=[['Request đang xử lý (L = λW)',vi(inflight),''],['Connection bận trung bình',vi(busy,1),''],['Pool đề xuất mỗi pod',Math.max(1,Math.ceil(rec/N)),''],['Tổng pool / max_connections',vi(pool/M*100)+'%',pool>M?'bad':pool>0.8*M?'warn':'good']]
+    .map(([k,v,c])=>`<div class="stat"><span>${k}</span><b${c?` class="${c}"`:''}>${v}</b></div>`).join('');
+  $('lmDesc').textContent=`${vi(L)} request mỗi giây, mỗi request giữ connection ${vi(D,1)} ms: trung bình chỉ ${vi(busy,1)} connection bận. Chừa gấp 2,5 cho giây đông nhất là khoảng ${rec} cho cả cụm, tức ${Math.max(1,Math.ceil(rec/N))} mỗi pod. `+
+    (pool>M?`Tổng pool hiện là ${vi(pool)}, vượt max_connections ${vi(M)}: pod mở connection sau cùng sẽ nhận lỗi "Too many connections".`:pool>rec*4?`Tổng pool ${vi(pool)} lớn gấp ${vi(pool/rec,1)} lần mức cần; phần dư chỉ là connection nhàn rỗi tốn tài nguyên ở server.`:`Tổng pool ${vi(pool)} hợp lý.`);
+  $('lmMeta').textContent=`${N} pod`;
+}
+['lmL','lmD','lmW','lmN','lmP','lmM'].forEach(id=>$(id).addEventListener('input',lm));lm();
+
+/* ---------- 02: queueing curve ---------- */
+function qu(){
+  const S=num('quS',0.1,1e4,10),r=num('quR',5,98,70)/100;
+  $('quRv').textContent=vi(r*100)+'%';
+  const mean=p=>S/(1-p),p99=p=>S*Math.log(100)/(1-p);
+  const X0=50,Wd=600,top=14,H=190,ymax=p99(0.95)*1.05;
+  const sx=p=>X0+p*Wd, sy=v=>top+H-Math.min(v,ymax)/ymax*H;
+  let g=`<rect class="band" x="${X0}" y="${top}" width="${0.7*Wd}" height="${H}" opacity=".45"/>`;
+  g+=`<line class="axis" x1="${X0}" y1="${top+H}" x2="${X0+Wd}" y2="${top+H}"/><line class="axis" x1="${X0}" y1="${top}" x2="${X0}" y2="${top+H}"/>`;
+  [0,0.25,0.5,0.7,0.9,1].forEach(p=>g+=T(sx(p),top+H+16,vi(p*100)+'%','middle','ts'));
+  g+=T(X0-6,top+8,vi(ymax)+' ms','end','ts')+T(X0-6,top+H,'0','end','ts');
+  let a='',b='';for(let p=0.01;p<=0.95;p+=0.005){a+=(a?'L':'M')+sx(p).toFixed(1)+' '+sy(mean(p)).toFixed(1);b+=(b?'L':'M')+sx(p).toFixed(1)+' '+sy(p99(p)).toFixed(1);}
+  g+=`<path class="curve" d="${a}"/><path class="curve p99" d="${b}"/>`;
+  g+=`<circle class="dot" cx="${sx(r)}" cy="${sy(mean(r))}" r="5"/><circle class="dot" cx="${sx(r)}" cy="${sy(p99(r))}" r="5"/>`;
+  $('quSvg').innerHTML=g;
+  $('quStats').innerHTML=[['Trung bình',vi(mean(r),1)+' ms'],['p99',vi(p99(r),1)+' ms'],['Gấp lúc rảnh (TB)',vi(1/(1-r),1)+'×']]
+    .map(([k,v])=>`<div class="stat"><span>${k}</span><b${r>0.85?' class="bad"':r>=0.7?' class="warn"':''}>${v}</b></div>`).join('');
+  const r2=Math.min(0.98,r*1.1);
+  $('quDesc').textContent=`Ở ${vi(r*100)}%, thời gian phản hồi trung bình là ${vi(mean(r),1)} ms, gấp ${vi(1/(1-r),1)} lần thời gian xử lý ${vi(S,1)} ms. Nếu tải tăng thêm 10% (lên ${vi(r2*100)}%), trung bình thành ${vi(mean(r2),1)} ms và p99 thành ${vi(p99(r2),1)} ms. `+(r>0.85?'Ở vùng này, một dao động nhỏ là đủ làm độ trễ tăng vọt.':r>=0.7?'Đây là mép vùng dốc: dự phòng đã mỏng.':'Còn ở vùng tương đối phẳng: tải tăng nhẹ làm độ trễ tăng ít.');
+  $('quMeta').textContent=`ρ = ${vi(r*100)}%`;
+}
+['quS','quR'].forEach(id=>$(id).addEventListener('input',qu));qu();
+</script>
+</body>
+</html>
