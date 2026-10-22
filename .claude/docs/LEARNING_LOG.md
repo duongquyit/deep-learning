@@ -99,6 +99,9 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 | Where an invariant is enforced (controller, service read-then-check, locked check, conditional SQL, `CHECK` constraint) and which write paths bypass each; defense in depth | 2 (prov.) | [layering-business-invariants](../topics/layering-business-invariants/index.html) §01, §03 | 2026-10-22 | Exercise E48; then write the invariant table (rule, where blocked, where detected, which test) for the Month 2 lab service |
 | Layering: controller, service (use case and transaction boundary), domain, repository; dependency direction; module boundaries that do not export repositories | 2 (prov.) | same, §02, §04 | 2026-10-22 | Build the Month 2 lab service this way, then review one module at work against the page's checklist (Month 2 deliverable) |
 | Money as integer minor units: ISO 4217 exponents, allocation of remainders, fee rounding, float pitfalls; mysql2 types for `BIGINT`, `DECIMAL`, `SUM` | 2 (prov.) | same, §02, §04 | 2026-10-22 | Exercise E49 on 8.4; then property tests for allocation and fee functions in the lab service |
+| NestJS `ValidationPipe` behaviour: `whitelist`, `forbidNonWhitelisted`, `transform`, implicit conversion; when the handler receives the original value; coercion traps (`"false"` → true, `+value` → NaN); `@IsOptional` and null | 2 (prov.) | [validation-error-contracts](../topics/validation-error-contracts/index.html) §01–§02 | 2026-10-22 | Exercise E50 over HTTP; then set the pipe options and per-field query coercion for the Month 2 lab service |
+| Error model: shape / auth / business-state / infrastructure classes, status codes (400, 401, 403, 404, 409, 422, 429, 5xx), which errors are retryable, mapping MySQL 1062/1205/1213 | 2 (prov.) | same, §02, §04 | 2026-10-22 | Exercise E51; then write the error-code catalogue and contract tests for the lab service |
+| Response contracts: Problem Details (RFC 9457) with a stable `code`, field errors with JSON Pointer, no leaked internals; which API changes break clients | 2 (prov.) | same, §02–§03 | 2026-10-22 | Review the error responses of one API at work against the page's checklist |
 
 "(prov.)" = provisional. Every row above rests on one artifact I wrote myself, with no measurement behind it. Week 1 of Month 1 includes a baseline assessment (TECHNICAL_GROWTH.md Section 11) that should confirm or cut these.
 
@@ -144,6 +147,8 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 38. On Node 22, how many microseconds and how much GC does a chain of 10 request-scoped providers cost per request, and from what request rate does it become the bottleneck? E47.
 39. Keep a separate balance column (I3) or compute `SUM` over ledger entries on each read? From how many entries per account does `SUM` over `(account_id, id)` become too slow for an API, and how much does a daily balance snapshot help? Variant of E48.
 40. Where is it cleanest to turn MySQL `BIGINT` into JavaScript `BigInt` with mysql2: a per-column `typeCast`, `bigNumberStrings` plus conversion in the repository, or strings all the way to JSON? What does each cost for 10,000 rows? E49.
+41. How many milliseconds of event loop does `ValidationPipe` take for a body with 10,000 nested items, and how large is the error response when every item is invalid (the pipe cuts at 1,000,000 characters by default)? Should body size and item count be limited before the pipe? E50.
+42. NestJS 12's `StandardSchemaValidationPipe` with Zod vs class-validator: what do the error messages look like, how does coercion differ, and does switching break the error contract if codes are already mapped?
 
 ## Pending verification (from the session's own exercise list)
 
@@ -223,8 +228,39 @@ These are written in the page as exercises; none have been run yet.
 - **E49** — On 8.4: result types of `SUM`/`AVG` on `BIGINT` and `DOUBLE`, `ROUND` on exact vs approximate values; mysql2 values and `typeof` for `BIGINT` around 2^53 and for `SUM` under three configs.
 - **Q95–Q100** — The six recall questions in section 08 of the layering and invariants page.
 - **C28–C30** — The three real-world cases in section 09 of the layering and invariants page (negative wallet balances from a job that bypassed the service, multi-currency fees and installments off by a few units, an orders module writing the payments table before a service split). Solve in writing before opening the answers.
+- **E50** — The page's 7 payloads × 16 `ValidationPipe` option combinations over HTTP instead of calling the pipe directly; a named numeric query param with `transform`; an array body; a 10,000-item nested body (time, event-loop delay, error size).
+- **E51** — The page's `ProblemFilter` under real errors on MySQL 8.4 (malformed JSON, 1062, 1213, 1205, `TypeError`): status, `code`, `Retry-After`, no leaked internals, what 1205 leaves committed.
+- **Q101–Q106** — The six recall questions in section 08 of the validation and error contracts page.
+- **C31–C33** — The three real-world cases in section 09 of the validation and error contracts page (a library upgrade breaking mobile error messages, mass assignment of a transfer limit through `PATCH /me`, every database error returned as 500 and retried by an SDK). Solve in writing before opening the answers.
 - **Q11–Q16** — The six recall questions in section 08 of the composite-index page (answers are on the page, hidden).
 - **Q1–Q5** — The five check questions at the end of the page (leftmost prefix, `COUNT(*)` and the visibility map, full scan polluting the cache, TOAST, a `sessions` table updated 5,000×/sec). Answer in writing before looking anything up, then verify.
+
+---
+
+## 2026-10-22 — Validation and error contracts
+
+**Topic and objective.** Month 2 topic, written ahead as documentation only (Phase 2 of the documentation plan, 3 of 5): what NestJS `ValidationPipe` actually does with each option, which coercions hide client errors, how to classify errors into status codes and retry behaviour, and how to design an error body clients can depend on.
+
+**Output.** [topics/validation-error-contracts/index.html](../topics/validation-error-contracts/index.html) — 11 sections, including section 09 with cases C31–C33. Widgets: a `ValidationPipe` explorer (7 payloads × 16 option combinations, showing the real 400 body or the value and `typeof` each field reaches the handler with); an error mapper (13 errors → class, status, Problem Details body, retry advice, log level). Prediction templates for E50–E51.
+
+**What it covers.**
+
+- The explorer's data is the real output of `new ValidationPipe(opts).transform(value, metadata)` run in Claude's sandbox (NestJS 12.2.0, class-validator 0.15.1, class-transformer 0.5.1, Node 22.22.0), not over HTTP. Findings: with only `enableImplicitConversion`, validation passes on the converted copy but the handler receives the original strings; `?active=false` becomes `true`; `true` becomes 1 and `"1e3"` becomes 1000; `?limit=` becomes 0; whitelist errors come first; messages follow decorator order reversed.
+- `ValidationPipe` source (12.2.0): defaults (`transform` off, `forbidUnknownValues` false, status 400, `errorFormat` list, `maxErrorMessagesLength` 1,000,000), `+value` for named primitive params, when it returns the instance, a plain copy or the original value.
+- RFC 9457 Problem Details, RFC 9110 status semantics, a stable `code`, field errors with JSON Pointer, not leaking SQL or stacks; which API changes break clients.
+- MySQL 1062/1213/1205 handling; `innodb_rollback_on_timeout` default OFF (checked on the sandbox, 8.0.46) so 1205 rolls back only the statement; deadlock counter `lock_deadlocks` in `INNODB_METRICS`.
+
+**Initial understanding.** TODO — what did I believe about validation and error handling before this page? No prior belief was stated in the session.
+
+**Mistakes and misconceptions corrected.** TODO — only I know which. Traps the page writes down: a validated value is what the handler gets; implicit conversion makes query strings correct; `@IsOptional` only allows a missing field; clients can read `message`; every database error is a 500.
+
+**Experiments and results.** None on the lab. The explorer data comes from running the pipe in the sandbox without HTTP; it is an example, not evidence for a level. E50–E51 run it over HTTP and against real MySQL errors.
+
+**Competency level.** Level 2 provisional on three new matrix rows.
+
+**Remaining questions.** Open questions 41 and 42.
+
+**Next step.** Write the pagination page (Phase 2, 4 of 5).
 
 ---
 

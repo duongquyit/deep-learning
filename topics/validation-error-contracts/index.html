@@ -1,0 +1,1001 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Validation và hợp đồng lỗi</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F2F4F6; --surface:#FFFFFF; --ink:#18203A; --ink-2:#56607A; --ink-3:#8A93A8;
+  --rule:#CCD3DD; --rule-strong:#8C96AB;
+  --struct:#3446B8; --struct-bg:#E6E9FA;            /* cấu trúc index, chrome của trang */
+  --row:#16795F;    --row-bg:#DDF2EA;               /* dữ liệu row thật */
+  --hot:#9A5F00;    --hot-bg:#FCEFD2; --hot-line:#E3A21A;  /* bị ghi, bị chạm, bị lọc */
+  --miss:#B5302B;   --miss-bg:#FBE1DF;              /* đọc từ disk, việc thừa, lỗi */
+  --path:#0B7A8A;   --path-bg:#D8F1F3;              /* đường đi hoặc khoảng đang đọc */
+  --key:#A8327A;    --key-bg:#F8E0EE;               /* con trỏ: PK, TID */
+  --ram:#5B4BB0;    --ram-bg:#E7E3FA;               /* hit trong buffer pool */
+  --grid:rgba(52,70,184,.06);
+  --r-s:4px; --r-m:8px;
+  --sans:"Instrument Sans",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --paper:#0F1320; --surface:#171C2B; --ink:#E6E9F2; --ink-2:#A3ABC0; --ink-3:#6E7790;
+  --rule:#2C3448; --rule-strong:#55607A;
+  --struct:#97A3FF; --struct-bg:#232A55;
+  --row:#5FD0AE;    --row-bg:#123A31;
+  --hot:#F2BE5C;    --hot-bg:#3B2C0E; --hot-line:#E3A21A;
+  --miss:#FF8A84;   --miss-bg:#3E1A1A;
+  --path:#5ED3E0;   --path-bg:#113A40;
+  --key:#F28DC4;    --key-bg:#3E1A2E;
+  --ram:#B7A8FF;    --ram-bg:#2A2350;
+  --grid:rgba(151,163,255,.05);
+}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important;animation:none!important}}
+body{margin:0;color:var(--ink);font:400 17px/1.65 var(--sans);
+  background-color:var(--paper);
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:24px 24px}
+a{color:var(--struct)}
+:focus-visible{outline:2px solid var(--struct);outline-offset:2px}
+
+/* layout */
+.shell{display:grid;grid-template-columns:230px minmax(0,1fr);gap:56px;max-width:1180px;margin:0 auto;padding:0 32px}
+nav.toc{position:sticky;top:0;align-self:start;height:100vh;padding:48px 0;overflow:auto}
+nav.toc p{font-weight:600;margin:0 0 12px;font-size:15px}
+nav.toc ol,.mobile-toc ol{list-style:none;margin:0;padding:0;counter-reset:s}
+nav.toc li,.mobile-toc li{counter-increment:s;margin:0}
+nav.toc a,.mobile-toc a{display:grid;grid-template-columns:28px 1fr;padding:5px 0;color:var(--ink-2);text-decoration:none;font-size:14.5px;line-height:1.4}
+nav.toc a::before,.mobile-toc a::before{content:counter(s,decimal-leading-zero);font:500 12px/1.9 var(--mono);color:var(--ink-3)}
+nav.toc a:hover,nav.toc a.on{color:var(--struct)}
+main{min-width:0;padding:56px 0 120px}
+.prose{max-width:720px}
+section{padding-top:72px}
+section>header{display:grid;grid-template-columns:auto 1fr;gap:0 18px;align-items:baseline;max-width:720px;margin-bottom:12px}
+section>header .num{font:500 15px var(--mono);color:var(--struct);border:1.5px solid var(--struct);border-radius:var(--r-s);padding:2px 7px;transform:translateY(-4px)}
+h1,h2,h3,h4{line-height:1.2;letter-spacing:-.015em;margin:0}
+h1{font-size:clamp(2.3rem,5.4vw,3.9rem);font-weight:700;letter-spacing:-.03em;line-height:1.02;max-width:14ch;margin-bottom:20px}
+.lede{font-size:19px;color:var(--ink-2);max-width:56ch;margin-bottom:28px}
+h2{font-size:clamp(1.6rem,3vw,2.1rem);font-weight:650}
+h3{font-size:1.2rem;font-weight:600;margin:36px 0 8px}
+p{margin:0 0 14px}
+ul,ol.list{margin:0 0 16px;padding-left:22px}
+li{margin:4px 0}
+code{font:0.88em var(--mono);background:var(--struct-bg);color:var(--ink);padding:1px 5px;border-radius:3px}
+pre{font:13.5px/1.6 var(--mono);background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:var(--r-s);padding:14px 16px;overflow-x:auto;margin:0 0 18px;max-width:720px}
+pre code{background:none;padding:0}
+.tablewrap{overflow-x:auto;max-width:720px;margin:0 0 20px}
+table{border-collapse:collapse;width:100%;max-width:720px;margin:0 0 20px;font-size:15px;background:var(--surface)}
+.tablewrap table{margin:0;min-width:560px}
+th,td{text-align:left;padding:9px 12px;border:1px solid var(--rule);vertical-align:top}
+th{font-weight:600;background:var(--struct-bg)}
+
+/* widget frame: styled like a page, header strip = page header */
+.frame{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);margin:22px 0 28px;max-width:920px;overflow:hidden}
+.frame>.ph{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:9px 16px;border-bottom:1px solid var(--rule);background:var(--struct-bg);font-size:14px}
+.frame>.ph strong{font-weight:600}
+.frame>.ph .meta{margin-left:auto;font:500 12.5px var(--mono);color:var(--ink-2)}
+.frame .bd{padding:16px;min-width:0}
+.frame svg{display:block;width:100%;height:auto}
+.st-t{font:600 16px var(--sans);margin:0 0 8px}
+.desc{background:var(--paper);border-radius:var(--r-s);padding:12px 14px;margin-top:12px;min-height:84px;font-size:15.5px;color:var(--ink-2)}
+.desc pre{margin:10px 0 0;font-size:12.5px;border-left-color:var(--rule-strong)}
+.nav{display:flex;gap:8px;margin-top:12px;align-items:center}
+button{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 14px;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--struct);color:var(--struct)}
+button:disabled{opacity:.4;cursor:default}
+button.primary,button[aria-pressed="true"]{background:var(--struct);border-color:var(--struct);color:var(--surface)}
+button.primary:hover:not(:disabled),button[aria-pressed="true"]:hover{color:var(--surface);filter:brightness(1.1)}
+input,select{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 10px}
+input[type=number]{width:84px}
+input[type=range],input[type=checkbox]{accent-color:var(--struct)}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-top:12px}
+.stat{background:var(--paper);border-radius:var(--r-s);padding:8px 12px}
+.stat span{display:block;font-size:13px;color:var(--ink-2)}
+.stat b{font:600 20px var(--sans);font-variant-numeric:tabular-nums}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;color:var(--ink-2);margin-top:12px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:14px;height:14px;border-radius:3px;border:2px solid;display:inline-block}
+.fine{font-size:13.5px;color:var(--ink-2);margin:10px 0 0}  /* chú thích nhỏ dưới widget */
+
+/* svg text */
+.tb{font:600 14px var(--sans)} .t{font:400 13px var(--sans)} .ts{font:400 12px var(--sans)} .tm{font:500 12.5px var(--mono)}
+.lbl{fill:var(--ink-2);font:400 12.5px var(--sans)}
+
+/* callouts */
+.note{border-left:3px solid var(--hot-line);background:var(--hot-bg);padding:12px 16px;border-radius:0 var(--r-s) var(--r-s) 0;margin:18px 0;max-width:720px;font-size:16px}
+.note strong{color:var(--hot)}
+.senior{border:1.5px solid var(--struct);border-radius:var(--r-m);padding:14px 18px;margin:22px 0;max-width:720px;background:var(--surface)}
+.senior h4{font-size:16px;margin-bottom:6px;color:var(--struct)}
+.senior p:last-child,.senior ul:last-child{margin-bottom:0}
+details{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-s);padding:10px 14px;margin:10px 0;max-width:720px}
+details summary{cursor:pointer;font-weight:600}
+details[open] summary{margin-bottom:8px}
+details.answer{background:var(--paper);border-style:dashed;margin:10px 0 0}
+details.answer summary{font-weight:500;color:var(--struct)}
+.tag{display:inline-block;font:500 12px var(--sans);color:var(--ink-2);border:1px solid var(--rule-strong);border-radius:999px;padding:0 8px;margin-right:6px;vertical-align:1px}
+
+/* hero brief: mục tiêu, cần biết trước, trạng thái */
+.brief{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px 24px;background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);padding:14px 18px;max-width:920px;margin:0 0 8px;font-size:15px}
+.brief h4{font-size:14px;color:var(--struct);margin:0 0 4px}
+.brief ul{margin:0;padding-left:18px}
+.brief p{margin:0}
+
+.mobile-toc{display:none}
+@media (max-width:900px){
+  .shell{grid-template-columns:1fr;padding:0 16px;gap:0}
+  nav.toc{display:none}
+  .mobile-toc{display:block;margin-top:20px}
+  main{padding-top:32px}
+  .frame .bd{padding:12px}
+  body{font-size:16px}
+}
+
+
+/* ---- page widgets ---- */
+.n rect{fill:var(--surface);stroke:var(--rule-strong);stroke-width:1}
+.n text{fill:var(--ink)}
+.n.struct rect{fill:var(--struct-bg);stroke:var(--struct)} .n.struct text{fill:var(--struct)}
+.n.row rect{fill:var(--row-bg);stroke:var(--row);stroke-width:1.6} .n.row text{fill:var(--row)}
+.n.hot rect{fill:var(--hot-bg);stroke:var(--hot);stroke-width:2} .n.hot text{fill:var(--hot)}
+.n.miss rect{fill:var(--miss-bg);stroke:var(--miss);stroke-width:2} .n.miss text{fill:var(--miss)}
+.n.path rect{fill:var(--path-bg);stroke:var(--path);stroke-width:2.4} .n.path text{fill:var(--path)}
+.n.key rect{fill:var(--key-bg);stroke:var(--key);stroke-width:2} .n.key text{fill:var(--key)}
+.n.dim rect{fill:var(--paper);stroke:var(--rule)} .n.dim text{fill:var(--ink-3)}
+.edge{stroke:var(--rule-strong);stroke-width:1.2;fill:none}
+.edge.on{stroke:var(--path);stroke-width:2.6}
+.lg-path{border-color:var(--path);background:var(--path-bg)} .lg-row{border-color:var(--row);background:var(--row-bg)}
+.lg-miss{border-color:var(--miss);background:var(--miss-bg)} .lg-hot{border-color:var(--hot);background:var(--hot-bg)}
+.calc{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px 14px;margin-bottom:12px}
+.calc label{display:flex;flex-direction:column;gap:4px;font-size:13.5px;color:var(--ink-2)}
+.calc label.chk{flex-direction:row;align-items:center;gap:8px}
+.calc input[type=text]{width:100%}
+.stat b.bad{color:var(--miss)} .stat b.good{color:var(--row)}
+.log{font:12.5px/1.6 var(--mono);background:var(--paper);border-radius:var(--r-s);padding:8px 12px;margin:10px 0 0;min-height:60px;list-style:none}
+.log li{margin:0}
+.btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.chks{display:flex;flex-direction:column;gap:6px;margin:0 0 12px;font-size:14px;color:var(--ink-2)}
+.chks label{display:flex;gap:8px;align-items:flex-start}
+.chks input{margin-top:4px}
+.calc select{max-width:100%}
+pre.io{margin:10px 0 0;font-size:12.5px;white-space:pre-wrap;word-break:break-word;max-width:none}
+.verdict{margin:12px 0 0;padding:8px 12px;border-radius:var(--r-s);font-weight:600;font-size:15px}
+.verdict.ok{background:var(--row-bg);color:var(--row)}
+.verdict.bad{background:var(--miss-bg);color:var(--miss)}
+.stat b.sm{font-size:15px;line-height:1.35;display:block}
+/* bài toán thực tế: dạng phỏng vấn */
+.case{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:0 var(--r-m) var(--r-m) 0;padding:16px 20px;margin:22px 0;max-width:720px}
+.case>h3{margin:0 0 6px;font-size:1.15rem}
+.case .src{font-size:13.5px;color:var(--ink-2);margin:0 0 12px}
+.case .ctx{background:var(--paper);border:1px solid var(--rule);border-radius:var(--r-m);padding:10px 14px;margin:8px 0 0;font-size:15px}
+.case .ctx-h{margin:0 0 4px;font-weight:600;color:var(--struct)}
+.case .ctx ul{margin:0;padding-left:20px}
+.case .ctx li{margin:2px 0}
+.case .q{margin:10px 0 4px;padding:8px 0 8px 14px;border-left:3px solid var(--key);font-size:1.06rem;font-weight:500;color:var(--ink);max-width:none}
+.case details{max-width:none;margin:12px 0 0}
+.case details.answer[open]{background:var(--surface)}
+.case details.clar>summary,.case details.rubric>summary{color:var(--key)}
+.case .fu{margin:18px 0 0;padding-top:14px;border-top:1px solid var(--rule)}
+.case .fq{margin:0;font-weight:500}
+.case .fq b{color:var(--struct);margin-right:4px}
+.ah{font-size:15.5px;color:var(--struct);margin:20px 0 6px}
+.answer .tablewrap{max-width:none}
+@media (max-width:900px){.case{padding:14px}}
+</style>
+</head>
+<body>
+
+<div class="shell">
+<nav class="toc" aria-label="Mục lục">
+  <p>Validation, lỗi</p>
+  <ol>
+    <li><a href="#s1">Bản chất vấn đề</a></li>
+    <li><a href="#s2">Cơ chế hoạt động</a></li>
+    <li><a href="#s3">Vì sao thiết kế như vậy</a></li>
+    <li><a href="#s4">Ví dụ</a></li>
+    <li><a href="#s5">Thí nghiệm</a></li>
+    <li><a href="#s6">Ảnh hưởng khi chạy production</a></li>
+    <li><a href="#s7">Hiểu lầm thường gặp</a></li>
+    <li><a href="#s8">Câu hỏi ôn tập</a></li>
+    <li><a href="#s9">Bài toán thực tế</a></li>
+    <li><a href="#s10">Câu hỏi còn mở</a></li>
+    <li><a href="#s11">Tài liệu tham khảo</a></li>
+  </ol>
+</nav>
+
+<main>
+<div class="hero">
+<h1>Validation và hợp đồng lỗi</h1>
+<p class="lede">API là một hợp đồng: client gửi gì thì được nhận, và khi hỏng thì client nhận được gì. Phần nhận do validation giữ; phần hỏng do mô hình lỗi giữ. Bài này đi qua <code>ValidationPipe</code> của NestJS với kết quả chạy thật của từng tuỳ chọn, các bẫy ép kiểu, cách chọn status code, và một dạng body lỗi mà client dựa vào được nhiều năm mà không vỡ.</p>
+<div class="brief">
+  <div><h4>Mục tiêu</h4><ul>
+    <li>Dự đoán được <code>ValidationPipe</code> làm gì với một payload theo bốn tuỳ chọn <code>whitelist</code>, <code>forbidNonWhitelisted</code>, <code>transform</code>, <code>enableImplicitConversion</code>, kể cả các bẫy ép kiểu.</li>
+    <li>Xếp một lỗi vào đúng lớp (hình dạng, nghiệp vụ, trạng thái, hạ tầng) và chọn status code, có thử lại được hay không.</li>
+    <li>Thiết kế một body lỗi ổn định theo Problem Details (RFC 9457) với <code>code</code> riêng, không lộ chi tiết nội bộ.</li>
+    <li>Phân biệt thay đổi API an toàn với thay đổi làm vỡ client.</li>
+  </ul></div>
+  <div><h4>Cần biết trước</h4><ul>
+    <li><a href="../nestjs-request-lifecycle/index.html">Vòng đời request NestJS</a>: pipe, exception filter.</li>
+    <li><a href="../layering-business-invariants/index.html">Phân tầng và bất biến</a>: lỗi nghiệp vụ nằm ở domain.</li>
+    <li><a href="../idempotency-retries/index.html">Idempotency và retry</a>: lỗi nào thử lại được.</li>
+  </ul></div>
+  <div><h4>Trạng thái</h4><p>Level 2 (prov.). Widget phần 01 hiển thị kết quả chạy thật của <code>ValidationPipe</code> (NestJS 12.2.0, class-validator 0.15.1, class-transformer 0.5.1, Node 22.22.0) trong sandbox của Claude, gọi trực tiếp không qua HTTP. Chưa chạy qua HTTP trên lab (E50–E51).</p></div>
+</div>
+<details class="mobile-toc"><summary>Mục lục</summary><ol><li><a href="#s1">Bản chất vấn đề</a></li><li><a href="#s2">Cơ chế hoạt động</a></li><li><a href="#s3">Vì sao thiết kế như vậy</a></li><li><a href="#s4">Ví dụ</a></li><li><a href="#s5">Thí nghiệm</a></li><li><a href="#s6">Ảnh hưởng khi chạy production</a></li><li><a href="#s7">Hiểu lầm thường gặp</a></li><li><a href="#s8">Câu hỏi ôn tập</a></li><li><a href="#s9">Bài toán thực tế</a></li><li><a href="#s10">Câu hỏi còn mở</a></li><li><a href="#s11">Tài liệu tham khảo</a></li></ol></details>
+</div>
+
+<!-- 1 -->
+<section id="s1">
+<header><span class="num">01</span><h2>Bản chất vấn đề</h2></header>
+<div class="prose">
+<p>App mobile chuyển tiền bằng cách gửi <code>amountMinor</code>. Có hai sự cố trong cùng một tháng. Một: app gửi <code>"50000"</code> dạng chuỗi; tuần trước server chấp nhận, tuần này trả 400, vì ai đó bật một tuỳ chọn của <code>ValidationPipe</code>. Hai: app hiển thị lỗi bằng cách đọc <code>message[0]</code>; backend nâng thư viện, câu chữ đổi, và app hiện thông báo sai cho người dùng.</p>
+<p>Cả hai cùng một gốc: không ai viết ra hợp đồng. Validation quyết định payload nào được nhận và handler thấy giá trị kiểu gì. Mô hình lỗi quyết định client nhận được gì để phản ứng. Hình dung quầy nhận hồ sơ: quầy phải nói rõ giấy tờ nào bắt buộc, và khi trả hồ sơ thì ghi mã lý do, không chỉ viết một câu tuỳ hứng của nhân viên trực hôm đó.</p>
+<p>DTO trong widget: <code>TransferDto</code> có <code>fromAccountId</code>, <code>toAccountId</code>, <code>amountMinor</code> (mỗi trường <code>@IsInt() @IsPositive()</code>), <code>currency</code> (<code>@IsIn(['VND','USD'])</code>), <code>note</code> (<code>@IsOptional() @IsString() @MaxLength(140)</code>). Query <code>ListDto</code> có <code>active</code> (<code>@IsOptional() @IsBoolean()</code>) và <code>limit</code> (<code>@IsOptional() @IsInt() @Min(1) @Max(100)</code>). Chọn payload và bật tắt tuỳ chọn.</p>
+</div>
+<div class="frame" id="vp">
+  <div class="ph"><strong>ValidationPipe làm gì với payload này</strong><span class="meta" id="vpMeta"></span></div>
+  <div class="bd">
+    <div class="calc">
+      <label>Payload<select id="vpP">
+        <option value="b1">body: amountMinor "50000" (chuỗi), thêm role "admin"</option>
+        <option value="b2">body: đúng hết</option>
+        <option value="b3">body: fromAccountId true, amountMinor "1e3"</option>
+        <option value="b4">body: amountMinor 500.5, note null</option>
+        <option value="q1">query: ?active=false&amp;limit=20</option>
+        <option value="q2">query: ?limit= (rỗng)</option>
+        <option value="q3">query: ?limit=abc</option>
+      </select></label>
+    </div>
+    <div class="chks">
+      <label><input id="vpW" type="checkbox"><span><code>whitelist</code>: bỏ trường không có decorator</span></label>
+      <label><input id="vpF" type="checkbox"><span><code>forbidNonWhitelisted</code>: báo lỗi thay vì bỏ (cần <code>whitelist</code>)</span></label>
+      <label><input id="vpT" type="checkbox"><span><code>transform</code>: handler nhận instance của DTO</span></label>
+      <label><input id="vpI" type="checkbox"><span><code>enableImplicitConversion</code>: ép kiểu theo kiểu TypeScript của trường</span></label>
+    </div>
+    <pre class="io" id="vpIn" aria-label="Payload gửi lên"></pre>
+    <div class="verdict" id="vpV" aria-live="polite"></div>
+    <pre class="io" id="vpOut" aria-label="Kết quả"></pre>
+    <div class="desc" aria-live="polite" id="vpDesc"></div>
+    <p class="fine">Kết quả lấy từ <code>new ValidationPipe(opts).transform(value, metadata)</code> chạy thật trong sandbox: <code>@nestjs/common</code> 12.2.0, class-validator 0.15.1, class-transformer 0.5.1, Node 22.22.0. Không qua HTTP; qua HTTP thì lỗi được filter mặc định gửi đi nguyên body này với status 400. Chưa chạy trên lab (E50).</p>
+  </div>
+</div>
+</section>
+
+<!-- 2 -->
+<section id="s2">
+<header><span class="num">02</span><h2>Cơ chế hoạt động</h2></header>
+<div class="prose">
+<h3>ValidationPipe làm gì, theo từng bước</h3>
+<p>Ý chính: pipe làm một bản sao có kiểu của payload, kiểm tra bản sao đó, rồi quyết định trả cho handler bản sao hay bản gốc. Ba tuỳ chọn quyết định ba chỗ khác nhau, nên tổ hợp của chúng cho kết quả khó đoán.</p>
+<p>Theo mã nguồn <code>validation.pipe.js</code> của NestJS 12.2.0:</p>
+<ol class="list">
+<li>Nếu kiểu của tham số là <code>String</code>, <code>Number</code>, <code>Boolean</code>, <code>Array</code>, <code>Object</code>, <code>Date</code> hay <code>Buffer</code>, pipe không kiểm tra gì. Với <code>transform</code> và một tham số có tên (<code>@Query('page') page: number</code>), nó chỉ ép kiểu bằng <code>+value</code>: <code>"abc"</code> thành <code>NaN</code>, chuỗi rỗng thành <code>0</code>, và không báo lỗi.</li>
+<li>Với một class DTO: <code>plainToInstance</code> tạo instance. Có <code>enableImplicitConversion</code> thì giá trị được ép theo kiểu TypeScript: <code>Number("1e3")</code> là 1000, <code>Number(true)</code> là 1, <code>Boolean("false")</code> là <code>true</code>.</li>
+<li>class-validator kiểm tra instance. Có <code>whitelist</code> thì trường không có decorator nào bị xoá, hoặc báo lỗi nếu có thêm <code>forbidNonWhitelisted</code>. Lỗi whitelist đứng đầu danh sách.</li>
+<li>Có lỗi: ném <code>BadRequestException</code> với mảng message (dạng <code>list</code>, mặc định).</li>
+<li>Không lỗi: có <code>transform</code> thì trả instance. Không có <code>transform</code> mà có tuỳ chọn validator nào (ví dụ <code>whitelist</code>) thì trả bản sao đã đổi về object thường. Không có gì cả thì trả <strong>bản gốc</strong>.</li>
+</ol>
+<p>Bước 5 tạo ra bẫy khó thấy nhất: chỉ bật <code>enableImplicitConversion</code> mà không bật <code>transform</code>, pipe kiểm tra số 50000 nhưng handler nhận chuỗi <code>"50000"</code> (payload đầu tiên trong widget, chỉ bật ô thứ tư).</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Tuỳ chọn</th><th>Mặc định (12.2.0)</th><th>Tác dụng</th><th>Bẫy</th></tr></thead>
+<tbody>
+<tr><td><code>whitelist</code></td><td>tắt</td><td>Xoá trường không có decorator</td><td>Tắt thì <code>role: "admin"</code> tới tận handler và có thể vào câu <code>UPDATE</code> (mass assignment)</td></tr>
+<tr><td><code>forbidNonWhitelisted</code></td><td>tắt</td><td>Báo lỗi cho trường thừa</td><td>Client cũ gửi trường đã bỏ thì nhận 400; bật khi API còn trẻ</td></tr>
+<tr><td><code>transform</code></td><td>tắt</td><td>Handler nhận instance của DTO</td><td>Tham số có tên kiểu <code>number</code> bị ép bằng <code>+value</code>, ra <code>NaN</code> không lỗi</td></tr>
+<tr><td><code>transformOptions.enableImplicitConversion</code></td><td>tắt</td><td>Ép kiểu theo kiểu TypeScript</td><td><code>"false"</code> thành <code>true</code>; <code>true</code> thành 1; <code>""</code> thành 0</td></tr>
+<tr><td><code>forbidUnknownValues</code></td><td><code>false</code> (Nest đặt sẵn)</td><td>Báo lỗi khi object không có metadata</td><td>class-validator tự nó mặc định bật; Nest tắt đi</td></tr>
+<tr><td><code>errorHttpStatusCode</code></td><td>400</td><td>Status khi lỗi</td><td></td></tr>
+<tr><td><code>errorFormat</code></td><td><code>'list'</code></td><td>Mảng chuỗi; <code>'grouped'</code> gom theo trường</td><td>Dạng list buộc client đọc câu chữ</td></tr>
+<tr><td><code>maxErrorMessagesLength</code></td><td>1.000.000 ký tự</td><td>Cắt danh sách lỗi quá dài</td><td>Payload lồng sâu có thể tạo response lỗi rất lớn</td></tr>
+</tbody></table></div>
+<div class="note"><strong>Lỗi hay gặp:</strong> bật <code>enableImplicitConversion</code> cho cả app để query string "tự thành số". Nó cũng biến <code>?active=false</code> thành <code>true</code> và <code>{"fromAccountId": true}</code> thành 1. Quy tắc: ép kiểu tường minh cho từng trường của query (<code>@Type(() =&gt; Number)</code>, hoặc <code>@Transform</code> cho boolean nhận đúng <code>"true"</code> và <code>"false"</code>); body JSON đã có kiểu thì không ép.</div>
+
+<div class="prose">
+<h3>Bốn lớp lỗi và status code</h3>
+<p>Ý chính: mỗi lỗi thuộc một trong bốn lớp. Lớp quyết định status, client có nên thử lại không, và server có cần báo động không.</p>
+<ul>
+<li><strong>Hình dạng</strong>: payload sai kiểu, thiếu trường, JSON hỏng. 400. Thử lại y hệt vẫn hỏng.</li>
+<li><strong>Quyền</strong>: chưa xác thực (401) hoặc không được phép (403). Tài nguyên của người khác thì 404 để không xác nhận nó tồn tại.</li>
+<li><strong>Nghiệp vụ và trạng thái</strong>: payload đúng hình dạng nhưng quy tắc từ chối (422), hoặc xung đột với trạng thái hiện tại (409: trùng, phiên bản cũ, idempotency key dùng lại với body khác).</li>
+<li><strong>Hạ tầng</strong>: phụ thuộc chậm hoặc hỏng, quá tải (503, 504, 429). Thường thử lại được, sau một khoảng chờ. Lỗi lập trình (500) không nên thử lại và cần báo động.</li>
+</ul>
+<p>Chọn một lỗi để xem status, body, và cách client nên phản ứng.</p>
+</div>
+<div class="frame" id="em">
+  <div class="ph"><strong>Lỗi này trả về gì</strong><span class="meta" id="emMeta"></span></div>
+  <div class="bd">
+    <div class="calc"><label>Lỗi<select id="emE"></select></label></div>
+    <svg id="emSvg" viewBox="0 0 680 92" role="img" aria-label="Bốn lớp lỗi, lớp của lỗi đang chọn được tô màu"></svg>
+    <div class="stats" id="emStats"></div>
+    <pre class="io" id="emOut" aria-label="Response"></pre>
+    <div class="desc" aria-live="polite" id="emDesc"></div>
+    <p class="fine">Body theo Problem Details (RFC 9457) với thêm trường <code>code</code> và <code>traceId</code>. Đây là thiết kế đề xuất của trang, không phải mặc định của NestJS. Mã lỗi MySQL 1062, 1205, 1213 theo manual 8.4.</p>
+  </div>
+</div>
+
+<div class="prose">
+<h3>Hợp đồng lỗi: Problem Details và một code ổn định</h3>
+<p>Ý chính: client chỉ rẽ nhánh theo <code>code</code> (và status). <code>title</code> và <code>detail</code> là chữ cho con người, được phép đổi bất cứ lúc nào.</p>
+<p>RFC 9457 (thay RFC 7807 từ năm 2023) định nghĩa media type <code>application/problem+json</code> với năm trường: <code>type</code> (một URI định danh loại lỗi), <code>title</code>, <code>status</code>, <code>detail</code>, <code>instance</code>. Được thêm trường riêng (extension); client phải bỏ qua trường nó không biết. Trang này thêm ba trường:</p>
+<ul>
+<li><code>code</code>: chuỗi ngắn, viết hoa, không bao giờ đổi nghĩa: <code>INSUFFICIENT_FUNDS</code>, <code>VALIDATION_FAILED</code>.</li>
+<li><code>errors</code>: với lỗi hình dạng, một mảng <code>{ pointer, code, detail }</code>; <code>pointer</code> là JSON Pointer tới trường hỏng (<code>/amountMinor</code>), để app tô đỏ đúng ô.</li>
+<li><code>traceId</code>: correlation ID của request, để người hỗ trợ tìm log.</li>
+</ul>
+</div>
+<pre><code>HTTP/1.1 400 Bad Request
+Content-Type: application/problem+json
+
+{
+  "type": "https://errors.example.com/validation-failed",
+  "title": "Dữ liệu gửi lên không hợp lệ",
+  "status": 400,
+  "code": "VALIDATION_FAILED",
+  "errors": [
+    { "pointer": "/amountMinor", "code": "isInt", "detail": "amountMinor must be an integer number" },
+    { "pointer": "/role", "code": "whitelistValidation", "detail": "property role should not exist" }
+  ],
+  "traceId": "01JB4M8Q5Z7K3W2N"
+}</code></pre>
+<div class="note"><strong>Lỗi hay gặp:</strong> trả <code>err.message</code> của lỗi lạ cho client. Message của mysql2 chứa tên bảng, tên index và giá trị (<code>Duplicate entry 'a@x.com' for key 'users.uq_email'</code>); message của <code>TypeError</code> chứa tên biến. Quy tắc: lỗi không có <code>code</code> đã biết thì body chỉ có <code>INTERNAL</code> và <code>traceId</code>; chi tiết nằm trong log.</div>
+
+<div class="prose">
+<h3>Thay đổi API mà không làm vỡ client</h3>
+<p>Ý chính: client cũ vẫn chạy nhiều tháng sau khi bạn deploy (app mobile chưa cập nhật). Một thay đổi an toàn khi mọi client đúng theo hợp đồng cũ vẫn đúng sau thay đổi.</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Thay đổi</th><th>An toàn?</th><th>Vì sao</th></tr></thead>
+<tbody>
+<tr><td>Thêm trường mới vào response</td><td>Thường an toàn</td><td>Client tốt bỏ qua trường lạ. Client sinh code với kiểu chặt có thể không</td></tr>
+<tr><td>Thêm giá trị mới vào enum trong response</td><td>Không</td><td><code>switch</code> của client không có nhánh; app cũ có thể crash hoặc hiện sai</td></tr>
+<tr><td>Thêm trường tuỳ chọn vào request</td><td>An toàn</td><td>Client cũ không gửi, server dùng mặc định</td></tr>
+<tr><td>Biến trường tuỳ chọn của request thành bắt buộc</td><td>Không</td><td>Client cũ nhận 400</td></tr>
+<tr><td>Siết validation (max 140 xuống 100)</td><td>Không</td><td>Dữ liệu cũ hợp lệ giờ bị từ chối</td></tr>
+<tr><td>Đổi tên trường, đổi kiểu (số thành chuỗi)</td><td>Không</td><td>Thêm trường mới, giữ trường cũ một thời gian, rồi bỏ</td></tr>
+<tr><td>Đổi status hay <code>code</code> của một lỗi</td><td>Không</td><td>Client rẽ nhánh theo chúng</td></tr>
+<tr><td>Đổi <code>title</code>, <code>detail</code></td><td>An toàn</td><td>Chỉ để người đọc, nếu hợp đồng đã nói vậy</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- 3 -->
+<section id="s3">
+<header><span class="num">03</span><h2>Vì sao thiết kế như vậy</h2></header>
+<div class="prose">
+<p><strong>Vì sao validate ở biên, rồi kiểm tra lại ở domain?</strong> Validation ở biên trả lời "dữ liệu có đúng hình dạng không" và cho lỗi theo từng trường. Domain trả lời "việc này có được phép không" và phải đúng với mọi đường gọi, kể cả job không đi qua HTTP. Hai câu hỏi khác nhau; một <code>@IsPositive()</code> trên DTO không thay được kiểm tra số dư.</p>
+<p><strong>400 hay 422 cho lỗi nghiệp vụ?</strong> RFC 9110 định nghĩa 422 (Unprocessable Content): server hiểu kiểu nội dung và cú pháp đúng, nhưng không xử lý được chỉ thị trong đó. Nhiều API (Stripe chẳng hạn) dùng 400 hoặc 402 cho mọi lỗi của client và phân biệt bằng code. Cả hai đều ổn nếu nhất quán và có <code>code</code>. Trang này dùng 400 cho hình dạng, 422 cho quy tắc, để log và dashboard tách được hai loại.</p>
+<p><strong>Vì sao không trả 200 kèm <code>success: false</code>?</strong> Load balancer, retry của client, cache, metric theo status đều đọc status code. Trả 200 cho lỗi làm mọi thứ đó mù.</p>
+<p><strong>Vì sao một code ổn định thay vì message?</strong> Message được dịch, sửa chính tả, thay khi nâng thư viện. Code là một phần của hợp đồng, có tài liệu, có test.</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Cách validate</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>class-validator và <code>ValidationPipe</code></td><td>Có sẵn trong NestJS; DTO là class dùng được cho Swagger</td><td>Phụ thuộc metadata của TypeScript; ép kiểu ngầm nhiều bẫy; message tiếng Anh cố định</td></tr>
+<tr><td>Schema (Zod, Valibot) qua <code>StandardSchemaValidationPipe</code> (có trong NestJS 12)</td><td>Một schema cho kiểu và kiểm tra; ép kiểu tường minh</td><td>Mặc định trả giá trị đã biến đổi của schema; phải tự nối với Swagger</td></tr>
+<tr><td>JSON Schema (Fastify, OpenAPI trước)</td><td>Hợp đồng là tài liệu; nhanh</td><td>Lỗi khó đọc nếu không định dạng lại</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- 4 -->
+<section id="s4">
+<header><span class="num">04</span><h2>Ví dụ</h2></header>
+<div class="prose"><p>Viết theo API NestJS 12; phần DTO và tuỳ chọn pipe đã chạy trong sandbox (không qua HTTP), phần filter chưa chạy.</p><h3>DTO và ép kiểu tường minh cho query</h3></div>
+<pre><code>export class TransferDto {
+  @IsInt() @IsPositive() fromAccountId!: number;
+  @IsInt() @IsPositive() toAccountId!: number;
+  @IsInt() @IsPositive() @Max(Number.MAX_SAFE_INTEGER) amountMinor!: number;
+  @IsIn(['VND', 'USD']) currency!: 'VND' | 'USD';
+  @IsOptional() @IsString() @MaxLength(140) note?: string;
+}
+const toBool = ({ value }) =&gt; value === 'true' ? true : value === 'false' ? false : value;  // khác 2 giá trị: để validator báo lỗi
+export class ListDto {
+  @IsOptional() @Transform(toBool) @IsBoolean() active?: boolean;
+  @IsOptional() @Type(() =&gt; Number) @IsInt() @Min(1) @Max(100) limit?: number;
+}</code></pre>
+
+<div class="prose"><h3>Pipe toàn cục với lỗi theo Problem Details</h3></div>
+<pre><code>app.useGlobalPipes(new ValidationPipe({
+  whitelist: true, forbidNonWhitelisted: true, transform: true,   // không bật enableImplicitConversion
+  exceptionFactory: (errors) =&gt; new ProblemException(400, 'VALIDATION_FAILED', 'Dữ liệu gửi lên không hợp lệ',
+    flatten(errors).map(e =&gt; ({ pointer: e.pointer, code: e.constraint, detail: e.message }))),
+}));
+function flatten(errs: ValidationError[], base = ''): { pointer: string; constraint: string; message: string }[] {
+  return errs.flatMap(e =&gt; [
+    ...Object.entries(e.constraints ?? {}).map(([constraint, message]) =&gt; ({ pointer: `${base}/${e.property}`, constraint, message })),
+    ...flatten(e.children ?? [], `${base}/${e.property}`),
+  ]);
+}</code></pre>
+
+<div class="prose"><h3>Một filter cuối cùng, đổi mọi lỗi thành hợp đồng</h3></div>
+<pre><code>@Catch()
+export class ProblemFilter implements ExceptionFilter {
+  constructor(private readonly log: Logger) {}
+  catch(e: unknown, host: ArgumentsHost) {
+    const req = host.switchToHttp().getRequest(), res = host.switchToHttp().getResponse();
+    const p = toProblem(e);                       // bảng ánh xạ ở dưới
+    if (p.status &gt;= 500) this.log.error({ err: e, traceId: req.id }, p.code);
+    if (p.retryAfter) res.setHeader('Retry-After', String(p.retryAfter));
+    res.status(p.status).type('application/problem+json')
+       .send({ type: `https://errors.example.com/${p.code.toLowerCase()}`, title: p.title, status: p.status,
+               code: p.code, ...(p.errors &amp;&amp; { errors: p.errors }), traceId: req.id });
+  }
+}
+function toProblem(e: unknown): Problem {
+  if (e instanceof ProblemException) return e.problem;
+  if (e instanceof DomainError) return { status: 422, code: e.code, title: e.message };
+  if (e instanceof HttpException) return { status: e.getStatus(), code: httpCode(e.getStatus()), title: 'Yêu cầu không hợp lệ' };
+  const errno = (e as { errno?: number })?.errno;
+  if (errno === 1062) return { status: 409, code: 'CONFLICT_DUPLICATE', title: 'Dữ liệu đã tồn tại' };
+  if (errno === 1213 || errno === 1205) return { status: 503, code: 'RETRY_LATER', title: 'Hệ thống bận, thử lại sau', retryAfter: 1 };
+  return { status: 500, code: 'INTERNAL', title: 'Lỗi hệ thống' };   // không đưa message gốc ra ngoài
+}</code></pre>
+<p class="prose">Ánh xạ 1062 thành 409 ở filter là lưới cuối. Tốt hơn: service bắt 1062 ở đúng câu <code>INSERT</code> nó biết (trùng email, trùng idempotency key) và ném một <code>DomainError</code> có code riêng, vì cùng lỗi 1062 trên hai index khác nhau có hai nghĩa khác nhau.</p>
+
+<div class="prose"><h3>Test hợp đồng lỗi</h3></div>
+<pre><code>it.each([
+  ['body sai kiểu', { amountMinor: 'abc' },   400, 'VALIDATION_FAILED'],
+  ['trường thừa',   { ...ok, role: 'admin' }, 400, 'VALIDATION_FAILED'],
+  ['không đủ tiền', { ...ok, amountMinor: 10_000_000 }, 422, 'INSUFFICIENT_FUNDS'],
+])('%s', async (_, body, status, code) =&gt; {
+  const r = await request(app).post('/transfers').set(auth).send(body);
+  expect(r.status).toBe(status);
+  expect(r.headers['content-type']).toMatch(/application\/problem\+json/);
+  expect(r.body).toMatchObject({ status, code });
+  expect(JSON.stringify(r.body)).not.toMatch(/ER_|SELECT|at \w+ \(/);   // không lộ SQL, stack
+});</code></pre>
+</section>
+
+<!-- 5 -->
+<section id="s5">
+<header><span class="num">05</span><h2>Thí nghiệm</h2></header>
+<div class="prose"><p>Chạy với app NestJS 12 của lab qua HTTP. Viết dự đoán trước.</p></div>
+<details><summary>E50. ValidationPipe qua HTTP</summary>
+<p><strong>Câu hỏi.</strong> Với 7 payload và 16 tổ hợp tuỳ chọn của widget phần 01, gửi qua HTTP thay vì gọi pipe trực tiếp. Status, body và giá trị handler nhận (in <code>typeof</code> từng trường) có giống widget không? Thêm: <code>@Query('page') page: number</code> với <code>?page=abc</code>; body là mảng; body 10.000 phần tử lồng nhau: thời gian validate và kích thước response lỗi.</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e50/prediction.md</code></p>
+<p><strong>Chạy.</strong> Một script gửi từng payload, một handler in <code>JSON.stringify</code> và <code>typeof</code>; khởi động lại app cho từng tổ hợp.</p>
+<p><strong>Kết quả.</strong> Chưa chạy qua HTTP. Gọi pipe trực tiếp trong sandbox: xem widget phần 01.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+<details><summary>E51. Hợp đồng lỗi dưới sự cố thật</summary>
+<p><strong>Câu hỏi.</strong> Với <code>ProblemFilter</code> ở phần 04: mỗi lỗi trong widget "Lỗi này trả về gì" (JSON hỏng, trùng email, deadlock, chờ khoá quá hạn, <code>TypeError</code>) cho status, <code>code</code>, header <code>Retry-After</code> nào? Body có chứa chuỗi nào của SQL, tên index hay stack không? Lỗi trong middleware có đi qua filter không (câu hỏi mở 37)?</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e51/prediction.md</code></p>
+<p><strong>Chạy.</strong> Gây từng lỗi thật trên MySQL 8.4 (hai session cho deadlock, <code>innodb_lock_wait_timeout = 1</code> cho 1205); chạy bộ test hợp đồng.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+</section>
+
+<!-- 6 -->
+<section id="s6">
+<header><span class="num">06</span><h2>Ảnh hưởng khi chạy production</h2></header>
+<div class="prose">
+<h3>Khi nào dùng gì</h3>
+<ul>
+<li>API mới: <code>whitelist</code>, <code>forbidNonWhitelisted</code>, <code>transform</code> bật từ ngày đầu; không bật ép kiểu ngầm.</li>
+<li>API đã có nhiều client: bật <code>whitelist</code> (an toàn, chỉ bỏ trường thừa), log những request mà <code>forbidNonWhitelisted</code> lẽ ra từ chối một thời gian trước khi bật.</li>
+<li>DTO riêng cho từng việc: <code>CreateUserDto</code>, <code>UpdateProfileDto</code>, <code>AdminUpdateUserDto</code>. Không dùng chung một DTO hay entity cho mọi endpoint.</li>
+</ul>
+<h3>Cái giá</h3>
+<ul>
+<li>Validation chạy trên event loop; DTO lớn và mảng dài tốn CPU trên mọi request (câu hỏi mở 41).</li>
+<li>Hợp đồng lỗi cần tài liệu và test; mỗi code mới là một cam kết.</li>
+<li>Giữ trường cũ khi đổi API tốn code và tài liệu trong nhiều tháng.</li>
+</ul>
+<h3>Nhận ra trên production bằng gì</h3>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Triệu chứng</th><th>Xem ở đâu</th></tr></thead>
+<tbody>
+<tr><td>Tỉ lệ 400 tăng sau một bản deploy</td><td>Metric theo <code>code</code> và theo phiên bản app (header <code>User-Agent</code> hoặc <code>X-App-Version</code>); đổi validation là nghi phạm đầu tiên</td></tr>
+<tr><td>Dữ liệu có giá trị lạ (<code>NaN</code>, 0 thay vì rỗng, <code>true</code> thay vì false)</td><td>Ép kiểu ngầm, <code>transform</code> trên tham số có tên</td></tr>
+<tr><td>Người dùng đổi được trường không nên đổi</td><td>DTO dùng chung, thiếu <code>whitelist</code>, entity truyền thẳng vào <code>UPDATE</code></td></tr>
+<tr><td>500 có message lạ tới client</td><td>Filter đang trả <code>err.message</code>; tìm trong log theo <code>traceId</code></td></tr>
+<tr><td>Client thử lại vô ích</td><td>Lỗi hình dạng hoặc nghiệp vụ trả 5xx; xem tỉ lệ thử lại theo <code>code</code></td></tr>
+</tbody></table></div>
+<div class="senior"><h4>Góc nhìn senior: danh mục mã lỗi là tài liệu được review</h4><p>Senior giữ danh mục mã lỗi trong repo: mỗi <code>code</code>, status, ý nghĩa, client nên làm gì, có thử lại không. Thêm code mới đi qua review như đổi schema. Mỗi code có một test hợp đồng. Dashboard đếm lỗi theo <code>code</code> chứ không theo message, nên một lần nâng thư viện không làm biểu đồ nhảy lung tung.</p></div>
+<div class="prose">
+<h3>Checklist khi review một endpoint</h3>
+<ul>
+<li>DTO riêng cho endpoint này? Có trường nào client không được tự đặt (role, ownerId, status, giá)?</li>
+<li><code>whitelist</code> bật? Query có ép kiểu tường minh từng trường?</li>
+<li>Mỗi lỗi có thể xảy ra có <code>code</code>, status và test không? Lỗi nào thử lại được?</li>
+<li>Body lỗi có thể chứa SQL, tên index, stack hay dữ liệu của người khác không?</li>
+<li>Thay đổi này có làm vỡ client cũ không (bảng ở phần 02)?</li>
+</ul>
+</div>
+</section>
+
+<!-- 7 -->
+<section id="s7">
+<header><span class="num">07</span><h2>Hiểu lầm thường gặp</h2></header>
+<div class="prose"><ul>
+<li><strong>Hiểu lầm:</strong> pipe đã validate thì handler nhận giá trị đã validate. <strong>Vì sao sai:</strong> không có <code>transform</code> và không có tuỳ chọn validator, handler nhận bản gốc chưa ép kiểu (<a href="#s2">phần 02</a>). <strong>Quy tắc:</strong> bật <code>transform</code>.</li>
+<li><strong>Hiểu lầm:</strong> <code>enableImplicitConversion</code> làm query string "đúng kiểu". <strong>Vì sao sai:</strong> <code>"false"</code> thành <code>true</code>, <code>""</code> thành 0. <strong>Quy tắc:</strong> ép kiểu tường minh từng trường.</li>
+<li><strong>Hiểu lầm:</strong> <code>@IsOptional()</code> chỉ cho phép thiếu trường. <strong>Vì sao sai:</strong> nó bỏ qua mọi kiểm tra khi giá trị là <code>null</code> hoặc <code>undefined</code>. <strong>Quy tắc:</strong> quyết định rõ <code>null</code> nghĩa là gì (xoá giá trị hay không cho phép) và kiểm tra riêng.</li>
+<li><strong>Hiểu lầm:</strong> client có thể đọc <code>message</code> để biết lỗi gì. <strong>Vì sao sai:</strong> câu chữ đổi theo thư viện và ngôn ngữ. <strong>Quy tắc:</strong> client rẽ nhánh theo <code>code</code>.</li>
+<li><strong>Hiểu lầm:</strong> mọi lỗi của database là 500. <strong>Vì sao sai:</strong> 1062 thường là xung đột (409), 1213 và 1205 thử lại được. <strong>Quy tắc:</strong> phân loại lỗi theo lớp, mỗi lớp một hành vi của client.</li>
+</ul></div>
+</section>
+
+<!-- 8 -->
+<section id="s8">
+<header><span class="num">08</span><h2>Câu hỏi ôn tập</h2></header>
+<p class="prose">Viết ngày 2026-10-22. Đánh số Q101 đến Q106.</p>
+<details><summary><span class="tag">Dự đoán</span>Q101. Chỉ bật ép kiểu ngầm</summary>
+<p><code>new ValidationPipe({ transformOptions: { enableImplicitConversion: true } })</code>, không có tuỳ chọn nào khác. Body <code>{"amountMinor": "50000", …}</code>. Pipe báo lỗi không? Handler nhận <code>amountMinor</code> kiểu gì?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Không lỗi: bản sao được ép thành số 50000 và qua <code>@IsInt()</code>. Nhưng không có <code>transform</code> và chỉ có một tuỳ chọn validator (<code>forbidUnknownValues</code> do Nest đặt), nên pipe trả bản gốc: handler nhận chuỗi <code>"50000"</code>. Đây là kết quả chạy thật trong widget phần 01.</p></details></details>
+<details><summary><span class="tag">Dự đoán</span>Q102. Query boolean</summary>
+<p><code>@IsOptional() @IsBoolean() active?: boolean</code>, pipe có <code>transform</code> và <code>enableImplicitConversion</code>. Gọi <code>?active=false</code>. Handler nhận gì?</p>
+<details class="answer"><summary>Xem đáp án</summary><p><code>true</code>. class-transformer ép bằng <code>Boolean("false")</code>, mà mọi chuỗi khác rỗng đều là <code>true</code>. Danh sách lọc trả cả bản ghi không hoạt động. Sửa: <code>@Transform</code> nhận đúng <code>"true"</code> và <code>"false"</code>.</p></details></details>
+<details><summary><span class="tag">Giải thích</span>Q103. 400 hay 422</summary>
+<p>Phân biệt lỗi trả 400 và lỗi trả 422 trong thiết kế của trang này. Cho mỗi loại một ví dụ trên <code>POST /transfers</code>.</p>
+<details class="answer"><summary>Xem đáp án</summary><p>400: payload sai hình dạng, ví dụ <code>amountMinor</code> là chuỗi hoặc thiếu <code>currency</code>; gửi lại y hệt luôn hỏng. 422: hình dạng đúng nhưng quy tắc từ chối, ví dụ số dư không đủ, hai tài khoản khác loại tiền; cùng payload có thể thành công khi trạng thái đổi. Điều quan trọng hơn con số là có <code>code</code> riêng cho từng trường hợp.</p></details></details>
+<details><summary><span class="tag">Chẩn đoán</span>Q104. Người dùng tự nâng quyền</summary>
+<p><code>PATCH /me</code> nhận <code>UpdateUserDto</code> rồi gọi <code>repo.update(userId, dto)</code>. Một người gửi <code>{"displayName":"An","role":"admin"}</code> và trở thành admin. Pipe có <code>transform: true</code> nhưng không có <code>whitelist</code>. Vì sao, và sửa thế nào?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Không có <code>whitelist</code> nên trường <code>role</code> (không có decorator) vẫn nằm trong instance, và <code>repo.update</code> ghi mọi trường nó nhận. Sửa: bật <code>whitelist</code> (và <code>forbidNonWhitelisted</code> để thấy ai đang thử); service chỉ chép những trường được phép (<code>{ displayName: dto.displayName }</code>) thay vì truyền cả DTO; một DTO riêng cho admin.</p></details></details>
+<details><summary><span class="tag">Giải thích</span>Q105. Thêm giá trị enum</summary>
+<p>Response có <code>status: "pending" | "completed" | "failed"</code>. Team muốn thêm <code>"reversed"</code>. Vì sao đây có thể là thay đổi làm vỡ client, và làm thế nào cho an toàn?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>App cũ có <code>switch</code> không có nhánh cho <code>"reversed"</code>, hoặc kiểu sinh tự động từ OpenAPI từ chối giá trị lạ, nên có thể crash hoặc hiện sai. An toàn: hợp đồng ghi từ đầu rằng client phải có nhánh mặc định cho giá trị lạ; khi thêm giá trị, kiểm tra phiên bản app đang dùng; hoặc chỉ trả giá trị mới cho client gửi phiên bản đủ mới.</p></details></details>
+<details><summary><span class="tag">Chẩn đoán</span>Q106. Thử lại vô ích</summary>
+<p>Dashboard thấy client thử lại 3 lần cho mỗi lỗi khi đăng ký tài khoản với email đã tồn tại. Server trả <code>500 Internal server error</code>. Chuyện gì đang xảy ra?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Lỗi 1062 của mysql2 tới filter mặc định, không phải <code>HttpException</code>, nên thành 500. Client coi 5xx là lỗi tạm thời và thử lại, ba lần đều trùng. Sửa: service bắt 1062 trên index email và ném <code>EmailTakenError</code> (409, <code>EMAIL_TAKEN</code>); client không thử lại 4xx.</p></details></details>
+</section>
+
+<!-- 9 -->
+<section id="s9">
+<header><span class="num">09</span><h2>Bài toán thực tế</h2></header>
+<div class="prose">
+<p>Mỗi bài là một vòng phỏng vấn system design cấp senior, khoảng 30–45 phút. Cách dùng:</p>
+<ol class="list">
+<li>Đọc bối cảnh và câu hỏi của interviewer. Bối cảnh là những gì interviewer nói lúc đầu: hệ thống, cách đang làm, quy mô, chuyện đã xảy ra. Viết ra những gì bạn sẽ hỏi thêm trước khi thiết kế, rồi mới mở "Hỏi lại interviewer" để xem câu hỏi nên hỏi và câu trả lời của interviewer: con số chính xác, yêu cầu, ràng buộc. Các con số ở đó dùng cho những câu sau.</li>
+<li>Với mỗi follow-up, tự trả lời (nói to hoặc viết ra) trong vài phút, rồi mới mở đáp án. Follow-up cuối luôn là triển khai và kiểm chứng: thiết kế đã chọn được làm ra sao, test gì, theo dõi gì, lùi lại thế nào.</li>
+<li>Cuối bài, dùng rubric để tự chấm: câu trả lời của bạn giống cột "mid" hay cột "senior", và có rơi vào red flag nào không.</li>
+</ol>
+<p>Đáp án là lập luận từ tài liệu, không phải số đo; con số trong đó là ước lượng. Viết ngày 2026-10-22.</p>
+</div>
+
+<!-- C31 -->
+<div class="case" id="c31">
+<h3>C31. Nâng thư viện làm app mobile hiện sai thông báo lỗi</h3>
+<p class="src">Dựa trên: phần 02 của trang này (hợp đồng lỗi, thay đổi API).</p>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> API NestJS phục vụ app iOS, Android và web. App mobile cập nhật chậm: 30% người dùng ở bản cũ hơn 3 tháng.</li><li><strong>Đang làm:</strong> Lỗi trả theo dạng mặc định của Nest. App so <code>message[0]</code> với vài chuỗi đã biết để hiện thông báo tiếng Việt.</li><li><strong>Đã xảy ra:</strong> Sau khi nâng class-validator và đổi vài decorator, app cũ hiện "Đã có lỗi xảy ra" cho mọi lỗi nhập liệu; tỉ lệ hoàn tất đăng ký giảm 18% trong hai ngày.</li></ul></div>
+<blockquote class="q">"Bạn sửa ngay thế nào, và thiết kế lại hợp đồng lỗi ra sao để chuyện này không lặp lại?"</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>App cũ so những chuỗi nào?</td><td>Khoảng 25 chuỗi, ví dụ <code>"email must be an email"</code>, <code>"password must be longer than or equal to 8 characters"</code>.</td><td>Đó là hợp đồng ngầm cần giữ.</td></tr>
+<tr><td>Chuỗi nào đã đổi?</td><td>Hai decorator đổi thành decorator khác với message khác; thứ tự message cũng đổi vì sắp xếp lại decorator.</td><td>Cả câu chữ lẫn thứ tự là phần của hợp đồng ngầm.</td></tr>
+<tr><td>Có biết phiên bản app trong request không?</td><td>Có header <code>X-App-Version</code>.</td><td>Cho phép trả hai dạng theo phiên bản.</td></tr>
+<tr><td>Có đẩy bản app mới được không?</td><td>Có, nhưng mất 1–2 tuần để phần lớn người dùng cập nhật.</td><td>Sửa phía server là bắt buộc.</td></tr>
+<tr><td>Lỗi nghiệp vụ trả thế nào?</td><td>Mỗi service ném <code>BadRequestException</code> với chuỗi riêng.</td><td>Không có code nào ổn định.</td></tr>
+<tr><td>Còn client nào khác?</td><td>Hai đối tác B2B gọi API, đọc status code và message.</td><td>Thay đổi hợp đồng phải báo trước.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> hỏi app cũ đang phụ thuộc vào chính xác những gì. Hợp đồng ngầm cũng là hợp đồng; phá nó là sự cố, dù về lý thuyết client "không nên" làm vậy.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Việc đầu tiên trong một giờ tới là gì?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p>Khôi phục hợp đồng ngầm: rollback bản deploy, hoặc nếu không rollback được, thêm <code>message</code> tuỳ chỉnh cho hai decorator đã đổi để trả lại đúng chuỗi cũ và đúng thứ tự. Sau đó đo: tỉ lệ đăng ký theo phiên bản app. Thiết kế lại để sau; việc đầu là ngừng mất người dùng.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> Đề xuất hợp đồng lỗi mới. So với các cách khác.</p>
+<details class="answer"><summary>Đáp án</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>A. Giữ dạng mặc định, cấm đổi message</td><td>Không đổi gì</td><td>Câu chữ thành API; không dịch được; nâng thư viện là rủi ro</td></tr>
+<tr><td>B. Thêm <code>code</code> vào dạng hiện tại, giữ <code>message</code></td><td>Tương thích ngược; app mới dùng code</td><td>Hai dạng lỗi song song lâu dài</td></tr>
+<tr><td>C. Problem Details với <code>code</code> và <code>errors[]</code> có <code>pointer</code>, trả theo phiên bản app</td><td>Chuẩn, đủ để app tô đỏ đúng ô và dịch theo code</td><td>Hai dạng trong giai đoạn chuyển tiếp; cần tài liệu</td></tr>
+</tbody></table></div>
+<p><strong>Chọn C, đi qua B.</strong> Giai đoạn 1: giữ <code>message</code> cũ, thêm <code>code</code> và <code>errors</code>; app mới đọc trường mới. Giai đoạn 2: khi bản app cũ dưới 2% lượng dùng, trả Problem Details thuần cho mọi người, có ghi trong changelog và báo đối tác trước. <strong>Khi nào đổi ý:</strong> API chỉ có client nội bộ deploy cùng lúc: đổi một lần là đủ.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> Code của lỗi validation lấy từ đâu? Có dùng luôn tên constraint của class-validator (<code>isEmail</code>, <code>minLength</code>) không?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Tên constraint ổn định hơn câu chữ nhưng vẫn gắn với thư viện: đổi <code>@Length</code> sang <code>@MinLength</code> là đổi tên. Đổi sang Zod là mất hết.</li>
+<li>Tốt hơn: một bảng ánh xạ của mình, ví dụ <code>minLength</code>, <code>isLength</code> đều thành <code>TOO_SHORT</code>; app dịch <code>TOO_SHORT</code> kèm tham số (<code>min: 8</code>).</li>
+<li>Test hợp đồng giữ bảng này: mỗi DTO, mỗi trường, payload sai cho ra code mong đợi. Nâng thư viện mà test đỏ là tín hiệu đúng lúc.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> Lỗi nghiệp vụ hiện là <code>BadRequestException</code> với chuỗi tự do ở 60 chỗ. Chuyển đổi thế nào mà không dừng phát triển?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Thêm <code>DomainError</code> có <code>code</code> và filter đổi nó thành 422 Problem Details.</li>
+<li>Lint cấm <code>new BadRequestException('…')</code> trong code mới thuộc tầng service.</li>
+<li>Chuyển dần theo lượng dùng: lấy từ log 20 chuỗi lỗi xuất hiện nhiều nhất, chuyển trước; phần đuôi chuyển khi chạm vào.</li>
+<li>Trong lúc chuyển, filter gắn <code>code: 'LEGACY_BAD_REQUEST'</code> cho các chỗ chưa chuyển, để dashboard thấy còn bao nhiêu.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai và kiểm chứng thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ol class="list">
+<li>Snapshot test cho 25 chuỗi cũ: payload sai cho mỗi trường, kiểm tra <code>message</code> đúng chuỗi và đúng thứ tự cho <code>X-App-Version</code> cũ.</li>
+<li><code>exceptionFactory</code> mới tạo cả hai: <code>message</code> cũ và <code>code</code>, <code>errors</code>.</li>
+<li>Danh mục mã lỗi trong repo, có review; test hợp đồng cho mỗi code.</li>
+<li>App mới đọc <code>code</code>, có nhánh mặc định cho code lạ.</li>
+<li>Metric: lỗi theo <code>code</code> và phiên bản app; tỉ lệ hoàn tất đăng ký theo phiên bản. Báo đối tác B2B trước 60 ngày khi bỏ dạng cũ.</li>
+</ol>
+</details>
+</div>
+
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Phản ứng</td><td>"App không nên đọc message"</td><td>Khôi phục hợp đồng ngầm trước, sửa thiết kế sau</td></tr>
+<tr><td>Thiết kế</td><td>Thêm code</td><td>Problem Details, <code>errors[]</code> có pointer, bảng code của mình</td></tr>
+<tr><td>Chuyển tiếp</td><td>Đổi một lần</td><td>Hai dạng theo phiên bản, ngưỡng để bỏ dạng cũ, báo đối tác</td></tr>
+<tr><td>Bảo vệ</td><td>Review cẩn thận</td><td>Test hợp đồng, danh mục code, lint</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> đổ lỗi cho app và không sửa phía server; dùng tên constraint của thư viện làm hợp đồng vĩnh viễn; đổi dạng lỗi mà không báo đối tác.</p>
+</details>
+</div>
+
+<!-- C32 -->
+<div class="case" id="c32">
+<h3>C32. Người dùng tự đổi hạn mức của mình qua PATCH /me</h3>
+<p class="src">Dựa trên: phần 01 và 02 của trang này (whitelist, DTO); <a href="../layering-business-invariants/index.html">Phân tầng và bất biến</a>.</p>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> Ví điện tử. Bảng <code>users</code> có <code>display_name</code>, <code>avatar_url</code>, <code>daily_limit_minor</code>, <code>kyc_level</code>, <code>role</code>.</li><li><strong>Đang làm:</strong> <code>PATCH /me</code> nhận <code>UpdateUserDto</code> (dùng chung với trang admin), rồi gọi <code>usersRepo.update(userId, dto)</code>. Pipe toàn cục có <code>transform: true</code>.</li><li><strong>Đã xảy ra:</strong> Một nhà nghiên cứu bảo mật báo rằng gửi <code>{"dailyLimitMinor": 1000000000}</code> làm hạn mức chuyển tiền của họ tăng gấp 200 lần.</li></ul></div>
+<blockquote class="q">"Hãy sửa lỗi này và rà soát cả API."</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td><code>UpdateUserDto</code> có những trường nào và decorator gì?</td><td><code>displayName</code>, <code>avatarUrl</code>, <code>dailyLimitMinor</code>, <code>kycLevel</code>, đều <code>@IsOptional()</code>. Dùng chung cho admin.</td><td>Trường của admin nằm trong DTO của người dùng.</td></tr>
+<tr><td><code>whitelist</code> có bật không?</td><td>Không.</td><td>Ngay cả trường không có decorator cũng tới repository.</td></tr>
+<tr><td>Repository làm gì với DTO?</td><td><code>UPDATE users SET ? WHERE id = ?</code> với object nhận được.</td><td>Mọi khoá của object thành cột.</td></tr>
+<tr><td>Có endpoint nào khác dùng cùng cách?</td><td>Ít nhất 12 endpoint <code>PATCH</code> theo cùng mẫu.</td><td>Phạm vi rà soát.</td></tr>
+<tr><td>Có log thay đổi không?</td><td>Log request body bị tắt vì lý do riêng tư; có <code>updated_at</code>.</td><td>Khó biết ai đã khai thác.</td></tr>
+<tr><td>Ràng buộc?</td><td>Vá trong ngày; không phá app hiện tại.</td><td>App có thể đang gửi trường thừa vô hại.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> hỏi repository làm gì với object. Lỗi thật không nằm ở pipe mà ở chỗ một object do client điều khiển trở thành danh sách cột.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Chỉ ra từng lớp đã thất bại.</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li><strong>DTO:</strong> dùng chung cho người dùng và admin, nên trường của admin hợp lệ ở endpoint của người dùng.</li>
+<li><strong>Pipe:</strong> không <code>whitelist</code>; nhưng ở đây <code>dailyLimitMinor</code> có decorator, nên <code>whitelist</code> cũng không chặn. Bật <code>whitelist</code> là cần nhưng không đủ.</li>
+<li><strong>Service:</strong> không có; controller đưa DTO thẳng xuống repository.</li>
+<li><strong>Repository:</strong> <code>SET ?</code> với object tuỳ ý: mass assignment ở tầng SQL.</li>
+<li><strong>Domain:</strong> quy tắc "hạn mức chỉ đổi qua quy trình KYC" không tồn tại trong code.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> Sửa ở đâu? So các cách.</p>
+<details class="answer"><summary>Đáp án</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>A. Bật <code>whitelist</code> và <code>forbidNonWhitelisted</code> toàn cục</td><td>Một dòng</td><td>Không chặn <code>dailyLimitMinor</code> vì nó có decorator; có thể làm app gửi trường thừa nhận 400</td></tr>
+<tr><td>B. DTO riêng: <code>UpdateProfileDto</code> chỉ có <code>displayName</code>, <code>avatarUrl</code></td><td>Chặn đúng; tài liệu API rõ</td><td>Thêm class</td></tr>
+<tr><td>C. B, cộng service chép từng trường được phép, cộng repository chỉ nhận cột liệt kê sẵn</td><td>Ba lớp; quên DTO vẫn không ghi được cột lạ</td><td>Nhiều code hơn một chút</td></tr>
+</tbody></table></div>
+<p><strong>Chọn C.</strong> Đổi hạn mức là một use case riêng (<code>LimitsService.change()</code>) với quy tắc KYC và audit log, không phải một trường của hồ sơ. Repository có hàm <code>updateProfile(id, { displayName, avatarUrl })</code> với cột cố định. <code>whitelist</code> bật thêm như lớp chung.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> Còn bẫy nào với DTO lồng nhau, ví dụ <code>{"address": {"city": "…", "verified": true}}</code>?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Không có <code>@ValidateNested()</code> và <code>@Type(() =&gt; AddressDto)</code> thì object con không được validate, và <code>whitelist</code> không xoá trường thừa bên trong nó: <code>verified</code> lọt qua.</li>
+<li>Với <code>@IsObject()</code> hay không decorator, cả object con đi xuống repository nếu repository ghi JSON.</li>
+<li>Quy tắc: mọi object con có DTO riêng với <code>@ValidateNested</code> và <code>@Type</code>; test với trường thừa ở mức lồng.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> Rà soát 12 endpoint còn lại và tìm người đã khai thác thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Tìm mọi lời gọi repository nhận DTO hoặc <code>req.body</code> nguyên vẹn (<code>SET ?</code>, <code>update(id, dto)</code>, <code>Object.assign(entity, dto)</code>).</li>
+<li>Test tự động: với mỗi endpoint ghi, gửi payload có thêm mọi cột nhạy cảm của bảng (lấy từ <code>information_schema.columns</code>) và kiểm tra cột không đổi.</li>
+<li>Tìm khai thác: người dùng có <code>daily_limit_minor</code> khác mọi mức chuẩn của KYC, hoặc <code>updated_at</code> đổi mà không có bản ghi trong bảng duyệt hạn mức. Đối chiếu với giao dịch lớn sau thời điểm đó.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai và kiểm chứng thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ol class="list">
+<li>Giờ đầu: trong <code>PATCH /me</code>, chỉ chép <code>displayName</code> và <code>avatarUrl</code>; deploy. Test: gửi <code>dailyLimitMinor</code>, kiểm tra không đổi.</li>
+<li>Ngày đầu: tách DTO; <code>LimitsService.change()</code> có kiểm tra KYC và audit.</li>
+<li>Bật <code>whitelist</code> toàn cục. <code>forbidNonWhitelisted</code> chỉ log (một <code>exceptionFactory</code> ghi log thay vì ném) trong hai tuần để biết app gửi trường thừa nào, rồi mới ném.</li>
+<li>Test cột nhạy cảm cho mọi endpoint ghi, chạy trong CI trên MySQL thật.</li>
+<li>Đưa hạn mức về đúng mức KYC cho người bị ảnh hưởng, có bút toán audit; báo nhà nghiên cứu khi đã vá.</li>
+</ol>
+</details>
+</div>
+
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Chẩn đoán</td><td>"Thiếu whitelist"</td><td>Whitelist không đủ; DTO dùng chung và <code>SET ?</code> là gốc</td></tr>
+<tr><td>Sửa</td><td>Bật một tuỳ chọn</td><td>DTO theo use case, chép trường tường minh, cột cố định</td></tr>
+<tr><td>Lồng nhau</td><td>Không nghĩ tới</td><td><code>@ValidateNested</code>, <code>@Type</code>, test trường thừa ở mức lồng</td></tr>
+<tr><td>Phạm vi</td><td>Sửa một endpoint</td><td>Rà mọi endpoint ghi bằng test tự sinh; tìm người đã khai thác</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> chỉ bật <code>whitelist</code> và coi là xong; dùng entity của ORM làm DTO; ném 400 cho mọi trường thừa ngay lập tức mà không biết app đang gửi gì.</p>
+</details>
+</div>
+
+<!-- C33 -->
+<div class="case" id="c33">
+<h3>C33. Mọi lỗi của database trả 500, và client thử lại tất cả</h3>
+<p class="src">Dựa trên: phần 02 và 04 của trang này; <a href="../idempotency-retries/index.html">Idempotency và retry</a>; <a href="../innodb-locking-deadlock/index.html">Khoá và deadlock</a>.</p>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> API đặt vé sự kiện, NestJS, MySQL 8.4. Client là app mobile và một SDK đối tác.</li><li><strong>Đang làm:</strong> Không có filter riêng; mọi lỗi của mysql2 thành 500. SDK đối tác thử lại mọi 5xx tối đa 5 lần với backoff 200 ms.</li><li><strong>Quy mô:</strong> lúc mở bán, khoảng 4.000 request đặt vé mỗi giây.</li><li><strong>Đã xảy ra:</strong> Lần mở bán gần nhất, tỉ lệ 500 lên 12%; tải lên database tăng gấp 3; vài người bị giữ hai vé.</li></ul></div>
+<blockquote class="q">"Thiết kế lại cách server báo lỗi và cách client nên phản ứng."</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>Những lỗi MySQL nào chiếm 12% đó?</td><td>Khoảng 70% là 1213 (deadlock), 20% là 1062 trên <code>UNIQUE (event_id, seat_id)</code>, 10% là 1205.</td><td>Ba lỗi, ba hành vi khác nhau.</td></tr>
+<tr><td>Đặt vé có idempotency key không?</td><td>Không.</td><td>Thử lại sau timeout có thể giữ hai vé.</td></tr>
+<tr><td>Hai vé giữ cho một người xảy ra thế nào?</td><td>Request đầu commit nhưng response bị timeout ở load balancer; SDK thử lại với ghế khác vì ghế cũ đã bị giữ.</td><td>Đây là lỗi của mô hình retry, không phải của MySQL.</td></tr>
+<tr><td>Ai sở hữu SDK đối tác?</td><td>Mình viết, đối tác nhúng; đổi được ở bản sau.</td><td>Sửa được cả hai phía.</td></tr>
+<tr><td>Deadlock xảy ra ở câu nào?</td><td>Giữ hai ghế cạnh nhau, khoá theo thứ tự người dùng chọn.</td><td>Một phần sửa được ở gốc.</td></tr>
+<tr><td>Yêu cầu?</td><td>Người dùng biết rõ ghế hết hay hệ thống bận; không giữ trùng; giảm tải lúc cao điểm.</td><td>Hai thông báo khác nhau cho hai lỗi khác nhau.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> chia 12% theo mã lỗi. "500" là một con số vô dụng; 1213, 1062, 1205 là ba câu chuyện.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Với mỗi mã lỗi, server nên trả gì và client nên làm gì?</p>
+<details class="answer"><summary>Đáp án</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Lỗi</th><th>Nghĩa</th><th>Response</th><th>Client</th></tr></thead>
+<tbody>
+<tr><td>1062 trên <code>(event_id, seat_id)</code></td><td>Ghế đã có người giữ</td><td>409, <code>SEAT_TAKEN</code></td><td>Không thử lại; cho người dùng chọn ghế khác</td></tr>
+<tr><td>1213</td><td>InnoDB chọn transaction này làm nạn nhân và đã rollback</td><td>Server tự thử lại 1–2 lần ngay; vẫn lỗi thì 503 <code>RETRY_LATER</code>, <code>Retry-After: 1</code></td><td>Thử lại sau <code>Retry-After</code>, cùng idempotency key</td></tr>
+<tr><td>1205</td><td>Chờ khoá quá hạn; mặc định chỉ câu lệnh bị rollback, không phải cả transaction</td><td>Rollback cả transaction rồi 503 <code>RETRY_LATER</code></td><td>Như trên</td></tr>
+<tr><td>Lỗi khác</td><td>Bug hoặc sự cố</td><td>500 <code>INTERNAL</code>, không chi tiết</td><td>Không thử lại tự động, hoặc tối đa 1 lần</td></tr>
+</tbody></table></div>
+<p>Về 1205: với <code>innodb_rollback_on_timeout</code> tắt (mặc định), InnoDB chỉ rollback câu lệnh cuối. Code phải chủ động rollback cả transaction trước khi trả lỗi, nếu không phần đã ghi trước đó có thể bị commit nhầm.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> SDK thử lại 5 lần với backoff 200 ms. Ước lượng tải thêm lúc cao điểm và đề xuất chính sách mới.</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>4.000 request mỗi giây, 12% lỗi là 480 request lỗi mỗi giây. Nếu lần thử lại cũng lỗi với tỉ lệ cao (tải đang tăng), tới 5 lần thử là tới 2.400 request thêm mỗi giây: tải lên tới 1,6 lần ở mức xấu nhất, và lỗi tăng thì vòng lặp tự khuếch đại. Con số "gấp 3" quan sát được khớp với việc request trùng còn giữ khoá lâu hơn (ước lượng).</li>
+<li>Chính sách mới: chỉ thử lại khi <code>code</code> là <code>RETRY_LATER</code> (hoặc 503, 429); tối đa 2 lần; backoff luỹ thừa có jitter, tôn trọng <code>Retry-After</code>; không bao giờ thử lại 409, 422, 400.</li>
+<li>Phía server: deadlock thử lại trong server một lần (rẻ hơn một vòng mạng); giới hạn tốc độ theo người dùng trả 429 khi quá tải.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> Người dùng bị giữ hai vé. Đồng nghiệp đề xuất "khi thử lại, SDK gửi lại đúng ghế cũ". Có đủ không?</p>
+<details class="answer"><summary>Đáp án</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>A. SDK gửi lại đúng ghế</td><td>Đơn giản</td><td>Lần đầu đã commit: lần sau nhận 409 <code>SEAT_TAKEN</code> cho chính ghế của mình; người dùng tưởng mất ghế và chọn ghế khác</td></tr>
+<tr><td>B. Idempotency key cho mỗi lần đặt</td><td>Lần thử lại nhận đúng kết quả của lần đầu</td><td>Bảng khoá, SDK phải tạo key</td></tr>
+<tr><td>C. B cộng giới hạn "mỗi người tối đa N ghế giữ cùng lúc" trong database</td><td>Có lưới khi client sai</td><td>Thêm kiểm tra, cần khoá theo người dùng</td></tr>
+</tbody></table></div>
+<p><strong>Chọn C.</strong> Idempotency key giải quyết đúng câu hỏi "lần đầu đã thành công chưa". Giới hạn số ghế là bất biến nghiệp vụ, giữ được cả khi client có bug.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> 70% là deadlock. Giảm từ gốc thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Khoá ghế theo thứ tự cố định (<code>ORDER BY seat_id</code>) thay vì thứ tự người dùng chọn: hai người chọn cùng hai ghế theo thứ tự ngược nhau không còn khoá chéo.</li>
+<li>Giữ ghế bằng một câu <code>INSERT</code> nhiều dòng vào bảng có <code>UNIQUE</code>, không <code>SELECT … FOR UPDATE</code> trước: lỗi 1062 là câu trả lời "ghế đã có người".</li>
+<li>Transaction ngắn: không gọi dịch vụ ngoài trong transaction.</li>
+<li>Xem <code>SHOW ENGINE INNODB STATUS</code> phần <code>LATEST DETECTED DEADLOCK</code> để xác nhận đúng cặp câu lệnh.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai và kiểm chứng thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ol class="list">
+<li><code>ProblemFilter</code> với bảng ánh xạ; service bắt 1062 trên đúng index và ném <code>SeatTakenError</code>; trợ giúp <code>withDeadlockRetry()</code> thử lại một lần cho 1213.</li>
+<li>Bảng idempotency key; header bắt buộc cho đặt vé (SDK mới gửi; SDK cũ được miễn một thời gian, đo tỉ lệ).</li>
+<li>Test tích hợp trên MySQL thật: hai transaction giữ hai ghế theo thứ tự ngược (trước khi sửa phải có 1213, sau khi sửa không có); 1205 với <code>innodb_lock_wait_timeout = 1</code> kiểm tra rollback cả transaction; mọi response lỗi có đúng <code>code</code>.</li>
+<li>Load test mô phỏng mở bán: 4.000 request mỗi giây, tỉ lệ lỗi theo <code>code</code>, tải database, số người có hai vé (phải bằng 0).</li>
+<li>Metric production: lỗi theo <code>code</code>, số lần thử lại theo <code>code</code>, counter <code>lock_deadlocks</code> trong <code>INFORMATION_SCHEMA.INNODB_METRICS</code>.</li>
+</ol>
+</details>
+</div>
+
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Phân loại</td><td>"Lỗi database"</td><td>1062, 1213, 1205 tách riêng, mỗi loại một status và một hành vi</td></tr>
+<tr><td>Retry</td><td>Giảm số lần thử</td><td>Chỉ thử lại lỗi thử lại được, có jitter, tôn trọng <code>Retry-After</code>; ước lượng tải thêm</td></tr>
+<tr><td>Trùng</td><td>Gửi lại đúng ghế</td><td>Idempotency key cộng giới hạn trong database</td></tr>
+<tr><td>Gốc</td><td>Không động tới</td><td>Thứ tự khoá cố định, transaction ngắn</td></tr>
+<tr><td>1205</td><td>Như deadlock</td><td>Biết InnoDB chỉ rollback câu lệnh; chủ động rollback</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> trả 500 cho lỗi trùng; thử lại 409; trả <code>sqlMessage</code> cho client; tăng <code>innodb_lock_wait_timeout</code> để "giảm lỗi".</p>
+</details>
+</div>
+</section>
+
+<!-- 10 -->
+<section id="s10">
+<header><span class="num">10</span><h2>Câu hỏi còn mở</h2></header>
+<p class="prose">Số thứ tự trùng với Open questions trong <code>.claude/docs/LEARNING_LOG.md</code>. Log là bản gốc.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>#</th><th>Câu hỏi</th><th>Trạng thái</th></tr></thead>
+<tbody>
+<tr><td>41</td><td><code>ValidationPipe</code> với một body 10.000 phần tử lồng nhau tốn bao nhiêu mili giây trên event loop, và response lỗi lớn tới đâu khi mọi phần tử đều sai (mặc định cắt ở 1.000.000 ký tự)? Có cần giới hạn kích thước body và số phần tử trước khi tới pipe không?</td><td>Mở. Đo trong E50.</td></tr>
+<tr><td>42</td><td><code>StandardSchemaValidationPipe</code> của NestJS 12 với Zod so với class-validator: message lỗi trông thế nào, ép kiểu khác gì, và đổi sang có làm vỡ hợp đồng lỗi không nếu đã có bảng ánh xạ code?</td><td>Mở.</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- 11 -->
+<section id="s11">
+<header><span class="num">11</span><h2>Tài liệu tham khảo</h2></header>
+<div class="prose"><ul>
+<li>NestJS 12.2.0, mã nguồn <code>@nestjs/common</code>: <code>pipes/validation.pipe.js</code>, <code>pipes/standard-schema-validation.pipe.d.ts</code>, <code>exceptions/http.exception.js</code></li>
+<li>class-validator 0.15.1, mã nguồn: <code>validation/ValidationExecutor.js</code> (whitelist trước, message <code>should not exist</code>), <code>decorator/common/IsOptional.js</code> (bỏ qua <code>null</code> và <code>undefined</code>)</li>
+<li>class-transformer 0.5.1, mã nguồn: <code>TransformOperationExecutor.js</code> (<code>Number(value)</code>, <code>Boolean(value)</code> khi ép ngầm)</li>
+<li><a href="https://www.rfc-editor.org/rfc/rfc9457">RFC 9457</a>: Problem Details for HTTP APIs (thay RFC 7807)</li>
+<li><a href="https://www.rfc-editor.org/rfc/rfc9110">RFC 9110</a>: HTTP Semantics, mục 15 (status code, 409, 422), <code>Retry-After</code></li>
+<li>MySQL 8.4 Reference Manual: Server Error Message Reference (1062, 1205, 1213), <code>innodb_rollback_on_timeout</code></li>
+<li>OWASP API Security Top 10 (2023), API3: Broken Object Property Level Authorization (mass assignment)</li>
+</ul></div>
+<h3>Mức kiểm chứng</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>Khẳng định</th><th>Nguồn</th></tr></thead>
+<tbody>
+<tr><td>Kết quả của 7 payload × 16 tổ hợp tuỳ chọn trong widget phần 01</td><td>chạy thật <code>ValidationPipe.transform</code> trong sandbox (NestJS 12.2.0, Node 22.22.0); chưa qua HTTP (E50)</td></tr>
+<tr><td>Chỉ bật ép kiểu ngầm thì handler nhận bản gốc; <code>"false"</code> thành <code>true</code>; tham số có tên bị <code>+value</code></td><td>chạy thật trong sandbox và mã nguồn</td></tr>
+<tr><td>Mặc định của các tuỳ chọn</td><td>mã nguồn NestJS 12.2.0</td></tr>
+<tr><td>Thứ tự message theo thứ tự decorator ngược lại; lỗi whitelist đứng đầu</td><td>chạy thật class-validator 0.15.1 trong sandbox</td></tr>
+<tr><td>Trường của Problem Details; định nghĩa 409, 422</td><td>RFC 9457, RFC 9110</td></tr>
+<tr><td>Body của <code>ProblemFilter</code> cho từng lỗi MySQL</td><td>thiết kế của trang; chưa chạy (E51)</td></tr>
+</tbody></table></div>
+</section>
+</main>
+
+</div>
+
+<script>
+const DEFS=`<defs><marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>`;
+function B(x,y,w,h,cls,t,sub){
+  const tx=x+w/2;
+  return `<g class="n ${cls||''}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="5"/>`+
+  `<text class="tb" x="${tx}" y="${y+(sub?h/2-8:h/2)}" text-anchor="middle" dominant-baseline="central">${t}</text>`+
+  (sub?`<text class="ts" x="${tx}" y="${y+h/2+10}" text-anchor="middle" dominant-baseline="central">${sub}</text>`:'')+`</g>`;
+}
+const A=(d,cls)=>`<path d="${d}" class="edge ${cls||''}" marker-end="url(#arw)"/>`;
+const T=(x,y,t,anchor,cls)=>`<text class="${cls||'lbl'}" x="${x}" y="${y}" text-anchor="${anchor||'start'}">${t}</text>`;
+const $=id=>document.getElementById(id);
+const fmt=n=>Math.round(n).toLocaleString('vi-VN');
+const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+// Mounts a stepper into <div class="frame" id="ID"></div>; steps may be replaced via the returned set().
+function stepper(id,{title,vb,steps,draw,after,extra}){
+  const el=document.getElementById(id);
+  el.innerHTML=`<div class="ph"><strong>${title}</strong><span class="meta"></span></div><div class="bd">
+  ${extra||''}<h4 class="st-t"></h4>
+  <svg viewBox="${vb}" role="img"></svg>
+  <div class="desc" aria-live="polite"><div class="st-d"></div><pre hidden></pre></div>
+  <div class="nav"><button data-d="-1">Trước</button><button data-d="1" class="primary">Tiếp</button></div></div>`;
+  const svg=el.querySelector('svg'),t=el.querySelector('.st-t'),d=el.querySelector('.st-d'),pre=el.querySelector('pre'),meta=el.querySelector('.meta');
+  const [pv,nx]=el.querySelectorAll('.nav button');let i=0;
+  function render(){const s=steps[i];svg.innerHTML=DEFS+draw(s,i);svg.setAttribute('aria-label',s.t);t.textContent=s.t;d.textContent=s.d;
+    pre.hidden=!s.c;pre.textContent=s.c||'';meta.textContent=`bước ${i+1} / ${steps.length}`;pv.disabled=i===0;nx.disabled=i===steps.length-1;after&&after(s,el);}
+  function go(k){i=Math.max(0,Math.min(steps.length-1,i+k));render();}
+  pv.onclick=()=>go(-1);nx.onclick=()=>go(1);
+  el.tabIndex=0;el.addEventListener('keydown',e=>{if(e.target.closest('select,input'))return;if(e.key==='ArrowRight')go(1);if(e.key==='ArrowLeft')go(-1);});
+  render();
+  return {set(ns){steps=ns;i=0;render();},el};
+}
+
+/* Real outputs of ValidationPipe.transform, NestJS 12.2.0, class-validator 0.15.1, class-transformer 0.5.1, Node 22.22.0 (sandbox). Key: payload -> bitmask (1 whitelist, 2 forbidNonWhitelisted, 4 transform, 8 enableImplicitConversion). */
+const VPD={"b1":{"0":{"ok":0,"s":400,"v":"{\"message\":[\"amountMinor must be a positive number\",\"amountMinor must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"1":{"ok":0,"s":400,"v":"{\"message\":[\"amountMinor must be a positive number\",\"amountMinor must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"2":{"ok":0,"s":400,"v":"{\"message\":[\"amountMinor must be a positive number\",\"amountMinor must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"3":{"ok":0,"s":400,"v":"{\"message\":[\"property role should not exist\",\"amountMinor must be a positive number\",\"amountMinor must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"4":{"ok":0,"s":400,"v":"{\"message\":[\"amountMinor must be a positive number\",\"amountMinor must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"5":{"ok":0,"s":400,"v":"{\"message\":[\"amountMinor must be a positive number\",\"amountMinor must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"6":{"ok":0,"s":400,"v":"{\"message\":[\"amountMinor must be a positive number\",\"amountMinor must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"7":{"ok":0,"s":400,"v":"{\"message\":[\"property role should not exist\",\"amountMinor must be a positive number\",\"amountMinor must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"8":{"ok":1,"v":"{\"fromAccountId\":1,\"toAccountId\":2,\"amountMinor\":\"50000\",\"currency\":\"VND\",\"role\":\"admin\"}","t":{"fromAccountId":"number","toAccountId":"number","amountMinor":"string","currency":"string","role":"string"},"c":"Object"},"9":{"ok":1,"v":"{\"fromAccountId\":1,\"toAccountId\":2,\"amountMinor\":50000,\"currency\":\"VND\"}","t":{"fromAccountId":"number","toAccountId":"number","amountMinor":"number","currency":"string"},"c":"Object"},"10":{"ok":1,"v":"{\"fromAccountId\":1,\"toAccountId\":2,\"amountMinor\":50000,\"currency\":\"VND\",\"role\":\"admin\"}","t":{"fromAccountId":"number","toAccountId":"number","amountMinor":"number","currency":"string","role":"string"},"c":"Object"},"11":{"ok":0,"s":400,"v":"{\"message\":[\"property role should not exist\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"12":{"ok":1,"v":"{\"fromAccountId\":1,\"toAccountId\":2,\"amountMinor\":50000,\"currency\":\"VND\",\"role\":\"admin\"}","t":{"fromAccountId":"number","toAccountId":"number","amountMinor":"number","currency":"string","role":"string"},"c":"TransferDto"},"13":{"ok":1,"v":"{\"fromAccountId\":1,\"toAccountId\":2,\"amountMinor\":50000,\"currency\":\"VND\"}","t":{"fromAccountId":"number","toAccountId":"number","amountMinor":"number","currency":"string"},"c":"TransferDto"},"14":{"ok":1,"v":"{\"fromAccountId\":1,\"toAccountId\":2,\"amountMinor\":50000,\"currency\":\"VND\",\"role\":\"admin\"}","t":{"fromAccountId":"number","toAccountId":"number","amountMinor":"number","currency":"string","role":"string"},"c":"TransferDto"},"15":{"ok":0,"s":400,"v":"{\"message\":[\"property role should not exist\"],\"error\":\"Bad Request\",\"statusCode\":400}"}},"b2":{"0":{"ok":1,"v":"{\"fromAccountId\":1,\"toAccountId\":2,\"amountMinor\":50000,\"currency\":\"VND\"}","t":{"fromAccountId":"number","toAccountId":"number","amountMinor":"number","currency":"string"},"c":"Object"},"1":{"ok":1,"v":"{\"fromAccountId\":1,\"toAccountId\":2,\"amountMinor\":50000,\"currency\":\"VND\"}","t":{"fromAccountId":"number","toAccountId":"number","amountMinor":"number","currency":"string"},"c":"Object"},"2":{"ok":1,"v":"{\"fromAccountId\":1,\"toAccountId\":2,\"amountMinor\":50000,\"currency\":\"VND\"}","t":{"fromAccountId":"number","toAccountId":"number","amountMinor":"number","currency":"string"},"c":"Object"},"3":{"ok":1,"v":"{\"fromAccountId\":1,\"toAccountId\":2,\"amountMinor\":50000,\"currency\":\"VND\"}","t":{"fromAccountId":"number","toAccountId":"number","amountMinor":"number","currency":"string"},"c":"Object"},"4":{"ok":1,"v":"{\"fromAccountId\":1,\"toAccountId\":2,\"amountMinor\":50000,\"currency\":\"VND\"}","t":{"fromAccountId":"number","toAccountId":"number","amountMinor":"number","currency":"string"},"c":"TransferDto"},"5":{"ok":1,"v":"{\"fromAccountId\":1,\"toAccountId\":2,\"amountMinor\":50000,\"currency\":\"VND\"}","t":{"fromAccountId":"number","toAccountId":"number","amountMinor":"number","currency":"string"},"c":"TransferDto"},"6":{"ok":1,"v":"{\"fromAccountId\":1,\"toAccountId\":2,\"amountMinor\":50000,\"currency\":\"VND\"}","t":{"fromAccountId":"number","toAccountId":"number","amountMinor":"number","currency":"string"},"c":"TransferDto"},"7":{"ok":1,"v":"{\"fromAccountId\":1,\"toAccountId\":2,\"amountMinor\":50000,\"currency\":\"VND\"}","t":{"fromAccountId":"number","toAccountId":"number","amountMinor":"number","currency":"string"},"c":"TransferDto"},"8":{"ok":1,"v":"{\"fromAccountId\":1,\"toAccountId\":2,\"amountMinor\":50000,\"currency\":\"VND\"}","t":{"fromAccountId":"number","toAccountId":"number","amountMinor":"number","currency":"string"},"c":"Object"},"9":{"ok":1,"v":"{\"fromAccountId\":1,\"toAccountId\":2,\"amountMinor\":50000,\"currency\":\"VND\"}","t":{"fromAccountId":"number","toAccountId":"number","amountMinor":"number","currency":"string"},"c":"Object"},"10":{"ok":1,"v":"{\"fromAccountId\":1,\"toAccountId\":2,\"amountMinor\":50000,\"currency\":\"VND\"}","t":{"fromAccountId":"number","toAccountId":"number","amountMinor":"number","currency":"string"},"c":"Object"},"11":{"ok":1,"v":"{\"fromAccountId\":1,\"toAccountId\":2,\"amountMinor\":50000,\"currency\":\"VND\"}","t":{"fromAccountId":"number","toAccountId":"number","amountMinor":"number","currency":"string"},"c":"Object"},"12":{"ok":1,"v":"{\"fromAccountId\":1,\"toAccountId\":2,\"amountMinor\":50000,\"currency\":\"VND\"}","t":{"fromAccountId":"number","toAccountId":"number","amountMinor":"number","currency":"string"},"c":"TransferDto"},"13":{"ok":1,"v":"{\"fromAccountId\":1,\"toAccountId\":2,\"amountMinor\":50000,\"currency\":\"VND\"}","t":{"fromAccountId":"number","toAccountId":"number","amountMinor":"number","currency":"string"},"c":"TransferDto"},"14":{"ok":1,"v":"{\"fromAccountId\":1,\"toAccountId\":2,\"amountMinor\":50000,\"currency\":\"VND\"}","t":{"fromAccountId":"number","toAccountId":"number","amountMinor":"number","currency":"string"},"c":"TransferDto"},"15":{"ok":1,"v":"{\"fromAccountId\":1,\"toAccountId\":2,\"amountMinor\":50000,\"currency\":\"VND\"}","t":{"fromAccountId":"number","toAccountId":"number","amountMinor":"number","currency":"string"},"c":"TransferDto"}},"b3":{"0":{"ok":0,"s":400,"v":"{\"message\":[\"fromAccountId must be a positive number\",\"fromAccountId must be an integer number\",\"amountMinor must be a positive number\",\"amountMinor must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"1":{"ok":0,"s":400,"v":"{\"message\":[\"fromAccountId must be a positive number\",\"fromAccountId must be an integer number\",\"amountMinor must be a positive number\",\"amountMinor must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"2":{"ok":0,"s":400,"v":"{\"message\":[\"fromAccountId must be a positive number\",\"fromAccountId must be an integer number\",\"amountMinor must be a positive number\",\"amountMinor must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"3":{"ok":0,"s":400,"v":"{\"message\":[\"fromAccountId must be a positive number\",\"fromAccountId must be an integer number\",\"amountMinor must be a positive number\",\"amountMinor must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"4":{"ok":0,"s":400,"v":"{\"message\":[\"fromAccountId must be a positive number\",\"fromAccountId must be an integer number\",\"amountMinor must be a positive number\",\"amountMinor must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"5":{"ok":0,"s":400,"v":"{\"message\":[\"fromAccountId must be a positive number\",\"fromAccountId must be an integer number\",\"amountMinor must be a positive number\",\"amountMinor must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"6":{"ok":0,"s":400,"v":"{\"message\":[\"fromAccountId must be a positive number\",\"fromAccountId must be an integer number\",\"amountMinor must be a positive number\",\"amountMinor must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"7":{"ok":0,"s":400,"v":"{\"message\":[\"fromAccountId must be a positive number\",\"fromAccountId must be an integer number\",\"amountMinor must be a positive number\",\"amountMinor must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"8":{"ok":1,"v":"{\"fromAccountId\":true,\"toAccountId\":2,\"amountMinor\":\"1e3\",\"currency\":\"VND\"}","t":{"fromAccountId":"boolean","toAccountId":"number","amountMinor":"string","currency":"string"},"c":"Object"},"9":{"ok":1,"v":"{\"fromAccountId\":1,\"toAccountId\":2,\"amountMinor\":1000,\"currency\":\"VND\"}","t":{"fromAccountId":"number","toAccountId":"number","amountMinor":"number","currency":"string"},"c":"Object"},"10":{"ok":1,"v":"{\"fromAccountId\":1,\"toAccountId\":2,\"amountMinor\":1000,\"currency\":\"VND\"}","t":{"fromAccountId":"number","toAccountId":"number","amountMinor":"number","currency":"string"},"c":"Object"},"11":{"ok":1,"v":"{\"fromAccountId\":1,\"toAccountId\":2,\"amountMinor\":1000,\"currency\":\"VND\"}","t":{"fromAccountId":"number","toAccountId":"number","amountMinor":"number","currency":"string"},"c":"Object"},"12":{"ok":1,"v":"{\"fromAccountId\":1,\"toAccountId\":2,\"amountMinor\":1000,\"currency\":\"VND\"}","t":{"fromAccountId":"number","toAccountId":"number","amountMinor":"number","currency":"string"},"c":"TransferDto"},"13":{"ok":1,"v":"{\"fromAccountId\":1,\"toAccountId\":2,\"amountMinor\":1000,\"currency\":\"VND\"}","t":{"fromAccountId":"number","toAccountId":"number","amountMinor":"number","currency":"string"},"c":"TransferDto"},"14":{"ok":1,"v":"{\"fromAccountId\":1,\"toAccountId\":2,\"amountMinor\":1000,\"currency\":\"VND\"}","t":{"fromAccountId":"number","toAccountId":"number","amountMinor":"number","currency":"string"},"c":"TransferDto"},"15":{"ok":1,"v":"{\"fromAccountId\":1,\"toAccountId\":2,\"amountMinor\":1000,\"currency\":\"VND\"}","t":{"fromAccountId":"number","toAccountId":"number","amountMinor":"number","currency":"string"},"c":"TransferDto"}},"b4":{"0":{"ok":0,"s":400,"v":"{\"message\":[\"amountMinor must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"1":{"ok":0,"s":400,"v":"{\"message\":[\"amountMinor must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"2":{"ok":0,"s":400,"v":"{\"message\":[\"amountMinor must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"3":{"ok":0,"s":400,"v":"{\"message\":[\"amountMinor must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"4":{"ok":0,"s":400,"v":"{\"message\":[\"amountMinor must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"5":{"ok":0,"s":400,"v":"{\"message\":[\"amountMinor must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"6":{"ok":0,"s":400,"v":"{\"message\":[\"amountMinor must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"7":{"ok":0,"s":400,"v":"{\"message\":[\"amountMinor must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"8":{"ok":0,"s":400,"v":"{\"message\":[\"amountMinor must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"9":{"ok":0,"s":400,"v":"{\"message\":[\"amountMinor must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"10":{"ok":0,"s":400,"v":"{\"message\":[\"amountMinor must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"11":{"ok":0,"s":400,"v":"{\"message\":[\"amountMinor must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"12":{"ok":0,"s":400,"v":"{\"message\":[\"amountMinor must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"13":{"ok":0,"s":400,"v":"{\"message\":[\"amountMinor must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"14":{"ok":0,"s":400,"v":"{\"message\":[\"amountMinor must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"15":{"ok":0,"s":400,"v":"{\"message\":[\"amountMinor must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"}},"q1":{"0":{"ok":0,"s":400,"v":"{\"message\":[\"active must be a boolean value\",\"limit must not be greater than 100\",\"limit must not be less than 1\",\"limit must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"1":{"ok":0,"s":400,"v":"{\"message\":[\"active must be a boolean value\",\"limit must not be greater than 100\",\"limit must not be less than 1\",\"limit must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"2":{"ok":0,"s":400,"v":"{\"message\":[\"active must be a boolean value\",\"limit must not be greater than 100\",\"limit must not be less than 1\",\"limit must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"3":{"ok":0,"s":400,"v":"{\"message\":[\"active must be a boolean value\",\"limit must not be greater than 100\",\"limit must not be less than 1\",\"limit must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"4":{"ok":0,"s":400,"v":"{\"message\":[\"active must be a boolean value\",\"limit must not be greater than 100\",\"limit must not be less than 1\",\"limit must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"5":{"ok":0,"s":400,"v":"{\"message\":[\"active must be a boolean value\",\"limit must not be greater than 100\",\"limit must not be less than 1\",\"limit must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"6":{"ok":0,"s":400,"v":"{\"message\":[\"active must be a boolean value\",\"limit must not be greater than 100\",\"limit must not be less than 1\",\"limit must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"7":{"ok":0,"s":400,"v":"{\"message\":[\"active must be a boolean value\",\"limit must not be greater than 100\",\"limit must not be less than 1\",\"limit must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"8":{"ok":1,"v":"{\"active\":\"false\",\"limit\":\"20\"}","t":{"active":"string","limit":"string"},"c":"Object"},"9":{"ok":1,"v":"{\"active\":true,\"limit\":20}","t":{"active":"boolean","limit":"number"},"c":"Object"},"10":{"ok":1,"v":"{\"active\":true,\"limit\":20}","t":{"active":"boolean","limit":"number"},"c":"Object"},"11":{"ok":1,"v":"{\"active\":true,\"limit\":20}","t":{"active":"boolean","limit":"number"},"c":"Object"},"12":{"ok":1,"v":"{\"active\":true,\"limit\":20}","t":{"active":"boolean","limit":"number"},"c":"ListDto"},"13":{"ok":1,"v":"{\"active\":true,\"limit\":20}","t":{"active":"boolean","limit":"number"},"c":"ListDto"},"14":{"ok":1,"v":"{\"active\":true,\"limit\":20}","t":{"active":"boolean","limit":"number"},"c":"ListDto"},"15":{"ok":1,"v":"{\"active\":true,\"limit\":20}","t":{"active":"boolean","limit":"number"},"c":"ListDto"}},"q2":{"0":{"ok":0,"s":400,"v":"{\"message\":[\"limit must not be greater than 100\",\"limit must not be less than 1\",\"limit must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"1":{"ok":0,"s":400,"v":"{\"message\":[\"limit must not be greater than 100\",\"limit must not be less than 1\",\"limit must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"2":{"ok":0,"s":400,"v":"{\"message\":[\"limit must not be greater than 100\",\"limit must not be less than 1\",\"limit must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"3":{"ok":0,"s":400,"v":"{\"message\":[\"limit must not be greater than 100\",\"limit must not be less than 1\",\"limit must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"4":{"ok":0,"s":400,"v":"{\"message\":[\"limit must not be greater than 100\",\"limit must not be less than 1\",\"limit must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"5":{"ok":0,"s":400,"v":"{\"message\":[\"limit must not be greater than 100\",\"limit must not be less than 1\",\"limit must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"6":{"ok":0,"s":400,"v":"{\"message\":[\"limit must not be greater than 100\",\"limit must not be less than 1\",\"limit must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"7":{"ok":0,"s":400,"v":"{\"message\":[\"limit must not be greater than 100\",\"limit must not be less than 1\",\"limit must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"8":{"ok":0,"s":400,"v":"{\"message\":[\"limit must not be less than 1\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"9":{"ok":0,"s":400,"v":"{\"message\":[\"limit must not be less than 1\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"10":{"ok":0,"s":400,"v":"{\"message\":[\"limit must not be less than 1\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"11":{"ok":0,"s":400,"v":"{\"message\":[\"limit must not be less than 1\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"12":{"ok":0,"s":400,"v":"{\"message\":[\"limit must not be less than 1\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"13":{"ok":0,"s":400,"v":"{\"message\":[\"limit must not be less than 1\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"14":{"ok":0,"s":400,"v":"{\"message\":[\"limit must not be less than 1\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"15":{"ok":0,"s":400,"v":"{\"message\":[\"limit must not be less than 1\"],\"error\":\"Bad Request\",\"statusCode\":400}"}},"q3":{"0":{"ok":0,"s":400,"v":"{\"message\":[\"limit must not be greater than 100\",\"limit must not be less than 1\",\"limit must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"1":{"ok":0,"s":400,"v":"{\"message\":[\"limit must not be greater than 100\",\"limit must not be less than 1\",\"limit must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"2":{"ok":0,"s":400,"v":"{\"message\":[\"limit must not be greater than 100\",\"limit must not be less than 1\",\"limit must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"3":{"ok":0,"s":400,"v":"{\"message\":[\"limit must not be greater than 100\",\"limit must not be less than 1\",\"limit must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"4":{"ok":0,"s":400,"v":"{\"message\":[\"limit must not be greater than 100\",\"limit must not be less than 1\",\"limit must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"5":{"ok":0,"s":400,"v":"{\"message\":[\"limit must not be greater than 100\",\"limit must not be less than 1\",\"limit must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"6":{"ok":0,"s":400,"v":"{\"message\":[\"limit must not be greater than 100\",\"limit must not be less than 1\",\"limit must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"7":{"ok":0,"s":400,"v":"{\"message\":[\"limit must not be greater than 100\",\"limit must not be less than 1\",\"limit must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"8":{"ok":0,"s":400,"v":"{\"message\":[\"limit must not be greater than 100\",\"limit must not be less than 1\",\"limit must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"9":{"ok":0,"s":400,"v":"{\"message\":[\"limit must not be greater than 100\",\"limit must not be less than 1\",\"limit must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"10":{"ok":0,"s":400,"v":"{\"message\":[\"limit must not be greater than 100\",\"limit must not be less than 1\",\"limit must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"11":{"ok":0,"s":400,"v":"{\"message\":[\"limit must not be greater than 100\",\"limit must not be less than 1\",\"limit must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"12":{"ok":0,"s":400,"v":"{\"message\":[\"limit must not be greater than 100\",\"limit must not be less than 1\",\"limit must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"13":{"ok":0,"s":400,"v":"{\"message\":[\"limit must not be greater than 100\",\"limit must not be less than 1\",\"limit must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"14":{"ok":0,"s":400,"v":"{\"message\":[\"limit must not be greater than 100\",\"limit must not be less than 1\",\"limit must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"},"15":{"ok":0,"s":400,"v":"{\"message\":[\"limit must not be greater than 100\",\"limit must not be less than 1\",\"limit must be an integer number\"],\"error\":\"Bad Request\",\"statusCode\":400}"}}}
+;
+/* ---------- 01: ValidationPipe explorer ---------- */
+const VPIN={
+ b1:{type:'body',v:{fromAccountId:1,toAccountId:2,amountMinor:'50000',currency:'VND',role:'admin'},note:'Hai bẫy trong một payload: số tiền gửi dạng chuỗi, và một trường role không có trong DTO.'},
+ b2:{type:'body',v:{fromAccountId:1,toAccountId:2,amountMinor:50000,currency:'VND'},note:'Payload đúng: mọi tổ hợp đều cho qua.'},
+ b3:{type:'body',v:{fromAccountId:true,toAccountId:2,amountMinor:'1e3',currency:'VND'},note:'Hai giá trị sai mà ép kiểu ngầm sẽ "sửa" giúp: true thành 1, "1e3" thành 1000.'},
+ b4:{type:'body',v:{fromAccountId:1,toAccountId:2,amountMinor:500.5,currency:'USD',note:null},note:'Số tiền có phần lẻ, và note là null.'},
+ q1:{type:'query',q:'?active=false&limit=20',v:{active:'false',limit:'20'},note:'Query string luôn là chuỗi. Người dùng muốn lọc bản ghi không hoạt động.'},
+ q2:{type:'query',q:'?limit=',v:{limit:''},note:'Tham số có mặt nhưng rỗng.'},
+ q3:{type:'query',q:'?limit=abc',v:{limit:'abc'},note:'Giá trị không phải số.'}
+};
+const WANT={fromAccountId:'number',toAccountId:'number',amountMinor:'number',currency:'string',note:'string',active:'boolean',limit:'number'};
+function vp(){
+  const k=$('vpP').value,inp=VPIN[k];
+  const m=($('vpW').checked?1:0)|($('vpF').checked?2:0)|($('vpT').checked?4:0)|($('vpI').checked?8:0);
+  const r=VPD[k][m];
+  $('vpIn').textContent=(inp.type==='body'?'POST /transfers\n'+JSON.stringify(inp.v,null,1).replace(/\n\s*/g,' '):'GET /transfers'+inp.q);
+  const opts=[m&1?'whitelist':'',m&2?'forbidNonWhitelisted':'',m&4?'transform':'',m&8?'enableImplicitConversion':''].filter(Boolean);
+  $('vpMeta').textContent=opts.length?opts.length+' tuỳ chọn':'mặc định';
+  const notes=[inp.note];
+  if(!r.ok){
+    const body=JSON.parse(r.v);
+    $('vpV').className='verdict bad';$('vpV').textContent=`Pipe từ chối: ${r.s} Bad Request, ${body.message.length} message. Handler không chạy.`;
+    $('vpOut').textContent=JSON.stringify(body,null,2);
+    if(body.message.some(x=>/should not exist/.test(x)))notes.push('forbidNonWhitelisted biến trường thừa thành lỗi, và lỗi whitelist đứng đầu danh sách.');
+    if('role' in inp.v&&!body.message.some(x=>/role/.test(x)))notes.push(m&1?'role không gây lỗi: whitelist xoá nó lặng lẽ.':'role không gây lỗi: whitelist tắt nên không ai nhìn trường thừa.');
+    if((m&2)&&!(m&1))notes.push('forbidNonWhitelisted không làm gì khi whitelist tắt.');
+    if(!(m&8)&&inp.type==='query')notes.push('Không ép kiểu thì "20" là chuỗi, nên @IsInt và @IsBoolean đều báo lỗi.');
+    if(k==='q2'&&(m&8))notes.push('Number("") là 0, nên lỗi là "must not be less than 1" thay vì "must be an integer number".');
+  }else{
+    const v=JSON.parse(r.v);
+    $('vpV').className='verdict ok';$('vpV').textContent=`Pipe cho qua. Handler nhận ${r.c==='Object'?'một object thường':'instance của '+r.c}.`;
+    $('vpOut').textContent=Object.keys(v).map(f=>`${f.padEnd(14)} = ${JSON.stringify(v[f]).padEnd(10)} typeof ${r.t[f]}${WANT[f]?(WANT[f]!==r.t[f]&&r.t[f]!=='null'?'   ← DTO khai báo '+WANT[f]:''):'   ← không có trong DTO'}`).join('\n');
+    const wrong=Object.keys(v).filter(f=>WANT[f]&&r.t[f]!==WANT[f]&&r.t[f]!=='null');
+    if(wrong.length&&(m&8)&&!(m&4))notes.push(`Bẫy lớn nhất: pipe đã kiểm tra bản sao được ép kiểu và thấy hợp lệ, nhưng không có transform nên trả bản gốc. Handler nhận ${wrong.join(', ')} là chuỗi dù DTO khai báo số.`);
+    else if(wrong.length)notes.push(`Handler nhận ${wrong.join(', ')} khác kiểu DTO khai báo.`);
+    if('role' in v)notes.push('role tới tận handler. Nếu service truyền object này vào câu UPDATE, người dùng tự đặt được role (mass assignment). Bật whitelist.');
+    if(k==='b3')notes.push(`fromAccountId gửi true mà handler nhận ${JSON.stringify(v.fromAccountId)}; amountMinor gửi "1e3" mà nhận ${JSON.stringify(v.amountMinor)}. Ép kiểu ngầm che lỗi của client.`);
+    if(k==='q1'&&v.active===true)notes.push('active=false thành true: Boolean("false") là true. Bộ lọc trả ngược điều người dùng muốn.');
+    if(k==='b4')notes.push('note null qua được vì @IsOptional bỏ qua cả null lẫn undefined.');
+  }
+  $('vpDesc').textContent=notes.join(' ');
+}
+['vpP','vpW','vpF','vpT','vpI'].forEach(id=>$(id).addEventListener('change',vp));vp();
+
+/* ---------- 02: error mapper ---------- */
+const LAYERS4=[['shape','Hình dạng','400'],['auth','Quyền','401, 403, 404'],['biz','Nghiệp vụ, trạng thái','409, 422'],['infra','Hạ tầng, lỗi lập trình','429, 5xx']];
+const ERRS=[
+ {n:'JSON hỏng (dấu phẩy thừa)',l:'shape',s:400,c:'MALFORMED_JSON',retry:'Không',log:'info, không alert',d:'Lỗi từ body parser, trước guard và pipe. Gửi lại y hệt vẫn hỏng.'},
+ {n:'Thiếu trường currency',l:'shape',s:400,c:'VALIDATION_FAILED',retry:'Không',log:'info',x:{errors:[{pointer:'/currency',code:'isIn',detail:'currency must be one of the following values: VND, USD'}]},d:'pointer chỉ đúng trường để app tô đỏ ô nhập. App dịch theo code của từng lỗi, không theo detail.'},
+ {n:'Token hết hạn',l:'auth',s:401,c:'TOKEN_EXPIRED',retry:'Làm mới token rồi thử lại một lần',log:'info',d:'401 nghĩa là "chưa xác thực được". Client có refresh token thì làm mới và gửi lại; không có thì đưa về màn đăng nhập.'},
+ {n:'Không có vai trò kế toán',l:'auth',s:403,c:'FORBIDDEN',retry:'Không',log:'warn nếu tăng đột ngột',d:'Đã biết là ai nhưng không được phép. Thử lại không đổi gì.'},
+ {n:'Tài khoản nguồn là của người khác',l:'auth',s:404,c:'ACCOUNT_NOT_FOUND',retry:'Không',log:'warn, đếm theo user để phát hiện dò quét',d:'Trả 404 thay vì 403 để không xác nhận tài khoản đó tồn tại.'},
+ {n:'Số dư không đủ',l:'biz',s:422,c:'INSUFFICIENT_FUNDS',retry:'Không (trừ khi người dùng nạp thêm)',log:'info',x:{balanceMinor:30000,requestedMinor:50000},d:'Lỗi nghiệp vụ bình thường. Thêm trường riêng (số dư hiện có) giúp app hiện thông báo cụ thể; chỉ thêm thứ người dùng được phép xem.'},
+ {n:'Idempotency key dùng lại với body khác',l:'biz',s:422,c:'IDEMPOTENCY_KEY_REUSED',retry:'Không',log:'warn',d:'Cùng khoá mà khác thao tác là lỗi của client (trang Idempotency). Nếu cùng body và lần đầu đang chạy thì là 409.'},
+ {n:'Email đã được dùng (MySQL 1062)',l:'biz',s:409,c:'EMAIL_TAKEN',retry:'Không',log:'info',d:'Service bắt 1062 trên đúng index email và ném lỗi có code. Không đưa tên index hay giá trị trùng ra ngoài.'},
+ {n:'Deadlock (MySQL 1213)',l:'infra',s:503,c:'RETRY_LATER',retry:'Có, sau Retry-After, cùng idempotency key',log:'warn; alert nếu tỉ lệ cao',hdr:'Retry-After: 1',d:'InnoDB đã rollback cả transaction. Server nên tự thử lại một lần trước khi trả lỗi; vẫn lỗi thì client thử lại sau.'},
+ {n:'Chờ khoá quá hạn (MySQL 1205)',l:'infra',s:503,c:'RETRY_LATER',retry:'Có, sau Retry-After',log:'warn',hdr:'Retry-After: 1',d:'Mặc định InnoDB chỉ rollback câu lệnh cuối, không phải cả transaction. Code phải rollback cả transaction trước khi trả lỗi.'},
+ {n:'Cổng thanh toán không trả lời trong 10 giây',l:'infra',s:202,c:'PAYMENT_PENDING',retry:'Không gửi lại; hỏi trạng thái bằng GET',log:'warn',x:{paymentId:'pay_8812',statusUrl:'/payments/pay_8812'},d:'Timeout nghĩa là "không biết", không phải "thất bại". Trả 202 và một chỗ để hỏi kết quả; job đối soát với cổng sẽ chốt trạng thái.'},
+ {n:'Vượt giới hạn tốc độ',l:'infra',s:429,c:'RATE_LIMITED',retry:'Có, sau Retry-After',log:'info',hdr:'Retry-After: 30',d:'Retry-After cho client biết chờ bao lâu, tránh thử lại dồn dập.'},
+ {n:'TypeError trong code',l:'infra',s:500,c:'INTERNAL',retry:'Không tự động (tối đa một lần nếu có idempotency key)',log:'error, alert',d:'Body chỉ có code và traceId. Message gốc (tên biến, stack) chỉ nằm trong log.'}
+];
+$('emE').innerHTML=ERRS.map((e,i)=>`<option value="${i}">${e.n}</option>`).join('');
+const RSN={200:'OK',202:'Accepted',400:'Bad Request',401:'Unauthorized',403:'Forbidden',404:'Not Found',409:'Conflict',422:'Unprocessable Content',429:'Too Many Requests',500:'Internal Server Error',503:'Service Unavailable'};
+function em(){
+  const e=ERRS[+$('emE').value];
+  let g='';LAYERS4.forEach(([k,n,s],i)=>{g+=B(10+i*168,14,156,60,k===e.l?(k==='infra'?'miss':k==='biz'?'hot':k==='auth'?'key':'path'):'dim',n,s);});
+  $('emSvg').innerHTML=g;
+  const body={type:`https://errors.example.com/${e.c.toLowerCase().replace(/_/g,'-')}`,title:e.n,status:e.s,code:e.c,...(e.x||{}),traceId:'01JB4M8Q5Z7K3W2N'};
+  $('emOut').textContent=`HTTP/1.1 ${e.s} ${RSN[e.s]}\nContent-Type: ${e.s===202?'application/json':'application/problem+json'}${e.hdr?'\n'+e.hdr:''}\n\n${JSON.stringify(e.s===202?{status:'pending',...e.x}:body,null,2)}`;
+  $('emStats').innerHTML=[['Status',e.s,e.s>=500?'bad':''],['Client thử lại?',e.retry,''],['Log và alert',e.log,'']]
+    .map(([k,v,c])=>`<div class="stat"><span>${k}</span><b class="sm${c?' '+c:''}">${v}</b></div>`).join('');
+  $('emDesc').textContent=e.d;$('emMeta').textContent=e.c;
+}
+$('emE').addEventListener('change',em);em();
+</script>
+</body>
+</html>
