@@ -1,0 +1,1023 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Replication: đọc thấy chính lần ghi của mình</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F2F4F6; --surface:#FFFFFF; --ink:#18203A; --ink-2:#56607A; --ink-3:#8A93A8;
+  --rule:#CCD3DD; --rule-strong:#8C96AB;
+  --struct:#3446B8; --struct-bg:#E6E9FA;            /* cấu trúc index, chrome của trang */
+  --row:#16795F;    --row-bg:#DDF2EA;               /* dữ liệu row thật */
+  --hot:#9A5F00;    --hot-bg:#FCEFD2; --hot-line:#E3A21A;  /* bị ghi, bị chạm, bị lọc */
+  --miss:#B5302B;   --miss-bg:#FBE1DF;              /* đọc từ disk, việc thừa, lỗi */
+  --path:#0B7A8A;   --path-bg:#D8F1F3;              /* đường đi hoặc khoảng đang đọc */
+  --key:#A8327A;    --key-bg:#F8E0EE;               /* con trỏ: PK, TID */
+  --ram:#5B4BB0;    --ram-bg:#E7E3FA;               /* hit trong buffer pool */
+  --grid:rgba(52,70,184,.06);
+  --r-s:4px; --r-m:8px;
+  --sans:"Instrument Sans",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --paper:#0F1320; --surface:#171C2B; --ink:#E6E9F2; --ink-2:#A3ABC0; --ink-3:#6E7790;
+  --rule:#2C3448; --rule-strong:#55607A;
+  --struct:#97A3FF; --struct-bg:#232A55;
+  --row:#5FD0AE;    --row-bg:#123A31;
+  --hot:#F2BE5C;    --hot-bg:#3B2C0E; --hot-line:#E3A21A;
+  --miss:#FF8A84;   --miss-bg:#3E1A1A;
+  --path:#5ED3E0;   --path-bg:#113A40;
+  --key:#F28DC4;    --key-bg:#3E1A2E;
+  --ram:#B7A8FF;    --ram-bg:#2A2350;
+  --grid:rgba(151,163,255,.05);
+}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important;animation:none!important}}
+body{margin:0;color:var(--ink);font:400 17px/1.65 var(--sans);
+  background-color:var(--paper);
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:24px 24px}
+a{color:var(--struct)}
+:focus-visible{outline:2px solid var(--struct);outline-offset:2px}
+
+/* layout */
+.shell{display:grid;grid-template-columns:230px minmax(0,1fr);gap:56px;max-width:1180px;margin:0 auto;padding:0 32px}
+nav.toc{position:sticky;top:0;align-self:start;height:100vh;padding:48px 0;overflow:auto}
+nav.toc p{font-weight:600;margin:0 0 12px;font-size:15px}
+nav.toc ol,.mobile-toc ol{list-style:none;margin:0;padding:0;counter-reset:s}
+nav.toc li,.mobile-toc li{counter-increment:s;margin:0}
+nav.toc a,.mobile-toc a{display:grid;grid-template-columns:28px 1fr;padding:5px 0;color:var(--ink-2);text-decoration:none;font-size:14.5px;line-height:1.4}
+nav.toc a::before,.mobile-toc a::before{content:counter(s,decimal-leading-zero);font:500 12px/1.9 var(--mono);color:var(--ink-3)}
+nav.toc a:hover,nav.toc a.on{color:var(--struct)}
+main{min-width:0;padding:56px 0 120px}
+.prose{max-width:720px}
+section{padding-top:72px}
+section>header{display:grid;grid-template-columns:auto 1fr;gap:0 18px;align-items:baseline;max-width:720px;margin-bottom:12px}
+section>header .num{font:500 15px var(--mono);color:var(--struct);border:1.5px solid var(--struct);border-radius:var(--r-s);padding:2px 7px;transform:translateY(-4px)}
+h1,h2,h3,h4{line-height:1.2;letter-spacing:-.015em;margin:0}
+h1{font-size:clamp(2.3rem,5.4vw,3.9rem);font-weight:700;letter-spacing:-.03em;line-height:1.02;max-width:14ch;margin-bottom:20px}
+.lede{font-size:19px;color:var(--ink-2);max-width:56ch;margin-bottom:28px}
+h2{font-size:clamp(1.6rem,3vw,2.1rem);font-weight:650}
+h3{font-size:1.2rem;font-weight:600;margin:36px 0 8px}
+p{margin:0 0 14px}
+ul,ol.list{margin:0 0 16px;padding-left:22px}
+li{margin:4px 0}
+code{font:0.88em var(--mono);background:var(--struct-bg);color:var(--ink);padding:1px 5px;border-radius:3px}
+pre{font:13.5px/1.6 var(--mono);background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:var(--r-s);padding:14px 16px;overflow-x:auto;margin:0 0 18px;max-width:720px}
+pre code{background:none;padding:0}
+.tablewrap{overflow-x:auto;max-width:720px;margin:0 0 20px}
+table{border-collapse:collapse;width:100%;max-width:720px;margin:0 0 20px;font-size:15px;background:var(--surface)}
+.tablewrap table{margin:0;min-width:560px}
+th,td{text-align:left;padding:9px 12px;border:1px solid var(--rule);vertical-align:top}
+th{font-weight:600;background:var(--struct-bg)}
+
+/* widget frame: styled like a page, header strip = page header */
+.frame{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);margin:22px 0 28px;max-width:920px;overflow:hidden}
+.frame>.ph{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:9px 16px;border-bottom:1px solid var(--rule);background:var(--struct-bg);font-size:14px}
+.frame>.ph strong{font-weight:600}
+.frame>.ph .meta{margin-left:auto;font:500 12.5px var(--mono);color:var(--ink-2)}
+.frame .bd{padding:16px;min-width:0}
+.frame svg{display:block;width:100%;height:auto}
+.st-t{font:600 16px var(--sans);margin:0 0 8px}
+.desc{background:var(--paper);border-radius:var(--r-s);padding:12px 14px;margin-top:12px;min-height:84px;font-size:15.5px;color:var(--ink-2)}
+.desc pre{margin:10px 0 0;font-size:12.5px;border-left-color:var(--rule-strong)}
+.nav{display:flex;gap:8px;margin-top:12px;align-items:center}
+button{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 14px;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--struct);color:var(--struct)}
+button:disabled{opacity:.4;cursor:default}
+button.primary,button[aria-pressed="true"]{background:var(--struct);border-color:var(--struct);color:var(--surface)}
+button.primary:hover:not(:disabled),button[aria-pressed="true"]:hover{color:var(--surface);filter:brightness(1.1)}
+input,select{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 10px}
+input[type=number]{width:84px}
+input[type=range],input[type=checkbox]{accent-color:var(--struct)}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-top:12px}
+.stat{background:var(--paper);border-radius:var(--r-s);padding:8px 12px}
+.stat span{display:block;font-size:13px;color:var(--ink-2)}
+.stat b{font:600 20px var(--sans);font-variant-numeric:tabular-nums}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;color:var(--ink-2);margin-top:12px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:14px;height:14px;border-radius:3px;border:2px solid;display:inline-block}
+.fine{font-size:13.5px;color:var(--ink-2);margin:10px 0 0}  /* chú thích nhỏ dưới widget */
+
+/* svg text */
+.tb{font:600 14px var(--sans)} .t{font:400 13px var(--sans)} .ts{font:400 12px var(--sans)} .tm{font:500 12.5px var(--mono)}
+.lbl{fill:var(--ink-2);font:400 12.5px var(--sans)}
+
+/* callouts */
+.note{border-left:3px solid var(--hot-line);background:var(--hot-bg);padding:12px 16px;border-radius:0 var(--r-s) var(--r-s) 0;margin:18px 0;max-width:720px;font-size:16px}
+.note strong{color:var(--hot)}
+.senior{border:1.5px solid var(--struct);border-radius:var(--r-m);padding:14px 18px;margin:22px 0;max-width:720px;background:var(--surface)}
+.senior h4{font-size:16px;margin-bottom:6px;color:var(--struct)}
+.senior p:last-child,.senior ul:last-child{margin-bottom:0}
+details{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-s);padding:10px 14px;margin:10px 0;max-width:720px}
+details summary{cursor:pointer;font-weight:600}
+details[open] summary{margin-bottom:8px}
+details.answer{background:var(--paper);border-style:dashed;margin:10px 0 0}
+details.answer summary{font-weight:500;color:var(--struct)}
+.tag{display:inline-block;font:500 12px var(--sans);color:var(--ink-2);border:1px solid var(--rule-strong);border-radius:999px;padding:0 8px;margin-right:6px;vertical-align:1px}
+
+/* hero brief: mục tiêu, cần biết trước, trạng thái */
+.brief{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px 24px;background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);padding:14px 18px;max-width:920px;margin:0 0 8px;font-size:15px}
+.brief h4{font-size:14px;color:var(--struct);margin:0 0 4px}
+.brief ul{margin:0;padding-left:18px}
+.brief p{margin:0}
+
+.mobile-toc{display:none}
+@media (max-width:900px){
+  .shell{grid-template-columns:1fr;padding:0 16px;gap:0}
+  nav.toc{display:none}
+  .mobile-toc{display:block;margin-top:20px}
+  main{padding-top:32px}
+  .frame .bd{padding:12px}
+  body{font-size:16px}
+}
+
+
+/* bài toán thực tế: dạng phỏng vấn */
+.case{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:0 var(--r-m) var(--r-m) 0;padding:16px 20px;margin:22px 0;max-width:720px}
+.case>h3{margin:0 0 6px;font-size:1.15rem}
+.case .src{font-size:13.5px;color:var(--ink-2);margin:0 0 12px}
+.case .ctx{background:var(--paper);border:1px solid var(--rule);border-radius:var(--r-m);padding:10px 14px;margin:8px 0 0;font-size:15px}
+.case .ctx-h{margin:0 0 4px;font-weight:600;color:var(--struct)}
+.case .ctx ul{margin:0;padding-left:20px}
+.case .ctx li{margin:2px 0}
+.case .q{margin:10px 0 4px;padding:8px 0 8px 14px;border-left:3px solid var(--key);font-size:1.06rem;font-weight:500;color:var(--ink);max-width:none}
+.case details{max-width:none;margin:12px 0 0}
+.case details.answer[open]{background:var(--surface)}
+.case details.clar>summary,.case details.rubric>summary{color:var(--key)}
+.case .fu{margin:18px 0 0;padding-top:14px;border-top:1px solid var(--rule)}
+.case .fq{margin:0;font-weight:500}
+.case .fq b{color:var(--struct);margin-right:4px}
+.ah{font-size:15.5px;color:var(--struct);margin:20px 0 6px}
+.answer .tablewrap{max-width:none}
+@media (max-width:900px){.case{padding:14px}}
+
+/* ---- page widgets ---- */
+.n rect{fill:var(--surface);stroke:var(--rule-strong);stroke-width:1}
+.n text{fill:var(--ink)}
+.n.struct rect{fill:var(--struct-bg);stroke:var(--struct)} .n.struct text{fill:var(--struct)}
+.n.row rect{fill:var(--row-bg);stroke:var(--row);stroke-width:1.6} .n.row text{fill:var(--row)}
+.n.hot rect{fill:var(--hot-bg);stroke:var(--hot);stroke-width:2} .n.hot text{fill:var(--hot)}
+.n.miss rect{fill:var(--miss-bg);stroke:var(--miss);stroke-width:2} .n.miss text{fill:var(--miss)}
+.n.path rect{fill:var(--path-bg);stroke:var(--path);stroke-width:2.4} .n.path text{fill:var(--path)}
+.n.key rect{fill:var(--key-bg);stroke:var(--key);stroke-width:2} .n.key text{fill:var(--key)}
+.n.dim rect{fill:var(--paper);stroke:var(--rule);stroke-dasharray:4 3} .n.dim text{fill:var(--ink-3)}
+.edge{stroke:var(--rule-strong);stroke-width:1.2;fill:none}
+.edge.on{stroke:var(--path);stroke-width:2.6}
+.edge.key{stroke:var(--key);stroke-width:2.4}
+.axis{stroke:var(--rule-strong);stroke-width:1}
+.gridl{stroke:var(--rule);stroke-width:1;stroke-dasharray:2 4}
+.lagbar{fill:var(--miss-bg);stroke:var(--miss);stroke-width:1}
+.okbar{fill:var(--row-bg);stroke:var(--row);stroke-width:1}
+.wmark{stroke:var(--struct);stroke-width:2}
+.rd.new{fill:var(--row)} .rd.old{fill:var(--miss)} .rd.wait{fill:var(--hot-line)}
+.rdl{font:600 11px var(--sans);fill:var(--surface)}
+.curve{fill:none;stroke:var(--miss);stroke-width:2.4}
+.area{fill:var(--miss-bg)}
+.lg-new{border-color:var(--row);background:var(--row)} .lg-old{border-color:var(--miss);background:var(--miss)}
+.lg-wait{border-color:var(--hot-line);background:var(--hot-line)} .lg-lag{border-color:var(--miss);background:var(--miss-bg)}
+.lg-ok{border-color:var(--row);background:var(--row-bg)}
+.lg-path{border-color:var(--path);background:var(--path-bg)} .lg-key{border-color:var(--key);background:var(--key-bg)}
+.lg-row{border-color:var(--row);background:var(--row-bg)} .lg-miss{border-color:var(--miss);background:var(--miss-bg)}
+.calc{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px 14px;margin-bottom:12px}
+.calc label{display:flex;flex-direction:column;gap:4px;font-size:13.5px;color:var(--ink-2)}
+.calc label.chk{flex-direction:row;align-items:center;gap:8px}
+.calc input[type=number]{width:100%;max-width:170px}
+.stat b.bad{color:var(--miss)} .stat b.good{color:var(--row)} .stat b.warn{color:var(--hot)}
+</style>
+</head>
+<body>
+
+<div class="shell">
+<nav class="toc" aria-label="Mục lục">
+  <p>Replication và read-your-writes</p>
+  <ol>
+    <li><a href="#s1">Bản chất vấn đề</a></li>
+    <li><a href="#s2">Cơ chế hoạt động</a></li>
+    <li><a href="#s3">Vì sao thiết kế như vậy</a></li>
+    <li><a href="#s4">Ví dụ</a></li>
+    <li><a href="#s5">Thí nghiệm</a></li>
+    <li><a href="#s6">Ảnh hưởng khi chạy production</a></li>
+    <li><a href="#s7">Hiểu lầm thường gặp</a></li>
+    <li><a href="#s8">Câu hỏi ôn tập</a></li>
+    <li><a href="#s9">Bài toán thực tế</a></li>
+    <li><a href="#s10">Câu hỏi còn mở</a></li>
+    <li><a href="#s11">Tài liệu tham khảo</a></li>
+  </ol>
+</nav>
+
+<main>
+<div class="hero">
+<h1>Replication: đọc thấy chính lần ghi của mình</h1>
+<p class="lede">Đọc từ replica là cách rẻ nhất để giảm tải cho primary. Cái giá: replica luôn trễ một chút, có lúc trễ rất nhiều. Người dùng sửa tên, tải lại trang, và thấy tên cũ. Bài này đi theo một transaction từ primary tới replica trong MySQL 8.4, chỉ ra chỗ sinh độ trễ, so sánh async với semi-sync, và các cách bảo đảm người dùng luôn đọc thấy thứ họ vừa ghi.</p>
+<div class="brief">
+  <div><h4>Mục tiêu</h4><ul>
+    <li>Mô tả được đường đi của một transaction từ primary tới replica (binlog, receiver, relay log, applier), và chỉ ra chỗ sinh độ trễ.</li>
+    <li>Phân biệt được async và semi-sync <code>AFTER_SYNC</code>: commit trả về lúc nào, failover mất gì, và vì sao semi-sync không làm replica đọc thấy ngay.</li>
+    <li>Thiết kế được read-your-writes và monotonic reads: đọc primary sau khi ghi, chờ GTID trên replica, gắn phiên với một replica; và tính được cái giá của từng cách.</li>
+    <li>Chẩn đoán được độ trễ replica: đo đúng chỗ, tìm transaction lớn, và chia nhỏ job ghi hàng loạt.</li>
+  </ul></div>
+  <div><h4>Cần biết trước</h4><ul>
+    <li><a href="../innodb-buffer-pool-redo-undo/index.html">Buffer pool, redo, undo</a>: commit và fsync.</li>
+    <li><a href="../transactional-outbox/index.html">Transactional outbox</a>: binlog và CDC.</li>
+    <li><a href="../caching-invalidation/index.html">Cache và invalidation</a>: fill cache từ replica trễ.</li>
+  </ul></div>
+  <div><h4>Trạng thái</h4><p>Level 2 (prov.). Hành vi semi-sync, <code>WAIT_FOR_EXECUTED_GTID_SET</code>, <code>Seconds_Behind_Source</code> lấy từ manual 8.4; các giá trị mặc định và tên cột performance_schema đọc từ mã nguồn MySQL 8.4. Widget là mô hình; chưa đo trên lab (E41–E43).</p></div>
+</div>
+<details class="mobile-toc"><summary>Mục lục</summary><ol><li><a href="#s1">Bản chất vấn đề</a></li><li><a href="#s2">Cơ chế hoạt động</a></li><li><a href="#s3">Vì sao thiết kế như vậy</a></li><li><a href="#s4">Ví dụ</a></li><li><a href="#s5">Thí nghiệm</a></li><li><a href="#s6">Ảnh hưởng khi chạy production</a></li><li><a href="#s7">Hiểu lầm thường gặp</a></li><li><a href="#s8">Câu hỏi ôn tập</a></li><li><a href="#s9">Bài toán thực tế</a></li><li><a href="#s10">Câu hỏi còn mở</a></li><li><a href="#s11">Tài liệu tham khảo</a></li></ol></details>
+</div>
+
+<!-- 1 -->
+<section id="s1">
+<header><span class="num">01</span><h2>Bản chất vấn đề</h2></header>
+<div class="prose">
+<p>Một app có một primary và hai replica. Mọi câu ghi đi tới primary, mọi câu đọc chia đều cho hai replica. Primary nhẹ hẳn. Rồi khiếu nại bắt đầu: "Tôi đổi tên xong, trang tải lại vẫn hiện tên cũ." "Tôi vừa đặt đơn, mở danh sách đơn thì không thấy, tải lại thì thấy, tải lại lần nữa thì lại mất."</p>
+<p>Replication trong MySQL mặc định là bất đồng bộ (async). Primary commit, trả lời client, rồi mới gửi thay đổi sang replica. Replica áp dụng lại thay đổi sau một khoảng gọi là độ trễ replica (replication lag). Thường là vài chục mili giây; lúc có job ghi lớn có thể là vài phút. Hai khiếu nại trên là hai bảo đảm khác nhau mà hệ thống đang thiếu:</p>
+<ul>
+<li><strong>Read-your-writes</strong> (đọc thấy chính lần ghi của mình): sau khi tôi ghi, tôi luôn đọc thấy lần ghi đó.</li>
+<li><strong>Monotonic reads</strong> (đọc không lùi thời gian): đã thấy bản mới thì lần sau không thấy lại bản cũ. Vi phạm khi hai lần đọc rơi vào hai replica trễ khác nhau.</li>
+</ul>
+<p>Hình dung một bảng tin có nhiều bản sao dán ở các tầng. Bạn sửa bản gốc ở tầng 1, người dán bản sao lên các tầng trên sẽ đến sau vài phút. Bạn chạy lên tầng 3 xem thì vẫn thấy tin cũ. Chọn cách định tuyến đọc dưới đây để xem năm lần đọc sau một lần ghi trả về gì.</p>
+</div>
+<div class="frame" id="ryw">
+  <div class="ph"><strong>Năm lần đọc sau một lần ghi</strong><span class="meta" id="ryMeta"></span></div>
+  <div class="bd">
+    <div class="calc">
+      <label>Cách định tuyến đọc<select id="ryS">
+        <option value="replica" selected>Luôn đọc replica, xoay vòng</option>
+        <option value="sticky">Gắn phiên với một replica</option>
+        <option value="window">Đọc primary trong N ms sau khi ghi</option>
+        <option value="gtid">Chờ GTID trên replica, quá hạn thì đọc primary</option>
+        <option value="primary">Luôn đọc primary</option>
+      </select></label>
+      <label>Độ trễ replica A (ms)<input id="ryA" type="number" min="0" max="600000" value="1200"></label>
+      <label>Độ trễ replica B (ms)<input id="ryB" type="number" min="0" max="600000" value="150"></label>
+      <label>N: cửa sổ đọc primary (ms)<input id="ryW" type="number" min="0" max="600000" value="2000"></label>
+      <label>Thời gian chờ GTID tối đa (ms)<input id="ryT" type="number" min="0" max="60000" value="500"></label>
+    </div>
+    <svg id="rySvg" viewBox="0 0 680 210" role="img" aria-label="Dòng thời gian sau một lần ghi: replica nào đã có bản mới, mỗi lần đọc trả về gì"></svg>
+    <div class="stats" id="ryStats"></div>
+    <div class="desc" aria-live="polite" id="ryDesc"></div>
+    <div class="legend"><span><i class="lg-lag"></i>replica chưa có bản mới</span><span><i class="lg-ok"></i>replica đã có bản mới</span><span><i class="lg-new"></i>đọc thấy bản mới</span><span><i class="lg-old"></i>đọc thấy bản cũ</span><span><i class="lg-wait"></i>đọc phải chờ</span></div>
+    <p class="fine">Người dùng đọc 5 lần, ở 100, 400, 900, 1.600 và 3.000 ms sau khi ghi. "Xoay vòng" gửi lần đọc thứ nhất tới A, thứ hai tới B, cứ thế. "Gắn phiên" dùng A cho mọi lần đọc. Độ trễ cố định trong suốt lần thử; ngoài đời nó dao động. Mô hình; chưa đo (E41).</p>
+  </div>
+</div>
+</section>
+
+<!-- 2 -->
+<section id="s2">
+<header><span class="num">02</span><h2>Cơ chế hoạt động</h2></header>
+<div class="prose">
+<h3>Đường đi của một transaction</h3>
+<p>Ý chính: thay đổi chỉ hiện trên replica sau khi đi qua năm chặng. Mỗi chặng thêm độ trễ, và chặng cuối (áp dụng lại) thường là chặng chậm nhất.</p>
+<p>Khi bật binlog (mặc định trên 8.4), commit trên primary là commit hai pha giữa InnoDB và binlog: InnoDB chuẩn bị, binlog ghi và fsync (<code>sync_binlog</code> mặc định 1), rồi InnoDB commit. Sau đó binlog được gửi đi. Trên replica, luồng nhận (receiver) ghi sự kiện vào relay log; luồng áp dụng (applier) đọc relay log và chạy lại thay đổi. Trên 8.4, applier chạy song song với 4 worker mặc định (<code>replica_parallel_workers</code> = 4), quyết định chạy song song theo dấu thời gian logic do primary ghi (<code>LOGICAL_CLOCK</code>), và giữ đúng thứ tự commit (<code>replica_preserve_commit_order</code> = ON). Bấm qua từng bước, và đổi giữa async và semi-sync.</p>
+</div>
+<div class="frame" id="pipe"></div>
+<div class="note"><strong>Lỗi hay gặp:</strong> bật semi-sync để "hết đọc cũ trên replica". Semi-sync chỉ chờ replica <em>nhận</em> transaction vào relay log, không chờ nó <em>áp dụng</em>. Ngay sau khi commit trả về, đọc trên replica vẫn có thể ra bản cũ. Semi-sync giải bài toán mất dữ liệu khi failover, không giải bài toán đọc cũ. Quy tắc: read-your-writes cần cơ chế riêng (phần 01).</div>
+
+<div class="prose">
+<h3>Async và semi-sync</h3>
+<p>Ý chính: semi-sync đổi một chút độ trễ commit lấy việc không mất transaction đã commit khi primary chết. Với <code>AFTER_SYNC</code> (mặc định), không client nào thấy một transaction trước khi ít nhất một replica đã nhận nó.</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th></th><th>Async (mặc định)</th><th>Semi-sync <code>AFTER_SYNC</code> (mặc định của semi-sync)</th><th>Semi-sync <code>AFTER_COMMIT</code></th></tr></thead>
+<tbody>
+<tr><td>Commit trả về khi</td><td>Primary đã commit</td><td>Một replica đã ghi vào relay log, rồi primary commit</td><td>Primary commit, rồi một replica đã ghi vào relay log</td></tr>
+<tr><td>Client khác thấy thay đổi khi</td><td>Ngay khi primary commit</td><td>Sau khi replica xác nhận</td><td>Ngay khi primary commit, trước khi replica xác nhận</td></tr>
+<tr><td>Primary chết, đưa replica lên</td><td>Có thể mất các transaction cuối</td><td>Không mất transaction đã commit</td><td>Client khác có thể đã đọc dữ liệu mà replica mới không có</td></tr>
+<tr><td>Thêm vào độ trễ commit</td><td>0</td><td>Một vòng mạng tới replica gần nhất</td><td>Một vòng mạng</td></tr>
+<tr><td>Replica không trả lời</td><td>Không ảnh hưởng</td><td>Commit chờ tới <code>rpl_semi_sync_source_timeout</code> (mặc định 10.000 ms), rồi primary chuyển về async</td><td>Như bên trái</td></tr>
+</tbody></table></div>
+<div class="prose"><p>Dòng cuối là cái bẫy vận hành: khi replica chết, mọi commit trên primary đứng tới 10 giây, rồi primary lặng lẽ chuyển sang async. Từ lúc đó, bảo đảm "không mất dữ liệu" không còn, cho tới khi một replica bắt kịp. Phải có cảnh báo cho trạng thái này.</p></div>
+
+<div class="prose">
+<h3>Vì sao replica trễ</h3>
+<p>Ý chính: replica phải làm lại toàn bộ công việc ghi của primary, và phải commit theo đúng thứ tự. Một transaction lớn chạy 2 phút trên primary sẽ chiếm applier khoảng 2 phút trên replica, và mọi transaction commit sau nó phải chờ.</p>
+<p>Nguồn độ trễ thường gặp:</p>
+<ul>
+<li><strong>Transaction lớn:</strong> <code>DELETE</code> hay <code>UPDATE</code> hàng triệu row trong một câu. Binlog chỉ gửi đi khi commit, nên replica bắt đầu muộn, rồi mất thời gian tương đương để áp dụng.</li>
+<li><strong>Tải ghi vượt sức applier:</strong> primary nhận ghi từ hàng trăm connection song song; applier chỉ có vài worker, và các transaction đụng cùng row không chạy song song được.</li>
+<li><strong>Replica yếu hơn hoặc bận:</strong> cấu hình nhỏ hơn, hoặc đang chạy báo cáo nặng tranh I/O với applier.</li>
+<li><strong>Thay đổi schema:</strong> một <code>ALTER TABLE</code> chạy 30 phút trên primary sẽ chạy khoảng 30 phút trên replica, và chặn mọi thứ sau nó.</li>
+</ul>
+<p>Widget dưới đây tính "một lần ghi lúc t sẽ hiện trên replica sau bao lâu", khi có một transaction lớn chen vào tải ghi bình thường.</p>
+</div>
+<div class="frame" id="lag">
+  <div class="ph"><strong>Một transaction lớn và độ trễ của replica</strong><span class="meta" id="lgMeta"></span></div>
+  <div class="bd">
+    <div class="calc">
+      <label>Tải ghi bình thường (% sức applier)<input id="lgR" type="number" min="1" max="150" value="60"></label>
+      <label>Transaction lớn chạy (giây)<input id="lgD" type="number" min="0" max="3600" value="120"></label>
+      <label>Chia transaction lớn thành (lô)<input id="lgN" type="number" min="1" max="10000" value="1"></label>
+    </div>
+    <svg id="lgSvg" viewBox="0 0 680 210" role="img" aria-label="Độ trễ để một lần ghi mới hiện trên replica theo thời gian"></svg>
+    <div class="stats" id="lgStats"></div>
+    <div class="desc" aria-live="polite" id="lgDesc"></div>
+    <p class="fine">Mô hình hàng đợi: applier xử lý 1 giây công việc mỗi giây; tải bình thường thêm ρ giây công việc mỗi giây; transaction lớn thêm D giây công việc lúc nó commit (giây 60). Khi chia thành lô, các lô được rải đều trong 2 × D giây. Con số trên trục là thời gian chờ của một lần ghi mới, không phải <code>Seconds_Behind_Source</code> (cột đó tăng dần trong lúc transaction lớn đang được áp dụng). Chưa đo (E42).</p>
+  </div>
+</div>
+<div class="note"><strong>Lỗi hay gặp:</strong> tin <code>Seconds_Behind_Source</code> = 0 nghĩa là replica đã bắt kịp. Manual 8.4 ghi rõ: cột này bằng 0 khi replica không đang xử lý sự kiện nào, kể cả khi luồng nhận đang chậm vì mạng; và nó dựa trên đồng hồ của hai máy. Quy tắc: đo độ trễ bằng dấu thời gian trong <code>performance_schema</code> hoặc một bảng heartbeat (phần 04).</div>
+
+<div class="prose">
+<h3>Đọc thấy chính lần ghi của mình: các cách làm</h3>
+<p>Ý chính: định tuyến lần đọc dựa trên việc người dùng vừa ghi gì. Cách chính xác nhất là mang theo vị trí của lần ghi (GTID) và chờ replica áp dụng tới đó; cách đơn giản nhất là đọc primary trong một khoảng ngắn sau khi ghi.</p>
+<ul>
+<li><strong>Đọc primary trong N giây sau khi ghi:</strong> lưu thời điểm ghi cuối trong session hoặc cookie. Đơn giản, nhưng N phải lớn hơn độ trễ tệ nhất, và khi replica trễ hơn N thì vẫn sai.</li>
+<li><strong>Chờ GTID:</strong> mỗi transaction có một GTID (định danh toàn cục). Bật <code>session_track_gtids = OWN_GTID</code>, server trả GTID của transaction vừa commit trong gói OK; mysql2 đưa nó ra ở <code>result.stateChanges.gtids</code>. Lần đọc sau chạy <code>SELECT WAIT_FOR_EXECUTED_GTID_SET('&lt;gtid&gt;', 1)</code> trên replica: trả 0 khi đã áp dụng, 1 khi quá thời gian chờ (tính bằng giây).</li>
+<li><strong>Gắn phiên với một replica:</strong> giải monotonic reads (không lùi thời gian), nhưng không giải read-your-writes.</li>
+<li><strong>Đọc primary cho dữ liệu của chính người dùng:</strong> hồ sơ, đơn của tôi đọc primary; dữ liệu chung (danh mục, bài viết) đọc replica. Thường là cách có tỉ lệ lợi ích trên công sức tốt nhất.</li>
+</ul>
+</div>
+</section>
+
+<!-- 3 -->
+<section id="s3">
+<header><span class="num">03</span><h2>Vì sao thiết kế như vậy</h2></header>
+<div class="prose">
+<p><strong>Vì sao mặc định là async?</strong> Chờ replica ở mỗi commit thêm ít nhất một vòng mạng. Trong cùng datacenter là dưới 1 ms; sang region khác là hàng chục tới trăm mili giây. Phần lớn ứng dụng chịu được việc đọc trễ vài trăm mili giây hơn là mọi lần ghi chậm thêm.</p>
+<p><strong>Vì sao semi-sync chờ nhận, không chờ áp dụng?</strong> Mục tiêu của nó là không mất dữ liệu khi failover; dữ liệu đã nằm trong relay log của replica là đủ cho mục tiêu đó. Chờ áp dụng sẽ biến tốc độ của applier thành giới hạn của mọi commit trên primary.</p>
+<p><strong>Vì sao replica phải giữ thứ tự commit?</strong> Để một người đọc trên replica không bao giờ thấy trạng thái mà primary chưa từng có: ví dụ thấy lần trừ tiền ở ví A mà chưa thấy lần cộng ở ví B của cùng một transaction trước đó. Cái giá: một transaction chậm chặn tất cả các transaction sau nó.</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th></th><th>MySQL 8.4</th><th>PostgreSQL</th></tr></thead>
+<tbody>
+<tr><td>Thứ được gửi sang replica</td><td>Binlog theo row (logic)</td><td>WAL (vật lý)</td></tr>
+<tr><td>Mặc định</td><td>Async</td><td>Async</td></tr>
+<tr><td>Chờ replica nhận</td><td>Semi-sync <code>AFTER_SYNC</code></td><td><code>synchronous_commit = on</code> (đã flush) hoặc <code>remote_write</code></td></tr>
+<tr><td>Chờ replica áp dụng xong</td><td>Không có ở mức commit; dùng <code>WAIT_FOR_EXECUTED_GTID_SET</code> ở phía đọc</td><td><code>synchronous_commit = remote_apply</code>: đọc trên standby thấy ngay sau commit</td></tr>
+<tr><td>Đo độ trễ</td><td>Dấu thời gian trong performance_schema</td><td><code>pg_stat_replication</code> (<code>replay_lag</code>)</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- 4 -->
+<section id="s4">
+<header><span class="num">04</span><h2>Ví dụ</h2></header>
+<div class="prose"><p>Câu lệnh theo manual 8.4; tên cột performance_schema đối chiếu với mã nguồn 8.4. Chưa chạy trên lab.</p><h3>Đo độ trễ đúng cách</h3></div>
+<pre><code>-- trên replica: transaction áp dụng gần nhất mất bao lâu từ lúc commit gốc
+SELECT WORKER_ID,
+       LAST_APPLIED_TRANSACTION,
+       TIMESTAMPDIFF(MICROSECOND,
+         LAST_APPLIED_TRANSACTION_ORIGINAL_COMMIT_TIMESTAMP,
+         LAST_APPLIED_TRANSACTION_END_APPLY_TIMESTAMP) / 1000 AS lag_ms
+  FROM performance_schema.replication_applier_status_by_worker;
+
+-- trên replica: luồng nhận đã nhận tới đâu
+SELECT LAST_QUEUED_TRANSACTION,
+       LAST_QUEUED_TRANSACTION_ORIGINAL_COMMIT_TIMESTAMP
+  FROM performance_schema.replication_connection_status;
+
+-- bảng heartbeat: primary ghi mỗi giây, replica so với đồng hồ của chính nó
+-- (độc lập với Seconds_Behind_Source; đồng hồ hai máy phải đồng bộ)
+CREATE TABLE heartbeat (id TINYINT PRIMARY KEY, ts DATETIME(6) NOT NULL);
+-- primary:  REPLACE INTO heartbeat VALUES (1, NOW(6));   -- mỗi giây
+-- replica:  SELECT TIMESTAMPDIFF(MICROSECOND, ts, NOW(6)) / 1000 AS lag_ms FROM heartbeat;</code></pre>
+
+<div class="prose"><h3>Read-your-writes bằng GTID trong Node</h3></div>
+<pre><code>// primary: connection có bật session_track_gtids
+await primary.query("SET SESSION session_track_gtids = 'OWN_GTID'");
+const [res] = await primary.execute('UPDATE users SET name = ? WHERE id = ?', [name, userId]);
+const gtid = (res as any).stateChanges?.gtids?.[0];   // ví dụ '3E11FA47-…:1205'
+session.lastWriteGtid = gtid;                          // lưu theo người dùng (cookie, Redis)
+
+// lần đọc sau
+async function readProfile(userId: number, lastGtid?: string) {
+  if (lastGtid) {
+    const conn = await replicaPool.getConnection();
+    try {
+      const [[r]] = await conn.query&lt;RowDataPacket[]&gt;(
+        'SELECT WAIT_FOR_EXECUTED_GTID_SET(?, 1) AS timedOut', [lastGtid]);   // chờ tối đa 1 giây
+      if (r.timedOut === 0) return (await conn.execute('SELECT … FROM users WHERE id = ?', [userId]))[0];
+    } finally { conn.release(); }
+    return (await primary.execute('SELECT … FROM users WHERE id = ?', [userId]))[0];  // quá hạn: đọc primary
+  }
+  return (await replicaPool.execute('SELECT … FROM users WHERE id = ?', [userId]))[0];
+}</code></pre>
+<p class="prose">Hai câu chờ và đọc phải chạy trên cùng một connection, để chắc lần đọc rơi vào đúng replica đã được kiểm tra. Thời gian chờ chặn connection đó; đặt giới hạn nhỏ.</p>
+
+<div class="prose"><h3>Chia nhỏ job xoá hàng loạt</h3></div>
+<pre><code>-- thay vì một câu xoá 20 triệu row
+-- DELETE FROM events WHERE created_at &lt; '2026-01-01';
+
+-- lặp tới khi 0 row; giữa các lô, đợi nếu replica trễ quá 2 giây
+DELETE FROM events WHERE created_at &lt; '2026-01-01' ORDER BY id LIMIT 5000;</code></pre>
+</section>
+
+<!-- 5 -->
+<section id="s5">
+<header><span class="num">05</span><h2>Thí nghiệm</h2></header>
+<div class="prose"><p>Cần một primary và một replica MySQL 8.4 trong Docker, bật GTID. Viết dự đoán trước.</p></div>
+<details><summary>E41. Đọc cũ ngay sau khi ghi</summary>
+<p><strong>Câu hỏi.</strong> Ghi một row rồi đọc nó trên replica sau 0, 1, 5, 20, 100 ms, mỗi mức 1.000 lần, khi primary rảnh và khi primary nhận 500 ghi mỗi giây. Bao nhiêu phần trăm lần đọc ra bản cũ? Với <code>WAIT_FOR_EXECUTED_GTID_SET</code>, lần đọc chờ thêm bao lâu (p50, p99)?</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e41/prediction.md</code></p>
+<p><strong>Chạy.</strong> Script Node với hai pool (primary, replica), bật <code>session_track_gtids</code>.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+<details><summary>E42. Transaction lớn và độ trễ</summary>
+<p><strong>Câu hỏi.</strong> Xoá 2 triệu row trong một câu, so với 400 lô 5.000 row, trong khi một script ghi 200 row mỗi giây vào bảng khác. Đồ thị độ trễ theo heartbeat, theo performance_schema và theo <code>Seconds_Behind_Source</code> trông thế nào? Độ trễ lớn nhất của mỗi cách là bao nhiêu?</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e42/prediction.md</code></p>
+<p><strong>Chạy.</strong> Lấy mẫu ba cách đo mỗi giây trong lúc job chạy.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+<details><summary>E43. Semi-sync: độ trễ commit và khi replica chết</summary>
+<p><strong>Câu hỏi.</strong> Bật semi-sync <code>AFTER_SYNC</code>: p50 và p99 của commit thay đổi bao nhiêu so với async? Dừng replica giữa chừng: commit đầu tiên sau đó chờ bao lâu, primary chuyển về async lúc nào, và trạng thái nào cho biết điều đó?</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e43/prediction.md</code></p>
+<p><strong>Chạy.</strong> Script ghi liên tục, đo từng commit; <code>docker stop</code> replica; đọc <code>SHOW STATUS LIKE 'Rpl_semi_sync%'</code>.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+</section>
+
+<!-- 6 -->
+<section id="s6">
+<header><span class="num">06</span><h2>Ảnh hưởng khi chạy production</h2></header>
+<div class="prose">
+<h3>Khi nào đọc replica, khi nào không</h3>
+<ul>
+<li>Đọc replica: dữ liệu chung, báo cáo, tìm kiếm, trang danh mục; chấp nhận cũ vài giây.</li>
+<li>Đọc primary: dữ liệu người dùng vừa ghi, mọi bước quyết định tiền hay quyền, câu đọc trong cùng transaction với câu ghi.</li>
+<li>Không bao giờ: đọc replica rồi dùng kết quả để ghi lên primary ("đọc số dư từ replica, trừ, ghi lại"). Đó là lost update có thêm độ trễ.</li>
+</ul>
+<h3>Cái giá</h3>
+<ul>
+<li>Định tuyến đọc phải biết ngữ cảnh (người dùng vừa ghi gì), không thể chỉ là một proxy chia đều.</li>
+<li>Semi-sync thêm một vòng mạng vào mọi commit, và có thể làm commit đứng tới 10 giây khi replica chết.</li>
+<li>Replica trễ cần theo dõi và cảnh báo; job ghi hàng loạt phải chia nhỏ và tự giảm tốc theo độ trễ.</li>
+</ul>
+<h3>Nhận ra trên production bằng gì</h3>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Triệu chứng</th><th>Xem ở đâu</th></tr></thead>
+<tbody>
+<tr><td>Người dùng thấy dữ liệu cũ ngay sau khi sửa</td><td>Log định tuyến: lần đọc ngay sau lần ghi có đi replica không; độ trễ replica lúc đó</td></tr>
+<tr><td>Độ trễ replica tăng vọt vào giờ cố định</td><td>Heartbeat và performance_schema; tìm job hay <code>ALTER</code> chạy giờ đó; binlog có transaction lớn (<code>mysqlbinlog</code>, kích thước sự kiện)</td></tr>
+<tr><td>Commit trên primary đột nhiên chậm 10 giây</td><td>Semi-sync chờ replica: <code>Rpl_semi_sync_source_status</code>, <code>Rpl_semi_sync_source_no_tx</code></td></tr>
+<tr><td>Replica dừng hẳn</td><td><code>SHOW REPLICA STATUS</code>: <code>Replica_IO_Running</code>, <code>Replica_SQL_Running</code>, <code>Last_SQL_Error</code></td></tr>
+</tbody></table></div>
+<div class="senior"><h4>Góc nhìn senior: viết ra bảo đảm nhất quán cho từng màn hình</h4><p>Senior không hỏi "có đọc replica không", mà liệt kê màn hình và bảo đảm mỗi màn cần: "hồ sơ của tôi: read-your-writes", "danh sách đơn của tôi: read-your-writes và monotonic", "trang chủ: cũ 30 giây được", "báo cáo: cũ 1 giờ được". Rồi chọn cơ chế rẻ nhất cho từng nhóm, và đặt một ngưỡng độ trễ mà vượt qua thì tự chuyển mọi lần đọc về primary hoặc bỏ replica đó khỏi pool.</p></div>
+<div class="prose">
+<h3>Checklist khi review code đọc từ replica</h3>
+<ul>
+<li>Màn hình này có hiển thị thứ người dùng vừa ghi không? Nếu có, cơ chế read-your-writes là gì?</li>
+<li>Kết quả đọc từ replica có được dùng để quyết định một lần ghi không?</li>
+<li>Khi replica trễ quá ngưỡng, lần đọc có tự chuyển về primary không?</li>
+<li>Job ghi hàng loạt có chia lô và giảm tốc theo độ trễ không?</li>
+<li>Độ trễ được đo bằng heartbeat hoặc performance_schema, không chỉ <code>Seconds_Behind_Source</code>?</li>
+<li>Nếu dùng semi-sync: có cảnh báo khi primary chuyển về async không?</li>
+</ul>
+</div>
+</section>
+
+<!-- 7 -->
+<section id="s7">
+<header><span class="num">07</span><h2>Hiểu lầm thường gặp</h2></header>
+<div class="prose"><ul>
+<li><strong>Hiểu lầm:</strong> replica chỉ trễ vài mili giây nên không cần lo. <strong>Vì sao sai:</strong> một transaction lớn hay một <code>ALTER</code> đẩy độ trễ lên hàng phút (<a href="#s2">phần 02</a>). <strong>Quy tắc:</strong> thiết kế cho độ trễ tệ nhất, không phải trung bình.</li>
+<li><strong>Hiểu lầm:</strong> semi-sync làm replica đọc thấy ngay. <strong>Vì sao sai:</strong> nó chỉ chờ replica nhận vào relay log. <strong>Quy tắc:</strong> semi-sync cho failover, read-your-writes cần cơ chế riêng.</li>
+<li><strong>Hiểu lầm:</strong> <code>Seconds_Behind_Source</code> = 0 là đã bắt kịp. <strong>Vì sao sai:</strong> cột này bằng 0 khi không có gì đang xử lý, kể cả lúc luồng nhận đang chậm. <strong>Quy tắc:</strong> đo bằng heartbeat hoặc performance_schema.</li>
+<li><strong>Hiểu lầm:</strong> gắn người dùng với một replica là đủ. <strong>Vì sao sai:</strong> chỉ giải chuyện đọc lùi thời gian, không giải chuyện đọc thấy lần ghi của mình. <strong>Quy tắc:</strong> hai bảo đảm khác nhau, hai cơ chế khác nhau.</li>
+<li><strong>Hiểu lầm:</strong> thêm replica là thêm sức ghi. <strong>Vì sao sai:</strong> mọi replica phải làm lại mọi lần ghi. <strong>Quy tắc:</strong> replica chỉ chia tải đọc.</li>
+<li><strong>Hiểu lầm:</strong> semi-sync thì không bao giờ mất dữ liệu. <strong>Vì sao sai:</strong> khi replica không trả lời quá thời gian chờ, primary chuyển về async. <strong>Quy tắc:</strong> cảnh báo trạng thái này.</li>
+</ul></div>
+</section>
+
+<!-- 8 -->
+<section id="s8">
+<header><span class="num">08</span><h2>Câu hỏi ôn tập</h2></header>
+<p class="prose">Viết ngày 2026-10-20. Đánh số Q77 đến Q82.</p>
+<details><summary><span class="tag">Dự đoán</span>Q77. Hai replica, hai lần đọc</summary>
+<p>Replica A trễ 2 giây, B trễ 100 ms. Người dùng sửa tên, đọc ở 500 ms (rơi vào B) rồi 1 giây (rơi vào A). Hai lần đọc thấy gì, và bảo đảm nào bị vi phạm?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Lần đầu trên B (đã qua 100 ms) thấy tên mới. Lần hai trên A (chưa tới 2 giây) thấy tên cũ. Người dùng thấy dữ liệu "lùi thời gian": vi phạm monotonic reads, và lần hai vi phạm cả read-your-writes.</p></details></details>
+<details><summary><span class="tag">Giải thích</span>Q78. Semi-sync và đọc cũ</summary>
+<p>Team bật semi-sync <code>AFTER_SYNC</code> và mong hết lỗi "vừa sửa đã thấy cũ". Vì sao không hết?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Semi-sync chờ replica ghi transaction vào relay log rồi mới để primary commit. Replica vẫn phải áp dụng lại transaction đó; tới lúc áp dụng xong, đọc trên replica mới thấy. Commit đã trả về trước đó, nên lần đọc ngay sau vẫn có thể ra bản cũ. Semi-sync bảo vệ dữ liệu khi failover, không bảo đảm đọc mới.</p></details></details>
+<details><summary><span class="tag">Dự đoán</span>Q79. Transaction lớn</summary>
+<p>Tải ghi bình thường dùng 50% sức applier. Một <code>DELETE</code> chạy 3 phút trên primary rồi commit. Khoảng bao lâu sau commit, một lần ghi mới mới hiện trên replica, và mất bao lâu để độ trễ về 0?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Theo mô hình hàng đợi ở phần 02: ngay sau commit, applier có thêm khoảng 3 phút công việc, nên một lần ghi mới phải chờ khoảng 3 phút. Applier chỉ rút bớt hàng đợi với tốc độ 1 − 0,5 = 0,5 giây công việc mỗi giây, nên cần khoảng 6 phút để độ trễ về 0. Chia <code>DELETE</code> thành lô nhỏ thì độ trễ chỉ còn cỡ thời gian một lô.</p></details></details>
+<details><summary><span class="tag">Chẩn đoán</span>Q80. Commit chậm đúng 10 giây</summary>
+<p>Lúc 03:12, mọi commit trên primary chậm đúng khoảng 10 giây, rồi trở lại bình thường. Lúc đó replica duy nhất đang được khởi động lại. Giải thích, và nói rủi ro sau 03:12.</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Semi-sync: không replica nào xác nhận, nên commit chờ tới <code>rpl_semi_sync_source_timeout</code> (mặc định 10.000 ms), rồi primary chuyển về async. Sau đó commit nhanh trở lại, nhưng không còn bảo đảm không mất dữ liệu cho tới khi replica bắt kịp và primary quay lại semi-sync. Nếu primary chết trong khoảng đó, failover có thể mất dữ liệu. Cần cảnh báo trên <code>Rpl_semi_sync_source_status</code>; và nếu cần bảo đảm thật sự, chạy hai replica semi-sync để một cái khởi động lại không làm mất bảo đảm.</p></details></details>
+<details><summary><span class="tag">Giải thích</span>Q81. Vì sao giữ thứ tự commit</summary>
+<p><code>replica_preserve_commit_order</code> mặc định ON trên 8.4. Nó bảo vệ điều gì, và tốn gì?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Các worker có thể áp dụng song song, nhưng commit trên replica theo đúng thứ tự trên primary. Người đọc trên replica không bao giờ thấy trạng thái mà primary chưa từng có (ví dụ thấy transaction sau mà chưa thấy transaction trước). Cái giá: một transaction chậm chặn commit của mọi transaction sau nó, kể cả khi chúng đã được áp dụng xong.</p></details></details>
+<details><summary><span class="tag">Chẩn đoán</span>Q82. Đọc số dư từ replica</summary>
+<p>Service chuyển tiền đọc số dư từ replica để "giảm tải primary", kiểm tra đủ tiền, rồi trừ trên primary bằng <code>UPDATE … SET balance = balance - ?</code>. Thỉnh thoảng số dư âm. Vì sao?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Replica trễ, nên lần kiểm tra dựa trên số dư cũ, chưa thấy các lần trừ vừa xảy ra. Đây là "kiểm tra rồi mới làm" có thêm độ trễ. Sửa: đưa điều kiện vào câu ghi trên primary (<code>WHERE balance &gt;= ?</code>) và xem số row bị ảnh hưởng, như ở trang kiểm soát ghi đồng thời. Không bao giờ dùng dữ liệu từ replica để quyết định một lần ghi.</p></details></details>
+</section>
+
+<!-- 9 -->
+<section id="s9">
+<header><span class="num">09</span><h2>Bài toán thực tế</h2></header>
+<div class="prose">
+<p>Mỗi bài là một vòng phỏng vấn system design cấp senior, khoảng 30–45 phút. Cách dùng:</p>
+<ol class="list">
+<li>Đọc bối cảnh và câu hỏi của interviewer. Bối cảnh là những gì interviewer nói lúc đầu: hệ thống, cách đang làm, quy mô, chuyện đã xảy ra. Viết ra những gì bạn sẽ hỏi thêm trước khi thiết kế, rồi mới mở "Hỏi lại interviewer" để xem câu hỏi nên hỏi và câu trả lời của interviewer: con số chính xác, yêu cầu, ràng buộc. Các con số ở đó dùng cho những câu sau.</li>
+<li>Với mỗi follow-up, tự trả lời (nói to hoặc viết ra) trong vài phút, rồi mới mở đáp án. Follow-up cuối luôn là triển khai và kiểm chứng: thiết kế đã chọn được làm ra sao, test gì, theo dõi gì, lùi lại thế nào.</li>
+<li>Cuối bài, dùng rubric để tự chấm: câu trả lời của bạn giống cột "mid" hay cột "senior", và có rơi vào red flag nào không.</li>
+</ol>
+<p>Đáp án là lập luận từ tài liệu, không phải số đo; con số trong đó là ước lượng. Viết ngày 2026-10-21.</p>
+</div>
+
+<!-- C19 -->
+<div class="case" id="c19">
+<h3>C19. "Tôi vừa đặt đơn mà không thấy đâu"</h3>
+<p class="src">Dựa trên: phần 01–02 của trang này; <a href="../capacity-estimation/index.html">Ước lượng capacity</a>.</p>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> App giao đồ ăn: một MySQL 8.4 primary và 3 replica async cùng region; một proxy chia mọi <code>SELECT</code> đều cho 3 replica.</li><li><strong>Quy mô:</strong> Đỉnh 1.500 ghi và 12.000 đọc mỗi giây; primary đang ở 55% CPU. Replica thường trễ 20–80 ms.</li><li><strong>Đã xảy ra:</strong> Đặt đơn xong, màn "Đơn của tôi" không có đơn, vài giây sau mới có; đôi khi có rồi lại mất khi kéo để tải lại; chi tiết đơn đôi khi trả 404.</li></ul></div>
+<blockquote class="q">"Team đề xuất chuyển hết lượt đọc về primary. Bạn nghĩ sao, và bạn sẽ làm gì?"</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>Kiến trúc database?</td><td>Một primary và 3 replica MySQL 8.4, async, cùng region. Một proxy chia mọi <code>SELECT</code> đều cho 3 replica.</td><td>Đọc xoay vòng giữa các replica trễ khác nhau.</td></tr>
+<tr><td>Tải và tình trạng primary?</td><td>Đỉnh 1.500 ghi và 12.000 đọc mỗi giây. Primary 55% CPU. Không được vượt 70% ở đỉnh.</td><td>Để tính đề xuất "mọi đọc về primary".</td></tr>
+<tr><td>Replica trễ bao nhiêu?</td><td>Thường 20–80 ms; lúc 2:00 sáng job dọn dữ liệu đẩy lên 3 phút.</td><td>Cần thiết kế cho lúc trễ, không chỉ lúc bình thường.</td></tr>
+<tr><td>Triệu chứng chính xác?</td><td>Đơn không có rồi vài giây sau có; đôi khi có rồi lại mất khi kéo để tải lại; chi tiết đơn đôi khi 404 ngay sau khi đặt.</td><td>Hai bảo đảm khác nhau bị vi phạm.</td></tr>
+<tr><td>Màn nào cần dữ liệu mới?</td><td>"Đơn của tôi" và chi tiết đơn. Danh sách nhà hàng, thực đơn cũ vài giây được.</td><td>Chỉ một phần lượt đọc cần primary hoặc chờ.</td></tr>
+<tr><td>Hạ tầng và thời gian?</td><td>Có Redis. Không thay database. Hai tuần.</td><td>Giới hạn lựa chọn.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> tách triệu chứng. "Không thấy" là read-your-writes; "có rồi lại mất" là monotonic reads. Hai bảo đảm, hai cơ chế.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Đánh giá đề xuất "mọi đọc về primary" bằng con số.</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Giả sử một lượt đọc tốn CPU bằng khoảng 1/4 một lượt ghi. 1.500 ghi mỗi giây chiếm 55%.</li>
+<li>Thêm 12.000 đọc ≈ 3.000 "đơn vị ghi", gấp đôi tải hiện tại: CPU khoảng 165%. Không làm được.</li>
+<li>Đây là ước lượng thô; đo bằng tỉ lệ thời gian theo digest câu lệnh trong <code>performance_schema</code>.</li>
+</ul>
+<p>Và nó giải quá rộng: danh sách nhà hàng không cần dữ liệu mới. Chỉ phần "của tôi, ngay sau khi tôi ghi" cần.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> Vậy chỉ đọc primary trong 5 giây sau khi người dùng ghi thì sao?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Khoảng 1.500 lần đặt hay đổi trạng thái mỗi giây, mỗi lần kéo theo 2–3 lần đọc trong 5 giây sau: khoảng 3.000–4.500 đọc mỗi giây thêm lên primary. Với tỉ lệ 1/4 ở trên, CPU tăng khoảng 10–15 điểm: sát ngưỡng 70%.</li>
+<li>Sai lúc 2:00: độ trễ 3 phút vượt cửa sổ 5 giây, lỗi quay lại đúng lúc job chạy.</li>
+<li>Chọn 5 giây là đoán.</li>
+</ul>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>A. Mọi đọc về primary</td><td>Đúng tuyệt đối</td><td>Khoảng 165% CPU</td></tr>
+<tr><td>B. Cửa sổ primary 5 giây</td><td>Đơn giản</td><td>Thêm tải lớn; sai khi trễ vượt cửa sổ</td></tr>
+<tr><td>C. GTID: ghi trả GTID, đọc chờ trên replica tối đa 200 ms rồi về primary</td><td>Đúng bất kể độ trễ; primary chỉ nhận phần quá hạn</td><td>Phức tạp hơn; lần chờ giữ connection replica</td></tr>
+<tr><td>D. Gắn người dùng với một replica</td><td>Giải "có rồi lại mất"</td><td>Không giải read-your-writes</td></tr>
+<tr><td>E. Bỏ replica trễ quá ngưỡng khỏi pool</td><td>Giới hạn độ trễ tệ nhất</td><td>Lúc 2:00 cả 3 cùng trễ; cần đường về primary</td></tr>
+</tbody></table></div>
+<p><strong>Chọn C + D + E.</strong> Với chờ GTID, phần lớn lần đọc đến sau 100 ms, khi replica đã có bản mới, nên chờ 0 ms. D làm lần chờ hiệu quả hơn vì lần đọc luôn rơi vào cùng replica. <strong>Khi nào đổi ý:</strong> không lấy được GTID (ORM hay proxy che gói OK) thì B cộng E.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> Lúc 2:00 sáng cả 3 replica trễ 3 phút. Thiết kế của bạn cư xử thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Lần chờ GTID quá hạn 200 ms, đọc về primary: đúng, nhưng mọi người vừa ghi đều về primary. Ban đêm tải thấp, chấp nhận được; vẫn đo.</li>
+<li>E bỏ replica trễ quá 5 giây; nếu không còn replica nào, màn "của tôi" đọc primary, màn chung trả bản cache.</li>
+<li>Quan trọng nhất: <strong>sửa gốc</strong>. Job 2:00 chia lô, ngủ khi độ trễ quá 2 giây (C20). C, D, E chỉ là lưới an toàn; một job làm replica trễ 3 phút là lỗi riêng cần sửa.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> Lần chờ GTID có rủi ro gì cho replica?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Mỗi lần chờ giữ một connection replica tới 200 ms. Nếu replica trễ và hàng nghìn session cùng chờ, pool replica cạn, và cả các màn không cần chờ cũng chậm.</li>
+<li>Giảm rủi ro: thời gian chờ nhỏ; giới hạn số lần chờ đồng thời (vượt thì về primary ngay); E bỏ replica trễ trước khi các lần chờ dồn lại.</li>
+<li>Chi phí của hàng nghìn lần chờ đồng thời trên một replica chưa được đo (câu hỏi 34); cần thử trên lab trước khi bật rộng.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai và kiểm chứng thế nào trong hai tuần?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li><strong>Tuần 1:</strong> sửa job 2:00 (chia lô, giảm tốc theo heartbeat); thêm heartbeat; định tuyến theo hash user id (D); loại replica trễ (E).</li>
+<li><strong>Tuần 2:</strong> bật <code>session_track_gtids = OWN_GTID</code> trên connection ghi; lưu GTID vào <code>ryw:{userId}</code> TTL 30 giây; màn "của tôi" chạy <code>WAIT_FOR_EXECUTED_GTID_SET(?, 0.2)</code> trước khi đọc. Hàm nhận thời gian chờ theo giây; thời gian chờ thập phân cần thử trên lab.</li>
+<li>Test tự động: đặt đơn rồi đọc ngay 1.000 lần, với một replica bị làm chậm bằng <code>SOURCE_DELAY</code> (manual 8.4 gợi ý dùng để giả lập trễ). Không lần nào thiếu đơn, không lần nào "lùi".</li>
+<li>Metric: tỉ lệ lần chờ quá hạn và về primary; p99 thời gian chờ; CPU primary; thời gian chờ pool replica.</li>
+</ul>
+</details>
+</div>
+
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Chẩn đoán</td><td>"Replica trễ"</td><td>Hai bảo đảm: read-your-writes và monotonic reads</td></tr>
+<tr><td>Đề xuất của team</td><td>Đồng ý, hoặc từ chối không có số</td><td>Tính ra khoảng 165% CPU</td></tr>
+<tr><td>Thiết kế</td><td>Cửa sổ primary vài giây</td><td>Chờ GTID có quá hạn; gắn replica cho monotonic; loại replica trễ</td></tr>
+<tr><td>Lúc trễ lớn</td><td>Không nhắc</td><td>Hành vi lúc 2:00, và sửa gốc job gây trễ</td></tr>
+<tr><td>Kiểm chứng</td><td>Không có</td><td>Test với replica bị làm chậm; metric tải dội về primary</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> chuyển hết đọc về primary không tính tải; gắn người dùng với một replica rồi nghĩ là xong; cửa sổ thời gian cố định không xử lý lúc trễ vượt cửa sổ.</p>
+</details>
+</div>
+
+<!-- C20 -->
+<div class="case" id="c20">
+<h3>C20. Replica trễ 40 phút mỗi đêm</h3>
+<p class="src">Dựa trên: phần 02 và 04 của trang này; <a href="../capacity-estimation/index.html">Ước lượng capacity</a> (C13).</p>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> MySQL 8.4, một primary và 2 replica async. Báo cáo kinh doanh chạy trên replica lúc 7:00.</li><li><strong>Đang làm:</strong> Job archive lúc 01:00 chạy một câu <code>UPDATE orders SET archived = 1 WHERE created_at &lt; NOW() - INTERVAL 90 DAY …</code>, chạm khoảng 6 triệu row, mất 12 phút trên primary.</li><li><strong>Đã xảy ra:</strong> Sau đó replica trễ tới 40 phút; báo cáo sáng có lúc thiếu số đêm trước. Một lần primary chết lúc 01:20, và failover mất 35 phút.</li></ul></div>
+<blockquote class="q">"Vì sao 12 phút trên primary lại thành 40 phút trễ, và bạn sửa thế nào?"</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>Job archive làm gì?</td><td><code>UPDATE orders SET archived = 1 WHERE created_at &lt; NOW() - INTERVAL 90 DAY AND archived = 0</code>. Khoảng 6 triệu row, chạy 12 phút trên primary.</td><td>Một transaction khổng lồ.</td></tr>
+<tr><td>Replication cấu hình thế nào?</td><td>MySQL 8.4, async, 2 replica, binlog theo row.</td><td>Row-based: 6 triệu sự kiện thay đổi row.</td></tr>
+<tr><td>Ảnh hưởng?</td><td>Báo cáo kinh doanh lúc 7:00 có lúc thiếu số đêm trước. Failover lúc 01:20 mất 35 phút vì chờ replica áp dụng xong.</td><td>Độ trễ replica cũng là thời gian failover.</td></tr>
+<tr><td>Có nguồn trễ nào khác?</td><td>Giữa ngày, nhóm dữ liệu chạy <code>ALTER TABLE orders ADD COLUMN …</code> mất 25 phút; replica trễ thêm khoảng 25 phút.</td><td>Thay đổi schema cũng là transaction lớn với replica.</td></tr>
+<tr><td>Yêu cầu?</td><td>Độ trễ dưới 5 giây suốt ngày đêm. Failover dưới 2 phút. Job phải xong trước 5:00.</td><td>Có 4 giờ cho job.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> nối ngay hai triệu chứng: trễ 40 phút và failover 35 phút là cùng một con số, vì replica phải áp dụng hết trước khi nhận ghi.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Vì sao 12 phút trên primary thành 40 phút trễ?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Binlog của transaction chỉ được gửi lúc commit. Replica bắt đầu áp dụng ở phút 12.</li>
+<li>Với binlog theo row, replica nhận 6 triệu ảnh trước và sau. Áp dụng có thể chậm hơn chạy trên primary (tra cứu theo khoá, ghi redo của replica, một transaction chỉ do một worker áp dụng). Giả sử 15–25 phút. Trong lúc đó, transaction sau phải chờ để giữ thứ tự commit.</li>
+<li>Tổng: 12 phút chưa gửi + thời gian áp dụng + thời gian rút hàng đợi. Đây là suy luận; E42 đo hình dạng thật.</li>
+<li>Trong 12 phút đầu, <code>Seconds_Behind_Source</code> có thể gần 0 vì replica chưa nhận gì: chỉ số này đánh lừa ở đúng lúc quan trọng nhất.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> DBA đề xuất tăng <code>replica_parallel_workers</code>. Có giúp không?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p><strong>Không.</strong> Applier song song chia việc theo transaction; một transaction 6 triệu row chỉ do một worker áp dụng. Thêm worker giúp khi có nhiều transaction nhỏ, không giúp với một transaction lớn.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>A. Thêm worker cho applier</td><td>Một dòng cấu hình</td><td>Không giúp với một transaction lớn</td></tr>
+<tr><td>B. Chia lô theo khoá chính, giảm tốc theo độ trễ</td><td>Độ trễ có trần; failover không phải chờ lâu</td><td>Job dài hơn; cần checkpoint</td></tr>
+<tr><td>C. Partition theo tháng, chuyển cả partition</td><td>Hầu như không sinh binlog</td><td>Đổi schema lớn (C13)</td></tr>
+<tr><td>D. Bỏ qua replica báo cáo</td><td>Không</td><td>Không giải failover</td></tr>
+</tbody></table></div>
+<p><strong>Chọn B ngay</strong>, C là hướng dài hạn nếu bảng tiếp tục lớn.</p>
+<ul>
+<li>Lô 5.000 row: giả sử 0,5 giây mỗi lô trên primary; 1.200 lô, khoảng 10 phút chạy thuần.</li>
+<li>Mỗi lô làm replica trễ cỡ thời gian áp dụng một lô, khoảng 1 giây. Có giảm tốc thì giữ dưới 5 giây.</li>
+<li>Nghỉ 0,5 giây giữa lô: tổng khoảng 20 phút. Xong trước 5:00 dư dả.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> Viết vòng lặp chia lô. Có cạm bẫy gì?</p>
+<details class="answer"><summary>Đáp án</summary>
+<pre><code>-- mỗi lô: khoảng khoá chính cố định, nên mỗi lô chạm một vùng nhỏ của index
+UPDATE orders SET archived = 1
+ WHERE id &gt; ? AND id &lt;= ? + 5000
+   AND created_at &lt; ? AND archived = 0;
+-- sau mỗi lô: đọc heartbeat trên replica; nếu trễ &gt; 2 s thì ngủ tới khi &lt; 1 s
+-- lưu id cuối vào bảng job_checkpoints</code></pre>
+<ul>
+<li>Chia bằng <code>LIMIT 5000</code> không kèm khoảng khoá chính thì mỗi lô quét lại từ đầu qua các row đã xử lý: lô sau chậm hơn lô trước.</li>
+<li>Mốc <code>created_at</code> tính một lần lúc job bắt đầu và truyền vào mọi lô; dùng <code>NOW()</code> trong mỗi lô thì kết quả đổi theo thời điểm chạy.</li>
+<li>Đo độ trễ bằng heartbeat, không bằng <code>Seconds_Behind_Source</code> (Follow-up 1).</li>
+<li>Checkpoint để job dừng giữa chừng (deploy, lỗi) chạy tiếp được, như trang BullMQ.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> Còn <code>ALTER TABLE</code> 25 phút giữa ngày?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Với replica, một <code>ALTER</code> dài cũng là một sự kiện lớn: replica chạy lại nó, và mọi thứ phía sau chờ.</li>
+<li><code>ADD COLUMN</code> thường làm được bằng <code>ALGORITHM=INSTANT</code> trên 8.x (chỉ sửa metadata), nên không cần 25 phút. Ghi rõ <code>ALGORITHM=INSTANT</code> trong câu lệnh: nếu không làm được, MySQL báo lỗi thay vì âm thầm chép cả bảng.</li>
+<li>Thay đổi không INSTANT được: dùng công cụ online như gh-ost (chép theo lô, có giảm tốc theo độ trễ). Chi tiết ở chủ đề migration online (Month 4).</li>
+<li>Quy trình: mọi <code>ALTER</code> trên bảng lớn phải qua review, ghi rõ thuật toán và dự kiến ảnh hưởng tới replica.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai và kiểm chứng thế nào để chắc đã đạt "trễ dưới 5 giây, failover dưới 2 phút"?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Đồ thị độ trễ heartbeat lúc 01:00–02:00 sau khi đổi: đỉnh dưới 5 giây.</li>
+<li>Diễn tập failover ở staging trong lúc job đang chạy: đo thời gian tới khi replica nhận ghi.</li>
+<li>Review mọi job theo lịch: câu lệnh nào chạm hơn 10.000 row trong một transaction?</li>
+<li>Cảnh báo theo heartbeat, ngưỡng 5 giây, có ghi job nào đang chạy lúc đó.</li>
+</ul>
+</details>
+</div>
+
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Chẩn đoán</td><td>"Replica yếu"</td><td>Binlog gửi lúc commit; một transaction lớn; trễ và failover cùng một con số</td></tr>
+<tr><td>Đề xuất DBA</td><td>Đồng ý thêm worker</td><td>Giải thích vì sao worker song song không giúp</td></tr>
+<tr><td>Chia lô</td><td><code>LIMIT</code></td><td>Khoảng khoá chính, mốc thời gian cố định, giảm tốc theo heartbeat, checkpoint</td></tr>
+<tr><td>Schema</td><td>Không nhắc</td><td><code>INSTANT</code> hoặc công cụ online; quy trình review</td></tr>
+<tr><td>Đo</td><td><code>Seconds_Behind_Source</code></td><td>Heartbeat; diễn tập failover</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> tăng worker cho một transaction lớn; chỉ nhìn <code>Seconds_Behind_Source</code> và tưởng ổn trong 12 phút đầu; quên rằng độ trễ replica cũng là thời gian failover.</p>
+</details>
+</div>
+
+<!-- C21 -->
+<div class="case" id="c21">
+<h3>C21. Failover xong, mất 3 giây đơn hàng đã trả tiền</h3>
+<p class="src">Dựa trên: phần 02–03 của trang này; <a href="../idempotency-retries/index.html">Idempotency và retry</a> (C4).</p>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> MySQL 8.4 primary với 2 replica async ở 2 zone khác, cùng region. Có tự động failover. Đơn hàng được thanh toán qua cổng bên ngoài.</li><li><strong>Đã xảy ra:</strong> Primary chết vì hỏng phần cứng lúc 14:03:17 và không khởi động lại được. Replica được đưa lên sau 40 giây. Đối soát sau đó thấy 212 giao dịch đã thanh toán ở cổng mà không có đơn trong database, tất cả trong 3 giây cuối trước sự cố.</li></ul></div>
+<blockquote class="q">"Chuyện gì đã xảy ra, và làm sao để không lặp lại?"</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>Replication kiểu gì? Replica ở đâu?</td><td>Async. 2 replica ở 2 zone khác primary, cùng region.</td><td>Async là nghi phạm số một.</td></tr>
+<tr><td>212 giao dịch nằm ở đâu trên thời gian?</td><td>Tất cả trong 3 giây cuối trước khi primary chết lúc 14:03:17.</td><td>Khớp với binlog chưa gửi kịp.</td></tr>
+<tr><td>Primary cũ còn đọc được không?</td><td>Không khởi động lại được; disk coi như mất.</td><td>Không cứu được binlog trên đó.</td></tr>
+<tr><td>Thông tin về giao dịch còn ở đâu?</td><td>Cổng thanh toán (số tiền, mã tham chiếu, thời điểm); log ứng dụng; các event đã đi qua outbox.</td><td>Nguồn để khôi phục.</td></tr>
+<tr><td>Yêu cầu?</td><td>Một máy chết không làm mất transaction đã commit. Commit p99 tăng không quá 5 ms.</td><td>RPO 0 với ngân sách độ trễ.</td></tr>
+<tr><td>Vòng mạng giữa zone?</td><td>Khoảng 0,5–1 ms (giả định, phải đo).</td><td>Cái giá của chờ replica xác nhận.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> tách hai việc: khôi phục 212 đơn (khẩn cấp, hướng khách hàng) và ngăn lặp lại (thiết kế). Việc thứ nhất bắt đầu ngay, không chờ việc thứ hai.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Vì sao mất? Failover nhanh hơn có giúp không?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p>Async: primary commit, trả lời client, rồi mới gửi binlog. 3 giây cuối nằm trong binlog của primary cũ, chưa tới replica. Primary cũ không khởi động lại được, nên mất.</p>
+<p>Failover nhanh hơn không giúp: thời gian failover (RTO) và lượng dữ liệu mất (RPO) là hai thứ khác nhau. Async không thể cho RPO 0, dù failover mất 1 giây.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> 212 khách đã trả tiền mà không có đơn. Bạn làm gì ngay hôm nay?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Lấy danh sách giao dịch thành công từ cổng thanh toán trong khoảng thời gian sự cố, so với đơn trong database mới.</li>
+<li>Nếu mỗi lần thanh toán mang idempotency key gắn với một đơn (C4), dựng lại đơn từ log ứng dụng, hoặc từ event đã đi qua outbox mà consumer đã nhận (kho, email có thể đã có bản sao).</li>
+<li>Đơn nào không dựng lại được: hoàn tiền và liên hệ khách. Không để khách tự phát hiện.</li>
+<li>Từ nay: đối soát hằng ngày (hoặc mỗi giờ) đơn với cổng thanh toán, để lần sau phát hiện trong vài phút chứ không phải sau sự cố.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> Semi-sync có hai chế độ chờ, <code>AFTER_SYNC</code> và <code>AFTER_COMMIT</code>. Chọn cái nào? Commit chậm thêm bao nhiêu?</p>
+<details class="answer"><summary>Đáp án</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>A. Giữ async, failover nhanh hơn</td><td>Commit nhanh nhất</td><td>Vẫn mất dữ liệu</td></tr>
+<tr><td>B. Semi-sync <code>AFTER_SYNC</code>, đợi 1 trong 2 replica</td><td>Không mất transaction đã commit khi một máy chết; client khác không thấy dữ liệu replica chưa có</td><td>Thêm một vòng mạng; commit đứng tới timeout khi cả hai replica lỗi</td></tr>
+<tr><td>C. Semi-sync <code>AFTER_COMMIT</code></td><td>Như B về độ bền của client đang chờ</td><td>Client khác có thể đọc dữ liệu mà replica được đưa lên không có (manual 8.4)</td></tr>
+<tr><td>D. Group Replication</td><td>Failover tự động có kiểm soát</td><td>Đổi lớn (trang tiếp theo)</td></tr>
+</tbody></table></div>
+<p><strong>Chọn B,</strong> với 2 replica ở 2 zone, <code>rpl_semi_sync_source_wait_for_replica_count = 1</code> (mặc định). Một replica chết vẫn còn một cái xác nhận; commit không đứng.</p>
+<p><strong>Chi phí:</strong> một vòng mạng tới replica nhanh nhất, khoảng 0,5–1 ms khác zone, cộng thời gian replica ghi relay log. Trong ngân sách 5 ms, nhưng phải đo (E43). Lưu ý: xác nhận nghĩa là replica đã <em>ghi vào relay log</em>, chưa phải đã áp dụng; semi-sync không làm đọc trên replica mới hơn.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> Cả hai replica cùng không trả lời. Semi-sync làm gì? Bạn muốn nó làm gì?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Commit đứng tới <code>rpl_semi_sync_source_timeout</code> (mặc định 10 giây) rồi <strong>âm thầm chuyển về async</strong>. Từ lúc đó, RPO 0 không còn, và nếu primary chết tiếp thì lại mất dữ liệu.</li>
+<li>Timeout rất lớn: không bao giờ về async, nhưng mất cả hai replica thì primary ngừng nhận ghi. Đổi mất dữ liệu lấy mất khả dụng.</li>
+<li>Đây là quyết định của doanh nghiệp ("ngừng nhận đơn hay có thể mất đơn"), không phải của kỹ sư. Senior trình bày cả hai, kèm con số, và ghi lại quyết định.</li>
+<li>Dù chọn gì: cảnh báo ngay khi <code>Rpl_semi_sync_source_status = OFF</code>; theo dõi số replica semi-sync đang kết nối.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai và kiểm chứng thế nào, kể cả quy trình failover?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Bật semi-sync <code>AFTER_SYNC</code> trên primary và hai replica; đo p50, p99 commit trước và sau ở staging, rồi production.</li>
+<li>Replica semi-sync phải ở zone khác primary: một sự cố cả zone không được mất cả hai.</li>
+<li>Quy trình failover: chọn replica có GTID đã nhận nhiều nhất; áp dụng hết relay log trước khi mở ghi; không dùng lại primary cũ làm nguồn (manual yêu cầu bỏ nó đi và dựng lại).</li>
+<li>Diễn tập: tắt nguồn primary khi đang ghi liên tục; so số đơn đã báo thành công với số đơn trên primary mới. Phải bằng nhau.</li>
+<li>Cảnh báo: semi-sync tắt; số replica semi-sync; đối soát với cổng thanh toán lệch.</li>
+</ul>
+</details>
+</div>
+
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Chẩn đoán</td><td>"Failover chậm"</td><td>Async; tách RTO khỏi RPO</td></tr>
+<tr><td>Khôi phục</td><td>Không nhắc</td><td>Đối soát với cổng, dựng lại từ log hoặc event, hoàn tiền phần còn lại</td></tr>
+<tr><td>Thiết kế</td><td>"Bật semi-sync"</td><td><code>AFTER_SYNC</code> và vì sao không <code>AFTER_COMMIT</code>; đợi 1 trong 2; replica khác zone</td></tr>
+<tr><td>Giới hạn</td><td>Tin semi-sync luôn chặt</td><td>Hành vi khi timeout; đưa quyết định cho business</td></tr>
+<tr><td>Kiểm chứng</td><td>Không có</td><td>Diễn tập tắt nguồn, đếm đơn, cảnh báo khi về async</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> nghĩ semi-sync thì đọc trên replica luôn mới; không cảnh báo khi semi-sync về async; không có cách đối soát với hệ thống bên ngoài để tìm phần đã mất.</p>
+</details>
+</div>
+</section>
+
+<!-- 10 -->
+<section id="s10">
+<header><span class="num">10</span><h2>Câu hỏi còn mở</h2></header>
+<p class="prose">Số thứ tự trùng với Open questions trong <code>.claude/docs/LEARNING_LOG.md</code>. Log là bản gốc.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>#</th><th>Câu hỏi</th><th>Trạng thái</th></tr></thead>
+<tbody>
+<tr><td>33</td><td>Trong một transaction lớn, độ trễ đo bằng heartbeat, bằng performance_schema và bằng <code>Seconds_Behind_Source</code> khác nhau thế nào theo thời gian? Áp dụng một <code>UPDATE</code> 6 triệu row trên replica chậm hơn bao nhiêu so với chạy trên primary?</td><td>Mở. E42.</td></tr>
+<tr><td>34</td><td><code>WAIT_FOR_EXECUTED_GTID_SET</code> có nhận thời gian chờ dưới 1 giây (số thập phân) trên 8.4 không, và nó tốn gì cho replica khi hàng nghìn session cùng chờ?</td><td>Mở. Biến thể của E41.</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- 11 -->
+<section id="s11">
+<header><span class="num">11</span><h2>Tài liệu tham khảo</h2></header>
+<div class="prose"><ul>
+<li>MySQL 8.4, <a href="https://dev.mysql.com/doc/refman/8.4/en/replication-semisync.html">Semisynchronous Replication</a> và <a href="https://dev.mysql.com/doc/refman/8.4/en/replication-semisync-interface.html">cấu hình semi-sync</a>: <code>AFTER_SYNC</code>, <code>AFTER_COMMIT</code>, chuyển về async khi hết thời gian chờ</li>
+<li>MySQL 8.4, <a href="https://dev.mysql.com/doc/refman/8.4/en/replication-options-source.html">biến của source</a>: <code>rpl_semi_sync_source_timeout</code> 10.000, <code>wait_point</code> <code>AFTER_SYNC</code>, <code>wait_for_replica_count</code> 1</li>
+<li>MySQL 8.4, <a href="https://dev.mysql.com/doc/refman/8.4/en/gtid-functions.html">GTID Functions</a>: <code>WAIT_FOR_EXECUTED_GTID_SET</code></li>
+<li>MySQL 8.4, <a href="https://dev.mysql.com/doc/refman/8.4/en/show-replica-status.html">SHOW REPLICA STATUS</a>: cách tính và giới hạn của <code>Seconds_Behind_Source</code></li>
+<li>MySQL 8.4, <a href="https://dev.mysql.com/doc/refman/8.4/en/replication-delayed.html">Delayed Replication</a>: <code>SOURCE_DELAY</code>, dấu thời gian commit, bảng performance_schema để đo độ trễ</li>
+<li>Mã nguồn MySQL 8.4: <code>sql/sys_vars.cc</code> (mặc định <code>replica_parallel_workers</code> 4, <code>replica_parallel_type</code> <code>LOGICAL_CLOCK</code>, <code>replica_preserve_commit_order</code> ON, <code>sync_binlog</code> 1, <code>session_track_gtids</code>); <code>storage/perfschema</code> (tên cột)</li>
+<li>mysql2 3.24.6, <code>lib/packets/resultset_header.js</code>: <code>stateChanges.gtids</code></li>
+<li>PostgreSQL, <a href="https://www.postgresql.org/docs/current/runtime-config-wal.html">synchronous_commit</a>: <code>remote_apply</code></li>
+<li>Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, chương 5 (read-your-writes, monotonic reads)</li>
+</ul></div>
+<h3>Mức kiểm chứng</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>Khẳng định</th><th>Nguồn</th></tr></thead>
+<tbody>
+<tr><td><code>AFTER_SYNC</code>: mọi client thấy cùng lúc sau khi replica xác nhận; failover không mất. <code>AFTER_COMMIT</code>: client khác có thể thấy trước</td><td>manual 8.4</td></tr>
+<tr><td>Hết thời gian chờ thì chuyển về async; mặc định 10.000 ms</td><td>manual 8.4</td></tr>
+<tr><td>Các giá trị mặc định của applier và <code>sync_binlog</code></td><td>mã nguồn MySQL 8.4</td></tr>
+<tr><td><code>WAIT_FOR_EXECUTED_GTID_SET</code> trả 0 hoặc 1, thời gian chờ tính bằng giây</td><td>manual 8.4; chờ dưới 1 giây chưa thử (câu hỏi 34)</td></tr>
+<tr><td>mysql2 đưa GTID ra ở <code>stateChanges.gtids</code></td><td>mã nguồn mysql2 3.24.6; chưa chạy</td></tr>
+<tr><td>Hình dạng độ trễ khi có transaction lớn</td><td>mô hình hàng đợi; chưa đo (E42)</td></tr>
+<tr><td>Áp dụng trên replica có thể chậm hơn chạy trên primary</td><td>suy luận; chưa đo (câu hỏi 33)</td></tr>
+</tbody></table></div>
+</section>
+</main>
+
+</div>
+
+<script>
+const DEFS=`<defs><marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>`;
+function B(x,y,w,h,cls,t,sub){
+  const tx=x+w/2;
+  return `<g class="n ${cls||''}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="5"/>`+
+  `<text class="tb" x="${tx}" y="${y+(sub?h/2-8:h/2)}" text-anchor="middle" dominant-baseline="central">${t}</text>`+
+  (sub?`<text class="ts" x="${tx}" y="${y+h/2+10}" text-anchor="middle" dominant-baseline="central">${sub}</text>`:'')+`</g>`;
+}
+const A=(d,cls)=>`<path d="${d}" class="edge ${cls||''}" marker-end="url(#arw)"/>`;
+const T=(x,y,t,anchor,cls)=>`<text class="${cls||'lbl'}" x="${x}" y="${y}" text-anchor="${anchor||'start'}">${t}</text>`;
+const $=id=>document.getElementById(id);
+const vi=(n,d=0)=>Number(n).toLocaleString('vi-VN',{maximumFractionDigits:d});
+const num=(id,a,b,d)=>{let v=parseFloat($(id).value);return isNaN(v)?d:Math.max(a,Math.min(b,v));};
+
+/* ---------- 01: read-your-writes simulator ---------- */
+const READS=[100,400,900,1600,3000];
+function ry(){
+  const S=$('ryS').value,La=num('ryA',0,6e5,1200),Lb=num('ryB',0,6e5,150),Wn=num('ryW',0,6e5,2000),To=num('ryT',0,6e4,500);
+  const lag={A:La,B:Lb};
+  const res=READS.map((t,i)=>{
+    let srv,val,wait=0;
+    const rep=S==='sticky'?'A':(i%2===0?'A':'B');
+    if(S==='primary'){srv='P';val='new';}
+    else if(S==='window'&&t<Wn){srv='P';val='new';}
+    else if(S==='gtid'){const w=Math.max(0,lag[rep]-t);if(w<=To){srv=rep;val='new';wait=w;}else{srv='P';val='new';wait=To;}}
+    else{srv=rep;val=t>=lag[rep]?'new':'old';}
+    return {t,srv,val,wait};
+  });
+  const tmax=3500,X0=110,W=540,sx=t=>X0+Math.min(t,tmax)/tmax*W;
+  const lanes=[['Primary','P',0],['Replica A','A',La],['Replica B','B',Lb]];
+  let g='';
+  lanes.forEach(([name,k,l],i)=>{const y=24+i*50;g+=T(10,y+19,name,'start','t');
+    if(k==='P')g+=`<rect class="okbar" x="${X0}" y="${y}" width="${W}" height="28" rx="3"/>`;
+    else{g+=`<rect class="lagbar" x="${X0}" y="${y}" width="${Math.max(0,sx(l)-X0)}" height="28" rx="3"/>`;if(l<tmax)g+=`<rect class="okbar" x="${sx(l)}" y="${y}" width="${X0+W-sx(l)}" height="28" rx="3"/>`;}
+    res.forEach((r,j)=>{if(r.srv!==k)return;const cx=sx(r.t+r.wait);
+      if(r.wait>0)g+=`<line x1="${sx(r.t)}" y1="${y+14}" x2="${cx}" y2="${y+14}" stroke="var(--hot-line)" stroke-width="3"/>`;
+      g+=`<circle class="rd ${r.wait>0?'wait':r.val}" cx="${cx}" cy="${y+14}" r="11"/><text class="rdl" x="${cx}" y="${y+18}" text-anchor="middle">${j+1}</text>`;});
+  });
+  g+=`<line class="wmark" x1="${X0}" y1="16" x2="${X0}" y2="${24+3*50}"/>`+T(X0,14,'ghi','middle','ts');
+  [0,500,1000,1500,2000,2500,3000,3500].forEach(t=>g+=T(sx(t),190,vi(t/1000,1)+' s','middle','ts'));
+  $('rySvg').innerHTML=g;
+  const old=res.filter(r=>r.val==='old').length;
+  let back=false;for(let i=1;i<res.length;i++)if(res[i].val==='old'&&res.slice(0,i).some(r=>r.val==='new'))back=true;
+  const prim=res.filter(r=>r.srv==='P').length,maxW=Math.max(...res.map(r=>r.wait));
+  $('ryStats').innerHTML=[['Lần đọc thấy bản cũ',`${old} / 5`,old?'bad':'good'],['Đọc lùi thời gian',back?'có':'không',back?'bad':'good'],['Lần đọc về primary',`${prim} / 5`,prim>=4?'warn':''],['Chờ thêm lâu nhất',vi(maxW)+' ms',maxW>200?'warn':'']]
+    .map(([k,v,c])=>`<div class="stat"><span>${k}</span><b${c?` class="${c}"`:''}>${v}</b></div>`).join('');
+  const d={replica:'Mỗi lần đọc rơi vào replica tiếp theo. Lần đọc tới replica chưa có bản mới thấy bản cũ; xen kẽ hai replica trễ khác nhau làm người dùng thấy dữ liệu lùi thời gian.',
+    sticky:'Mọi lần đọc đi tới replica A. Người dùng không còn thấy dữ liệu lùi thời gian, nhưng vẫn thấy bản cũ cho tới khi A bắt kịp: monotonic reads có, read-your-writes chưa.',
+    window:`Trong ${vi(Wn)} ms sau lần ghi, mọi lần đọc đi primary. Đơn giản và đúng nếu mọi replica trễ ít hơn N. Nếu replica trễ hơn N, lần đọc sau cửa sổ lại thấy bản cũ.`,
+    gtid:`Lần đọc đi replica nhưng chờ replica áp dụng tới GTID của lần ghi, tối đa ${vi(To)} ms; quá hạn thì về primary. Luôn thấy bản mới; chỉ lần đọc sớm phải chờ, và primary chỉ nhận phần quá hạn.`,
+    primary:'Mọi lần đọc đi primary: luôn đúng, nhưng replica không còn giảm tải đọc nào cho người dùng này.'}[S];
+  $('ryDesc').textContent=d;
+  $('ryMeta').textContent=`A ${vi(La)} ms · B ${vi(Lb)} ms`;
+}
+['ryS','ryA','ryB','ryW','ryT'].forEach(id=>$(id).addEventListener('input',ry));ry();
+
+/* ---------- 02: replication pipeline stepper ---------- */
+const NODES={app:[10,20,'App'],prep:[150,20,'InnoDB'],bl:[290,20,'Binlog'],dump:[430,20,'Gửi binlog'],rcv:[150,140,'Receiver'],relay:[290,140,'Relay log'],apl:[430,140,'Applier'],rcm:[560,140,'Replica']};
+function pipeSteps(semi){
+  const S=[];const add=(t,d,on,extra)=>S.push(Object.assign({t,d,on},extra||{}));
+  add('App gửi COMMIT','Transaction đã ghi xong các row trong InnoDB. Giờ app gửi COMMIT. Chưa ai khác thấy thay đổi.',['app']);
+  add('InnoDB chuẩn bị (prepare)','Commit hai pha bắt đầu: InnoDB ghi trạng thái "đã chuẩn bị" vào redo log. Nếu server chết ngay lúc này, khi khởi động lại nó sẽ nhìn binlog để quyết định commit hay huỷ.',['app','prep']);
+  add('Ghi và fsync binlog','Transaction được ghi vào binlog và fsync xuống disk (sync_binlog = 1, mặc định). Từ đây transaction được coi là sẽ commit.',['prep','bl']);
+  if(semi){
+    add('Gửi sang replica','Luồng gửi binlog trên primary đẩy transaction sang replica.',['bl','dump','rcv'],{arrow:'send'});
+    add('Replica ghi relay log và xác nhận','Receiver trên replica ghi transaction vào relay log và gửi xác nhận về. Primary đang chờ đúng xác nhận này (AFTER_SYNC). Replica chưa áp dụng gì.',['rcv','relay'],{ack:true});
+    add('InnoDB commit, trả lời app','Có xác nhận, InnoDB commit. App nhận "OK". Mọi client trên primary thấy thay đổi cùng lúc, và nếu primary chết bây giờ, transaction đã nằm an toàn trong relay log của replica.',['prep','app'],{visP:true});
+    add('Applier áp dụng lại','Applier đọc relay log và chạy lại thay đổi trên replica. Đây thường là chặng chậm nhất. Nếu app đọc replica lúc này, nó vẫn thấy bản cũ, dù commit đã trả về.',['relay','apl'],{visP:true,stale:true});
+    add('Replica commit: giờ mới thấy','Replica commit theo đúng thứ tự của primary. Từ lúc này, đọc trên replica mới thấy bản mới. Semi-sync không rút ngắn chặng này.',['apl','rcm'],{visP:true,visR:true});
+  }else{
+    add('InnoDB commit, trả lời app','InnoDB commit. App nhận "OK" ngay. Với async, primary không chờ replica.',['prep','app'],{visP:true});
+    add('Gửi sang replica, không chờ','Luồng gửi binlog đẩy transaction sang replica. Việc này có thể xảy ra trước hoặc sau lúc app nhận OK; primary không chờ nó. Nếu primary chết trước khi replica nhận được, transaction đã báo OK cho app nhưng không tồn tại trên replica: failover sẽ mất nó.',['bl','dump','rcv'],{visP:true,arrow:'send',risk:true});
+    add('Replica ghi relay log','Receiver ghi transaction vào relay log.',['rcv','relay'],{visP:true});
+    add('Applier áp dụng lại','Applier chạy lại thay đổi. Trong lúc này, đọc trên replica vẫn thấy bản cũ.',['relay','apl'],{visP:true,stale:true});
+    add('Replica commit: giờ mới thấy','Replica commit theo đúng thứ tự. Độ trễ replica là tổng thời gian từ bước 4 tới đây.',['apl','rcm'],{visP:true,visR:true});
+  }
+  return S;
+}
+(function(){
+  const el=$('pipe');
+  el.innerHTML=`<div class="ph"><strong>Một transaction đi từ primary tới replica</strong><span class="meta"></span></div><div class="bd">
+  <div class="calc"><label class="chk"><input type="checkbox" id="ppSemi">Semi-sync AFTER_SYNC</label></div>
+  <h4 class="st-t"></h4><svg viewBox="0 0 680 240" role="img"></svg>
+  <div class="desc" aria-live="polite"><div class="st-d"></div><pre hidden></pre></div>
+  <div class="nav"><button data-d="-1">Trước</button><button data-d="1" class="primary">Tiếp</button></div>
+  <div class="legend"><span><i class="lg-path"></i>chặng đang chạy</span><span><i class="lg-row"></i>thay đổi đã thấy được</span><span><i class="lg-miss"></i>chưa thấy, hoặc có thể mất</span><span><i class="lg-key"></i>xác nhận của semi-sync</span></div></div>`;
+  const svg=el.querySelector('svg'),t=el.querySelector('.st-t'),d=el.querySelector('.st-d'),pre=el.querySelector('pre'),meta=el.querySelector('.meta');
+  const [pv,nx]=el.querySelectorAll('.nav button');let i=0,steps=pipeSteps(false);
+  function draw(s){
+    let g=T(10,14,'Primary','start','tb')+T(10,134,'Replica','start','tb');
+    for(const [k,[x,y,name]] of Object.entries(NODES)){
+      let cls=s.on.includes(k)?'path':'dim';
+      if(k==='app'&&s.visP)cls='row';
+      if(k==='rcm')cls=s.visR?'row':(s.stale?'miss':cls);
+      g+=B(x,y+6,112,46,cls,name);
+    }
+    const c=k=>[NODES[k][0]+56,NODES[k][1]+29];
+    [['app','prep'],['prep','bl'],['bl','dump'],['rcv','relay'],['relay','apl'],['apl','rcm']].forEach(([a,b])=>{const p=c(a),q=c(b);g+=A(`M${p[0]+56} ${p[1]} L${q[0]-58} ${q[1]}`,s.on.includes(a)&&s.on.includes(b)?'on':'');});
+    g+=A(`M${c('dump')[0]} ${c('dump')[1]+23} C${c('dump')[0]} 110 ${c('rcv')[0]} 110 ${c('rcv')[0]} ${c('rcv')[1]-25}`,s.arrow==='send'?'on':'');
+    if(s.ack)g+=A(`M${c('relay')[0]+20} ${c('relay')[1]-25} C${c('relay')[0]+60} 100 ${c('bl')[0]+40} 100 ${c('bl')[0]+30} ${c('bl')[1]+25}`,'key')+T(c('relay')[0]+70,104,'xác nhận','start','ts');
+    if(s.risk)g+=T(340,224,'Primary chết lúc này: app đã nhận OK, replica chưa có gì','middle','tb');
+    if(s.stale)g+=T(340,224,'Đọc trên replica lúc này: bản cũ','middle','tb');
+    return DEFS+g;
+  }
+  function render(){const s=steps[i];svg.innerHTML=draw(s);svg.setAttribute('aria-label',s.t);t.textContent=s.t;d.textContent=s.d;
+    pre.hidden=true;meta.textContent=`bước ${i+1} / ${steps.length}`;pv.disabled=i===0;nx.disabled=i===steps.length-1;}
+  const go=k=>{i=Math.max(0,Math.min(steps.length-1,i+k));render();};
+  pv.onclick=()=>go(-1);nx.onclick=()=>go(1);
+  $('ppSemi').onchange=()=>{steps=pipeSteps($('ppSemi').checked);i=0;render();};
+  el.tabIndex=0;el.addEventListener('keydown',e=>{if(e.target.closest('select,input'))return;if(e.key==='ArrowRight')go(1);if(e.key==='ArrowLeft')go(-1);});
+  render();
+})();
+
+/* ---------- 02: lag model ---------- */
+function lg(){
+  const rho=num('lgR',1,150,60)/100,D=num('lgD',0,3600,120),N=Math.round(num('lgN',1,1e4,1));
+  const T0=60,spread=N>1?2*D:0,drain=rho<1?D/(1-rho):Infinity;
+  const tEnd=Math.min(T0+spread+(rho<1?Math.max(D,D*rho/(1-rho))+D:600)+60,4000);
+  const dt=Math.max(0.5,tEnd/400);let Q=0,maxQ=0,tMax=0;const pts=[];
+  for(let t=0;t<=tEnd;t+=dt){
+    Q+=rho*dt;
+    if(N===1){if(t<=T0&&t+dt>T0)Q+=D;}
+    else if(t>=T0&&t<T0+spread){Q+=D/spread*dt;}
+    Q=Math.max(0,Q-dt);
+    if(Q>maxQ){maxQ=Q;tMax=t;}
+    pts.push([t,Q]);
+  }
+  const X0=60,W=590,top=12,H=160,ymax=Math.max(5,maxQ)*1.1;
+  const sx=t=>X0+t/tEnd*W,sy=v=>top+H-v/ymax*H;
+  let g=`<line class="axis" x1="${X0}" y1="${top+H}" x2="${X0+W}" y2="${top+H}"/><line class="axis" x1="${X0}" y1="${top}" x2="${X0}" y2="${top+H}"/>`;
+  g+=T(X0-6,top+8,fmtS(ymax),'end','ts')+T(X0-6,top+H,'0','end','ts');
+  for(let k=0;k<=5;k++){const t=tEnd*k/5;g+=T(sx(t),top+H+16,fmtS(t),'middle','ts');}
+  let a=`M${sx(0)} ${sy(0)}`;pts.forEach(([t,q])=>a+=`L${sx(t).toFixed(1)} ${sy(q).toFixed(1)}`);
+  g+=`<path class="area" d="${a}L${sx(tEnd)} ${sy(0)}Z" opacity=".6"/><path class="curve" d="${a.replace(/^M[^L]*/,'M'+sx(0)+' '+sy(0))}"/>`;
+  g+=`<line class="gridl" x1="${sx(T0)}" y1="${top}" x2="${sx(T0)}" y2="${top+H}"/>`+T(sx(T0)+4,top+12,N>1?'bắt đầu các lô':'transaction lớn commit','start','ts');
+  $('lgSvg').innerHTML=g;
+  $('lgStats').innerHTML=[['Độ trễ lớn nhất',fmtS(maxQ),maxQ>60?'bad':maxQ>5?'warn':'good'],['Lúc đạt đỉnh',`giây ${vi(tMax)}`,''],['Thời gian để về 0',rho<1?fmtS(N>1?Math.max(0,maxQ/(1-rho)):drain):'không bao giờ',rho>=1?'bad':'']]
+    .map(([k,v,c])=>`<div class="stat"><span>${k}</span><b${c?` class="${c}"`:''}>${v}</b></div>`).join('');
+  $('lgDesc').textContent=rho>=1?`Tải ghi bình thường đã vượt sức applier (${vi(rho*100)}%): độ trễ tăng mãi, không cần transaction lớn nào.`
+    :N===1?`Lúc transaction lớn commit, applier nhận thêm ${fmtS(D)} công việc. Một lần ghi mới phải chờ khoảng ${fmtS(maxQ)}. Applier chỉ rút bớt hàng đợi với tốc độ ${vi((1-rho)*100)}% sức của nó (phần còn lại dành cho tải bình thường), nên cần khoảng ${fmtS(drain)} để về 0.`
+    :`Chia thành ${vi(N)} lô rải trong ${fmtS(spread)}: mỗi lô chỉ thêm ${fmtS(D/N)} công việc, và tổng tải lúc chạy là ${vi((rho+0.5)*100)}% sức applier. Độ trễ lớn nhất còn ${fmtS(maxQ)}.`+(rho+0.5>=1?' Tổng tải vẫn vượt 100% nên hàng đợi vẫn tăng trong lúc chạy; cần rải dài hơn hoặc giảm tốc theo độ trễ.':'');
+  $('lgMeta').textContent=`tải ${vi(rho*100)}%`;
+}
+function fmtS(s){return s>=120?vi(s/60,1)+' phút':vi(s,s<10?1:0)+' giây';}
+['lgR','lgD','lgN'].forEach(id=>$(id).addEventListener('input',lg));lg();
+</script>
+</body>
+</html>

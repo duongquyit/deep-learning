@@ -810,6 +810,13 @@ footer.page-foot a{color:var(--text-1)}
   "sessions": [
     {
       "date": "2026-10-20",
+      "title": "Replication and read-your-writes",
+      "artifact": "../topics/replication-read-your-writes/index.html",
+      "planned": false,
+      "feeds": "Month 3"
+    },
+    {
+      "date": "2026-10-20",
       "title": "Caching and invalidation",
       "artifact": "../topics/caching-invalidation/index.html",
       "planned": false,
@@ -948,6 +955,12 @@ footer.page-foot a{color:var(--text-1)}
       "date": "2026-10-20",
       "work": "Caching and invalidation (cache patterns, write-path races, version/lease, stampede, jitter, hit ratio, Redis eviction) — documentation only, written ahead of Month 5; no measurements",
       "artifact": "topics/caching-invalidation",
+      "feeds": "Month 5"
+    },
+    {
+      "date": "2026-10-20",
+      "work": "Replication and read-your-writes (binlog pipeline, async vs semi-sync, lag sources and measurement, GTID-based read-your-writes, monotonic reads) — documentation only, written ahead of Month 5; no measurements",
+      "artifact": "topics/replication-read-your-writes",
       "feeds": "Month 5"
     }
   ],
@@ -1380,10 +1393,38 @@ footer.page-foot a{color:var(--text-1)}
         "provisional": true,
         "evidence": "same, §02",
         "date": "2026-10-20"
+      },
+      {
+        "topic": "MySQL replication pipeline (two-phase commit with binlog, receiver, relay log, parallel applier, commit order) and where lag comes from",
+        "level": 2,
+        "provisional": true,
+        "evidence": "replication-read-your-writes §02",
+        "date": "2026-10-20"
+      },
+      {
+        "topic": "Async vs semi-sync (AFTER_SYNC, AFTER_COMMIT): commit latency, failover data loss, fallback to async on timeout",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §02–§03",
+        "date": "2026-10-20"
+      },
+      {
+        "topic": "Read-your-writes and monotonic reads: primary window, GTID wait (session_track_gtids, WAIT_FOR_EXECUTED_GTID_SET), sticky replicas",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §01–§02, §04",
+        "date": "2026-10-20"
+      },
+      {
+        "topic": "Measuring replication lag correctly (performance_schema timestamps, heartbeat, limits of Seconds_Behind_Source)",
+        "level": 2,
+        "provisional": true,
+        "evidence": "same, §02, §04",
+        "date": "2026-10-20"
       }
     ],
     "levels": {
-      "2": 56,
+      "2": 60,
       "1": 2
     }
   }
