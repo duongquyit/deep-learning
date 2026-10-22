@@ -105,6 +105,9 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 | Offset pagination cost (entries read = OFFSET + LIMIT, PRIMARY lookups per skipped row), deferred join, page drift under concurrent writes | 2 (prov.) | [pagination-keyset](../topics/pagination-keyset/index.html) §01–§02 | 2026-10-22 | Exercise E52 on 5M rows, cold and warm; E54 for drift |
 | Keyset pagination on MySQL: total order with a tie-breaker, expanded `OR` form vs row constructor, index matching equality filters then sort columns | 2 (prov.) | same, §02, §04 | 2026-10-22 | Exercise E53 on 8.4; then convert one list endpoint at work and show `EXPLAIN` before and after |
 | Cursor API design: opaque cursor bound to sort and filter, `LIMIT n + 1`, previous page, totals (capped counts, count tables); snapshots for mutable sort keys | 2 (prov.) | same, §02–§03, §06 | 2026-10-22 | Implement the cursor endpoint in the Month 2 lab service with tests for ties and mismatched cursors |
+| Risk-based test strategy: unit for pure logic, integration on a real MySQL for anything that touches SQL, concurrency tests for invariants, thin HTTP tests for contracts; what mocks and SQLite miss | 2 (prov.) | [test-strategy-real-db](../topics/test-strategy-real-db/index.html) §01–§03 | 2026-10-22 | Exercise E55; then map last quarter's production incidents at work to the test that should have caught each |
+| MySQL in a container for tests: Testcontainers, migrations once per worker, per-worker databases, isolation strategies (rollback, DELETE, TRUNCATE, new database, unique data) and the implicit-commit trap | 2 (prov.) | same, §02, §04 | 2026-10-22 | Exercise E56; then set up the Month 2 lab's CI on a real MySQL (Month 2 deliverable) |
+| Testing invariants under concurrency: barriers, enough connections, repetition vs deterministic interleaving with `data_lock_waits`, proving a test can fail with a deliberate violation | 2 (prov.) | same, §02, §04 | 2026-10-22 | Exercise E57 *(Month 2 exit criterion: tests catch a deliberately introduced invariant violation)* |
 
 "(prov.)" = provisional. Every row above rests on one artifact I wrote myself, with no measurement behind it. Week 1 of Month 1 includes a baseline assessment (TECHNICAL_GROWTH.md Section 11) that should confirm or cut these.
 
@@ -154,6 +157,8 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 42. NestJS 12's `StandardSchemaValidationPipe` with Zod vs class-validator: what do the error messages look like, how does coercion differ, and does switching break the error contract if codes are already mapped?
 43. On MySQL 8.4, does the range optimizer use `(created_at, id) < (?, ?)`, even when it matches the prefix of an index `(created_at, id)` exactly? Claude's sandbox (8.0.46) says no: 99,020 entries read instead of 19. E53.
 44. On the sandbox, the same `WHERE user_id = 7 ORDER BY created_at DESC, id DESC LIMIT 20` without `FORCE INDEX` took about 4–6 ms and about 11,000 buffer-pool page reads, against 0.3 ms with `FORCE INDEX`, although `EXPLAIN` shows the same plan. Where does the extra work go? The optimizer trace shows the access path reconsidered for `ORDER BY`; recheck on 8.4.
+45. On the lab, how long does a `mysql:8.4` container take to accept connections, and how much does tmpfs plus `innodb_flush_log_at_trx_commit = 2` cut from the suite's wall time compared with the default configuration? E56.
+46. Testcontainers `withReuse()` keeps a container keyed by a hash of its create options (read in the 12.2.1 source). When switching between branches with different migrations, is reusing it safe, and how does the suite know the schema matches the current branch?
 
 ## Pending verification (from the session's own exercise list)
 
@@ -242,8 +247,41 @@ These are written in the page as exercises; none have been run yet.
 - **E54** — Paging through 10,000 orders while another script inserts and deletes 5 per second: duplicates and misses for offset, keyset with a tie-breaker, and keyset on a non-unique timestamp.
 - **Q107–Q112** — The six recall questions in section 08 of the pagination page.
 - **C34–C36** — The three real-world cases in section 09 of the pagination page (a 5M-row CSV export with offset taking 6 hours and producing duplicates, a feed sorted by a changing score, an admin screen that wants exact totals and page jumps). Solve in writing before opening the answers.
+- **E55** — The seven situations of the page's section 02 table as tests with a mocked repository, on SQLite, and on MySQL 8.4 in a container: which go red.
+- **E56** — Container start time and suite wall time for five isolation strategies, with and without tmpfs and relaxed durability.
+- **E57** — Three deliberate invariant violations against a barrier-based concurrency test and a deterministic-interleaving test: which go red, how often. *(Month 2 exit criterion.)*
+- **Q113–Q118** — The six recall questions in section 08 of the test strategy page.
+- **C37–C39** — The three real-world cases in section 09 of the test strategy page (a 25-minute CI and a proposal to mock every repository, a sequential "concurrency" test that let a show oversell, an unreproduced double-spend from a stalled BullMQ job). Solve in writing before opening the answers.
 - **Q11–Q16** — The six recall questions in section 08 of the composite-index page (answers are on the page, hidden).
 - **Q1–Q5** — The five check questions at the end of the page (leftmost prefix, `COUNT(*)` and the visibility map, full scan polluting the cache, TOAST, a `sessions` table updated 5,000×/sec). Answer in writing before looking anything up, then verify.
+
+---
+
+## 2026-10-22 — Test strategy with a real MySQL
+
+**Topic and objective.** Month 2 topic, written ahead as documentation only (Phase 2 of the documentation plan, 5 of 5): choose test types by risk, list the failures that mocks and SQLite cannot see, run a real MySQL in a container for tests, isolate data between tests, and write concurrency tests that can actually fail.
+
+**Output.** [topics/test-strategy-real-db/index.html](../topics/test-strategy-real-db/index.html) — 11 sections, including section 09 with cases C37–C39. Widgets: a suite coverage matrix (five test types × ten bugs, with an estimated CI time); a stepper of the rollback-per-test trap when the code opens its own transaction; an isolation-cost calculator (five strategies, tests, tables, workers); a race-reproduction calculator (requests, read-write gap, start jitter → probability per run and runs needed for 99%). Prediction templates for E55–E57.
+
+**What it covers.**
+
+- Run in Claude's sandbox (MySQL 8.0.46, default `sql_mode` and collation; not the lab): 1062 on a case-insensitive duplicate email, 1406 on a too-long value, 3819 on a CHECK violation, 1055 under ONLY_FULL_GROUP_BY, and a nested `START TRANSACTION` committing the outer transaction so the final `ROLLBACK` removes nothing; `SUM(bigint)` as `DECIMAL`.
+- Isolation costs measured on the sandbox with mysql2 (10 tables, 20 rows each, 30 iterations, default durability): rollback about 0, `DELETE` about 0.7 ms per table, `TRUNCATE` about 10.6 ms per table, a new database with 10 tables about 118 ms, unique data 0.
+- Testcontainers 12.2.1 source: the MySQL module requires an image, defaults to database/user/password `test` and a 120 s startup timeout; `withReuse` keys on a hash of the create options.
+- Concurrency tests: barrier, enough pool connections, repetition maths (uniform-spacing model), deterministic interleaving via `performance_schema.data_lock_waits`, mutation patches that must turn tests red.
+- SQLite behaviour (BINARY collation, unenforced `VARCHAR` length, nested BEGIN error) is from the SQLite documentation, not run.
+
+**Initial understanding.** TODO — what did I believe about testing against a database before this page? No prior belief was stated in the session.
+
+**Mistakes and misconceptions corrected.** TODO — only I know which. Traps the page writes down: high coverage means few bugs; SQLite is close enough to MySQL; rollback per test is always safe; a concurrency test that passed once is enough; tests against a real database are too slow.
+
+**Experiments and results.** None on the lab. The sandbox runs above are examples, not evidence for a level; E55–E57 need Docker on the lab. E57 is the Month 2 exit criterion.
+
+**Competency level.** Level 2 provisional on three new matrix rows.
+
+**Remaining questions.** Open questions 45 and 46.
+
+**Next step.** Phase 2 of the documentation plan is complete. Next: Phase 4 (Month 4), starting with `online-schema-migration`; or the pending rewrites of the three oldest pages.
 
 ---
 

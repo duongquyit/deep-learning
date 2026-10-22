@@ -1,0 +1,1037 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Chiến lược test và MySQL thật</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F2F4F6; --surface:#FFFFFF; --ink:#18203A; --ink-2:#56607A; --ink-3:#8A93A8;
+  --rule:#CCD3DD; --rule-strong:#8C96AB;
+  --struct:#3446B8; --struct-bg:#E6E9FA;            /* cấu trúc index, chrome của trang */
+  --row:#16795F;    --row-bg:#DDF2EA;               /* dữ liệu row thật */
+  --hot:#9A5F00;    --hot-bg:#FCEFD2; --hot-line:#E3A21A;  /* bị ghi, bị chạm, bị lọc */
+  --miss:#B5302B;   --miss-bg:#FBE1DF;              /* đọc từ disk, việc thừa, lỗi */
+  --path:#0B7A8A;   --path-bg:#D8F1F3;              /* đường đi hoặc khoảng đang đọc */
+  --key:#A8327A;    --key-bg:#F8E0EE;               /* con trỏ: PK, TID */
+  --ram:#5B4BB0;    --ram-bg:#E7E3FA;               /* hit trong buffer pool */
+  --grid:rgba(52,70,184,.06);
+  --r-s:4px; --r-m:8px;
+  --sans:"Instrument Sans",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --paper:#0F1320; --surface:#171C2B; --ink:#E6E9F2; --ink-2:#A3ABC0; --ink-3:#6E7790;
+  --rule:#2C3448; --rule-strong:#55607A;
+  --struct:#97A3FF; --struct-bg:#232A55;
+  --row:#5FD0AE;    --row-bg:#123A31;
+  --hot:#F2BE5C;    --hot-bg:#3B2C0E; --hot-line:#E3A21A;
+  --miss:#FF8A84;   --miss-bg:#3E1A1A;
+  --path:#5ED3E0;   --path-bg:#113A40;
+  --key:#F28DC4;    --key-bg:#3E1A2E;
+  --ram:#B7A8FF;    --ram-bg:#2A2350;
+  --grid:rgba(151,163,255,.05);
+}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important;animation:none!important}}
+body{margin:0;color:var(--ink);font:400 17px/1.65 var(--sans);
+  background-color:var(--paper);
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:24px 24px}
+a{color:var(--struct)}
+:focus-visible{outline:2px solid var(--struct);outline-offset:2px}
+
+/* layout */
+.shell{display:grid;grid-template-columns:230px minmax(0,1fr);gap:56px;max-width:1180px;margin:0 auto;padding:0 32px}
+nav.toc{position:sticky;top:0;align-self:start;height:100vh;padding:48px 0;overflow:auto}
+nav.toc p{font-weight:600;margin:0 0 12px;font-size:15px}
+nav.toc ol,.mobile-toc ol{list-style:none;margin:0;padding:0;counter-reset:s}
+nav.toc li,.mobile-toc li{counter-increment:s;margin:0}
+nav.toc a,.mobile-toc a{display:grid;grid-template-columns:28px 1fr;padding:5px 0;color:var(--ink-2);text-decoration:none;font-size:14.5px;line-height:1.4}
+nav.toc a::before,.mobile-toc a::before{content:counter(s,decimal-leading-zero);font:500 12px/1.9 var(--mono);color:var(--ink-3)}
+nav.toc a:hover,nav.toc a.on{color:var(--struct)}
+main{min-width:0;padding:56px 0 120px}
+.prose{max-width:720px}
+section{padding-top:72px}
+section>header{display:grid;grid-template-columns:auto 1fr;gap:0 18px;align-items:baseline;max-width:720px;margin-bottom:12px}
+section>header .num{font:500 15px var(--mono);color:var(--struct);border:1.5px solid var(--struct);border-radius:var(--r-s);padding:2px 7px;transform:translateY(-4px)}
+h1,h2,h3,h4{line-height:1.2;letter-spacing:-.015em;margin:0}
+h1{font-size:clamp(2.3rem,5.4vw,3.9rem);font-weight:700;letter-spacing:-.03em;line-height:1.02;max-width:14ch;margin-bottom:20px}
+.lede{font-size:19px;color:var(--ink-2);max-width:56ch;margin-bottom:28px}
+h2{font-size:clamp(1.6rem,3vw,2.1rem);font-weight:650}
+h3{font-size:1.2rem;font-weight:600;margin:36px 0 8px}
+p{margin:0 0 14px}
+ul,ol.list{margin:0 0 16px;padding-left:22px}
+li{margin:4px 0}
+code{font:0.88em var(--mono);background:var(--struct-bg);color:var(--ink);padding:1px 5px;border-radius:3px}
+pre{font:13.5px/1.6 var(--mono);background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:var(--r-s);padding:14px 16px;overflow-x:auto;margin:0 0 18px;max-width:720px}
+pre code{background:none;padding:0}
+.tablewrap{overflow-x:auto;max-width:720px;margin:0 0 20px}
+table{border-collapse:collapse;width:100%;max-width:720px;margin:0 0 20px;font-size:15px;background:var(--surface)}
+.tablewrap table{margin:0;min-width:560px}
+th,td{text-align:left;padding:9px 12px;border:1px solid var(--rule);vertical-align:top}
+th{font-weight:600;background:var(--struct-bg)}
+
+/* widget frame: styled like a page, header strip = page header */
+.frame{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);margin:22px 0 28px;max-width:920px;overflow:hidden}
+.frame>.ph{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:9px 16px;border-bottom:1px solid var(--rule);background:var(--struct-bg);font-size:14px}
+.frame>.ph strong{font-weight:600}
+.frame>.ph .meta{margin-left:auto;font:500 12.5px var(--mono);color:var(--ink-2)}
+.frame .bd{padding:16px;min-width:0}
+.frame svg{display:block;width:100%;height:auto}
+.st-t{font:600 16px var(--sans);margin:0 0 8px}
+.desc{background:var(--paper);border-radius:var(--r-s);padding:12px 14px;margin-top:12px;min-height:84px;font-size:15.5px;color:var(--ink-2)}
+.desc pre{margin:10px 0 0;font-size:12.5px;border-left-color:var(--rule-strong)}
+.nav{display:flex;gap:8px;margin-top:12px;align-items:center}
+button{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 14px;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--struct);color:var(--struct)}
+button:disabled{opacity:.4;cursor:default}
+button.primary,button[aria-pressed="true"]{background:var(--struct);border-color:var(--struct);color:var(--surface)}
+button.primary:hover:not(:disabled),button[aria-pressed="true"]:hover{color:var(--surface);filter:brightness(1.1)}
+input,select{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 10px}
+input[type=number]{width:84px}
+input[type=range],input[type=checkbox]{accent-color:var(--struct)}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-top:12px}
+.stat{background:var(--paper);border-radius:var(--r-s);padding:8px 12px}
+.stat span{display:block;font-size:13px;color:var(--ink-2)}
+.stat b{font:600 20px var(--sans);font-variant-numeric:tabular-nums}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;color:var(--ink-2);margin-top:12px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:14px;height:14px;border-radius:3px;border:2px solid;display:inline-block}
+.fine{font-size:13.5px;color:var(--ink-2);margin:10px 0 0}  /* chú thích nhỏ dưới widget */
+
+/* svg text */
+.tb{font:600 14px var(--sans)} .t{font:400 13px var(--sans)} .ts{font:400 12px var(--sans)} .tm{font:500 12.5px var(--mono)}
+.lbl{fill:var(--ink-2);font:400 12.5px var(--sans)}
+
+/* callouts */
+.note{border-left:3px solid var(--hot-line);background:var(--hot-bg);padding:12px 16px;border-radius:0 var(--r-s) var(--r-s) 0;margin:18px 0;max-width:720px;font-size:16px}
+.note strong{color:var(--hot)}
+.senior{border:1.5px solid var(--struct);border-radius:var(--r-m);padding:14px 18px;margin:22px 0;max-width:720px;background:var(--surface)}
+.senior h4{font-size:16px;margin-bottom:6px;color:var(--struct)}
+.senior p:last-child,.senior ul:last-child{margin-bottom:0}
+details{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-s);padding:10px 14px;margin:10px 0;max-width:720px}
+details summary{cursor:pointer;font-weight:600}
+details[open] summary{margin-bottom:8px}
+details.answer{background:var(--paper);border-style:dashed;margin:10px 0 0}
+details.answer summary{font-weight:500;color:var(--struct)}
+.tag{display:inline-block;font:500 12px var(--sans);color:var(--ink-2);border:1px solid var(--rule-strong);border-radius:999px;padding:0 8px;margin-right:6px;vertical-align:1px}
+
+/* hero brief: mục tiêu, cần biết trước, trạng thái */
+.brief{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px 24px;background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);padding:14px 18px;max-width:920px;margin:0 0 8px;font-size:15px}
+.brief h4{font-size:14px;color:var(--struct);margin:0 0 4px}
+.brief ul{margin:0;padding-left:18px}
+.brief p{margin:0}
+
+.mobile-toc{display:none}
+@media (max-width:900px){
+  .shell{grid-template-columns:1fr;padding:0 16px;gap:0}
+  nav.toc{display:none}
+  .mobile-toc{display:block;margin-top:20px}
+  main{padding-top:32px}
+  .frame .bd{padding:12px}
+  body{font-size:16px}
+}
+
+
+/* ---- page widgets ---- */
+.n rect{fill:var(--surface);stroke:var(--rule-strong);stroke-width:1}
+.n text{fill:var(--ink)}
+.n.struct rect{fill:var(--struct-bg);stroke:var(--struct)} .n.struct text{fill:var(--struct)}
+.n.row rect{fill:var(--row-bg);stroke:var(--row);stroke-width:1.6} .n.row text{fill:var(--row)}
+.n.hot rect{fill:var(--hot-bg);stroke:var(--hot);stroke-width:2} .n.hot text{fill:var(--hot)}
+.n.miss rect{fill:var(--miss-bg);stroke:var(--miss);stroke-width:2} .n.miss text{fill:var(--miss)}
+.n.path rect{fill:var(--path-bg);stroke:var(--path);stroke-width:2.4} .n.path text{fill:var(--path)}
+.n.key rect{fill:var(--key-bg);stroke:var(--key);stroke-width:2} .n.key text{fill:var(--key)}
+.n.dim rect{fill:var(--paper);stroke:var(--rule)} .n.dim text{fill:var(--ink-3)}
+.edge{stroke:var(--rule-strong);stroke-width:1.2;fill:none}
+.edge.on{stroke:var(--path);stroke-width:2.6}
+.lg-path{border-color:var(--path);background:var(--path-bg)} .lg-row{border-color:var(--row);background:var(--row-bg)}
+.lg-miss{border-color:var(--miss);background:var(--miss-bg)} .lg-hot{border-color:var(--hot);background:var(--hot-bg)}
+.calc{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px 14px;margin-bottom:12px}
+.calc label{display:flex;flex-direction:column;gap:4px;font-size:13.5px;color:var(--ink-2)}
+.calc label.chk{flex-direction:row;align-items:center;gap:8px}
+.calc input[type=text]{width:100%}
+.stat b.bad{color:var(--miss)} .stat b.good{color:var(--row)}
+.log{font:12.5px/1.6 var(--mono);background:var(--paper);border-radius:var(--r-s);padding:8px 12px;margin:10px 0 0;min-height:60px;list-style:none}
+.log li{margin:0}
+.btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.chks{display:flex;flex-direction:column;gap:6px;margin:0 0 12px;font-size:14px;color:var(--ink-2)}
+.chks label{display:flex;gap:8px;align-items:flex-start}
+.chks input{margin-top:4px}
+.calc select{max-width:100%}
+.frame .tablewrap{max-width:none}
+.mx td{font-size:14.5px}
+.mx tr.ok td:nth-child(2){background:var(--row-bg);color:var(--row);font-weight:600}
+.mx tr.warn td:nth-child(2){background:var(--hot-bg);color:var(--hot);font-weight:600}
+.mx tr.bad td:nth-child(2){background:var(--miss-bg);color:var(--miss);font-weight:600}
+.mx tr.sel td{background:var(--path-bg);font-weight:600}
+.axis{stroke:var(--rule-strong);stroke-width:1}
+.tick{stroke:var(--struct);stroke-width:1.5;stroke-dasharray:3 3}
+.curve{fill:none;stroke:var(--path);stroke-width:2.6}
+.frame .stats + .tablewrap{margin-top:12px}
+/* bài toán thực tế: dạng phỏng vấn */
+.case{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:0 var(--r-m) var(--r-m) 0;padding:16px 20px;margin:22px 0;max-width:720px}
+.case>h3{margin:0 0 6px;font-size:1.15rem}
+.case .src{font-size:13.5px;color:var(--ink-2);margin:0 0 12px}
+.case .ctx{background:var(--paper);border:1px solid var(--rule);border-radius:var(--r-m);padding:10px 14px;margin:8px 0 0;font-size:15px}
+.case .ctx-h{margin:0 0 4px;font-weight:600;color:var(--struct)}
+.case .ctx ul{margin:0;padding-left:20px}
+.case .ctx li{margin:2px 0}
+.case .q{margin:10px 0 4px;padding:8px 0 8px 14px;border-left:3px solid var(--key);font-size:1.06rem;font-weight:500;color:var(--ink);max-width:none}
+.case details{max-width:none;margin:12px 0 0}
+.case details.answer[open]{background:var(--surface)}
+.case details.clar>summary,.case details.rubric>summary{color:var(--key)}
+.case .fu{margin:18px 0 0;padding-top:14px;border-top:1px solid var(--rule)}
+.case .fq{margin:0;font-weight:500}
+.case .fq b{color:var(--struct);margin-right:4px}
+.ah{font-size:15.5px;color:var(--struct);margin:20px 0 6px}
+.answer .tablewrap{max-width:none}
+@media (max-width:900px){.case{padding:14px}}
+</style>
+</head>
+<body>
+
+<div class="shell">
+<nav class="toc" aria-label="Mục lục">
+  <p>Chiến lược test</p>
+  <ol>
+    <li><a href="#s1">Bản chất vấn đề</a></li>
+    <li><a href="#s2">Cơ chế hoạt động</a></li>
+    <li><a href="#s3">Vì sao thiết kế như vậy</a></li>
+    <li><a href="#s4">Ví dụ</a></li>
+    <li><a href="#s5">Thí nghiệm</a></li>
+    <li><a href="#s6">Ảnh hưởng khi chạy production</a></li>
+    <li><a href="#s7">Hiểu lầm thường gặp</a></li>
+    <li><a href="#s8">Câu hỏi ôn tập</a></li>
+    <li><a href="#s9">Bài toán thực tế</a></li>
+    <li><a href="#s10">Câu hỏi còn mở</a></li>
+    <li><a href="#s11">Tài liệu tham khảo</a></li>
+  </ol>
+</nav>
+
+<main>
+<div class="hero">
+<h1>Chiến lược test và MySQL thật</h1>
+<p class="lede">Bộ test phủ 92% dòng code, mọi repository đều được mock, và production vẫn hỏng vì email "An@x.com" trùng với "an@x.com". Mock chỉ trả lời điều bạn nghĩ database sẽ làm; MySQL thật trả lời điều nó làm. Bài này chọn loại test theo rủi ro, liệt kê những lỗi mà mock và SQLite không thấy (đã chạy thử trên MySQL), dựng MySQL thật trong container cho test, cô lập dữ liệu giữa các test với chi phí đã đo, và viết test bắt được lỗi đồng thời.</p>
+<div class="brief">
+  <div><h4>Mục tiêu</h4><ul>
+    <li>Chọn loại test theo rủi ro: logic thuần, SQL, đồng thời, hợp đồng HTTP; nói được mỗi loại bắt lỗi gì và bỏ sót lỗi gì.</li>
+    <li>Kể được ít nhất năm lỗi mà mock hay SQLite không bắt được nhưng MySQL thật bắt được, kèm mã lỗi.</li>
+    <li>Dựng MySQL trong container cho bộ test và chọn cách cô lập dữ liệu giữa các test theo chi phí và giới hạn của từng cách.</li>
+    <li>Viết test chứng minh một bất biến giữ được khi có nhiều request song song, và cho thấy nó đỏ khi bất biến bị phá cố ý.</li>
+  </ul></div>
+  <div><h4>Cần biết trước</h4><ul>
+    <li><a href="../layering-business-invariants/index.html">Phân tầng và bất biến</a>: bất biến, ranh giới transaction.</li>
+    <li><a href="../concurrency-control-strategies/index.html">Kiểm soát ghi đồng thời</a>: check-then-act, lost update.</li>
+    <li><a href="../validation-error-contracts/index.html">Validation và hợp đồng lỗi</a>: test hợp đồng lỗi.</li>
+  </ul></div>
+  <div><h4>Trạng thái</h4><p>Level 2 (prov.). Các lỗi trong bảng phần 02 và chi phí của từng cách cô lập dữ liệu chạy thật trên sandbox của Claude (MySQL 8.0.46, mysql2 3.24.6, Node 22). Chưa chạy trong container trên lab (E55–E57).</p></div>
+</div>
+<details class="mobile-toc"><summary>Mục lục</summary><ol><li><a href="#s1">Bản chất vấn đề</a></li><li><a href="#s2">Cơ chế hoạt động</a></li><li><a href="#s3">Vì sao thiết kế như vậy</a></li><li><a href="#s4">Ví dụ</a></li><li><a href="#s5">Thí nghiệm</a></li><li><a href="#s6">Ảnh hưởng khi chạy production</a></li><li><a href="#s7">Hiểu lầm thường gặp</a></li><li><a href="#s8">Câu hỏi ôn tập</a></li><li><a href="#s9">Bài toán thực tế</a></li><li><a href="#s10">Câu hỏi còn mở</a></li><li><a href="#s11">Tài liệu tham khảo</a></li></ol></details>
+</div>
+
+<!-- 1 -->
+<section id="s1">
+<header><span class="num">01</span><h2>Bản chất vấn đề</h2></header>
+<div class="prose">
+<p>Service sổ cái của Month 2 có 300 unit test. Mỗi test mock repository: <code>repo.findAccount.mockResolvedValue({ balance: 100000 })</code>. Test xanh. Sau một tháng production có năm sự cố: email trùng khác hoa thường, ghi chú quá dài làm request lỗi 500, số dư âm khi hai request tới cùng lúc, một báo cáo trả chuỗi thay vì số, và một lỗi trùng dữ liệu trả 500.</p>
+<p>Không lỗi nào nằm trong logic mà unit test kiểm tra. Chúng nằm ở chỗ code gặp MySQL: collation (quy tắc so sánh chuỗi), strict mode, khoá, kiểu dữ liệu driver trả về. Mock không có những thứ đó, nên test không thể đỏ vì chúng.</p>
+<p>Hình dung thử một chiếc ô bằng cách nhìn ảnh của nó. Ảnh cho biết hình dáng; chỉ cơn mưa thật mới cho biết nó có thấm nước không. Test theo rủi ro nghĩa là: với mỗi loại lỗi có thể xảy ra, chọn loại test rẻ nhất mà vẫn có "mưa thật" cho lỗi đó.</p>
+<p>Chọn các loại test trong bộ test và xem lỗi nào bị bắt.</p>
+</div>
+<div class="frame" id="suite">
+  <div class="ph"><strong>Bộ test này bắt được lỗi nào</strong><span class="meta" id="suMeta"></span></div>
+  <div class="bd">
+    <div class="chks" id="suOpts"></div>
+    <div class="tablewrap"><table class="mx" id="suTbl"></table></div>
+    <div class="stats" id="suStats"></div>
+    <div class="desc" aria-live="polite" id="suDesc"></div>
+    <div class="legend"><span><i class="lg-row"></i>bắt được</span><span><i class="lg-hot"></i>chỉ đôi khi bắt được</span><span><i class="lg-miss"></i>bỏ sót</span></div>
+    <p class="fine">Lỗi 2, 3, 5, 6 và 7 đã chạy thật trên sandbox MySQL 8.0.46 và mysql2 3.24.6 (phần 02). Hành vi của SQLite theo tài liệu SQLite (collation BINARY mặc định, không giới hạn độ dài <code>VARCHAR</code>). Thời gian CI là ước lượng; chưa đo (E56).</p>
+  </div>
+</div>
+</section>
+
+<!-- 2 -->
+<section id="s2">
+<header><span class="num">02</span><h2>Cơ chế hoạt động</h2></header>
+<div class="prose">
+<h3>Test theo rủi ro</h3>
+<p>Ý chính: mỗi rủi ro có một loại test rẻ nhất bắt được nó. Logic thuần thì unit test. Mọi thứ đi qua SQL thì test trên MySQL thật. Đồng thời thì test có nhiều kết nối thật cùng lúc. Hợp đồng HTTP thì test qua HTTP.</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Rủi ro</th><th>Loại test</th><th>Chạy trên</th><th>Thời gian mỗi test (ước lượng)</th></tr></thead>
+<tbody>
+<tr><td>Công thức, quy tắc thuần (phí, chia tiền, chuyển trạng thái)</td><td>Unit, không mock database vì không cần database</td><td>Bộ nhớ</td><td>dưới 1 ms</td></tr>
+<tr><td>Câu SQL đúng, ràng buộc, collation, kiểu driver trả về</td><td>Integration của repository và service</td><td>MySQL thật, cùng phiên bản và <code>sql_mode</code> với production</td><td>5–20 ms</td></tr>
+<tr><td>Bất biến khi có nhiều request cùng lúc</td><td>Test đồng thời</td><td>MySQL thật, nhiều kết nối</td><td>0,1–2 s</td></tr>
+<tr><td>Validation, status code, body lỗi, auth</td><td>HTTP (e2e mỏng)</td><td>App thật và MySQL thật</td><td>20–100 ms</td></tr>
+<tr><td>Migration chạy được trên dữ liệu thật</td><td>Test migration</td><td>Bản sao schema và dữ liệu mẫu</td><td>giây tới phút</td></tr>
+</tbody></table></div>
+<div class="note"><strong>Lỗi hay gặp:</strong> mock repository trong test của service rồi gọi đó là integration test. Test đó kiểm tra rằng service gọi <code>repo.debit</code> với đúng tham số, không kiểm tra rằng <code>debit</code> làm đúng. Quy tắc: mock ở biên của hệ thống (cổng thanh toán, email, giờ hệ thống), không mock database của chính service.</div>
+
+<div class="prose">
+<h3>Những gì mock và SQLite không thấy</h3>
+<p>Ý chính: SQL là code chạy trong MySQL. Hành vi của nó phụ thuộc collation, <code>sql_mode</code>, ràng buộc, khoá và driver. Mock không có những thứ đó; SQLite có nhưng khác.</p>
+<p>Các dòng sau đã chạy trên sandbox của Claude (MySQL 8.0.46, <code>sql_mode</code> mặc định, collation mặc định <code>utf8mb4_0900_ai_ci</code>):</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Tình huống</th><th>MySQL trả</th><th>Mock trả</th><th>SQLite (mặc định)</th></tr></thead>
+<tbody>
+<tr><td><code>UNIQUE(email)</code> có <code>An@x.com</code>, chèn <code>an@x.com</code></td><td><code>1062 Duplicate entry 'an@x.com' for key 'u.uq'</code></td><td>Thành công</td><td>Thành công (collation BINARY phân biệt hoa thường)</td></tr>
+<tr><td>Chèn 101 ký tự vào <code>VARCHAR(100)</code></td><td><code>1406 Data too long for column 'email'</code> (strict mode)</td><td>Thành công</td><td>Thành công (không giới hạn độ dài)</td></tr>
+<tr><td><code>CHECK (balance_minor &gt;= 0)</code>, trừ quá số dư</td><td><code>3819 Check constraint 'chk_bal' is violated</code></td><td>Thành công</td><td>Lỗi constraint (SQLite có CHECK)</td></tr>
+<tr><td><code>GROUP BY user_id</code> nhưng chọn <code>created_at</code></td><td><code>1055 … incompatible with sql_mode=only_full_group_by</code></td><td>Trả dữ liệu giả</td><td>Thành công, lấy một dòng tuỳ ý</td></tr>
+<tr><td>Trong transaction, gọi <code>START TRANSACTION</code> lần nữa rồi <code>ROLLBACK</code></td><td>Lệnh thứ hai commit ngầm transaction đầu; <code>ROLLBACK</code> không xoá gì</td><td>Không có khái niệm</td><td>Lỗi "cannot start a transaction within a transaction"</td></tr>
+<tr><td><code>SELECT SUM(amount_minor)</code> trên cột <code>BIGINT</code> qua mysql2</td><td><code>DECIMAL(41,0)</code>, mysql2 trả chuỗi</td><td>Số (do người viết mock chọn)</td><td>Số nguyên</td></tr>
+<tr><td>Hai transaction khoá hai dòng theo thứ tự ngược nhau</td><td><code>1213 Deadlock found</code> cho một bên</td><td>Không có</td><td>Khoá cả database, không có deadlock theo dòng</td></tr>
+</tbody></table></div>
+<p class="fine">Cột MySQL: sandbox 8.0.46. Cột SQLite: theo tài liệu SQLite, chưa chạy. Dòng deadlock là hành vi đã biết của InnoDB (trang <a href="../innodb-locking-deadlock/index.html">Khoá và deadlock</a>), chưa chạy lại ở đây.</p>
+
+<div class="prose">
+<h3>Cái bẫy của "mỗi test một transaction rồi rollback"</h3>
+<p>Ý chính: cách cô lập rẻ nhất (bọc mỗi test trong một transaction và rollback ở cuối) âm thầm hỏng khi code được test tự mở transaction. MySQL không có transaction lồng nhau: <code>START TRANSACTION</code> thứ hai commit transaction đang mở.</p>
+<p>Đi từng bước với một test của <code>transfer()</code>, hàm tự mở transaction của nó.</p>
+</div>
+<div class="frame" id="nest"></div>
+<div class="legend"><span><i class="lg-path"></i>lệnh đang chạy</span><span><i class="lg-hot"></i>đã ghi, chưa commit</span><span><i class="lg-row"></i>đã commit</span><span><i class="lg-miss"></i>dữ liệu rò sang test sau</span></div>
+<p class="fine">Hành vi commit ngầm đã chạy trên sandbox 8.0.46: chèn một dòng, <code>START TRANSACTION</code> lần hai, <code>ROLLBACK</code>, dòng vẫn còn. Các lệnh khác cũng commit ngầm: DDL, <code>TRUNCATE</code>, <code>LOCK TABLES</code> (manual 8.4, Statements That Cause an Implicit Commit).</p>
+
+<div class="prose">
+<h3>MySQL thật trong container, và cô lập dữ liệu</h3>
+<p>Ý chính: khởi động một MySQL cho cả lần chạy test, chạy migration một lần, mỗi worker của test runner dùng một database riêng, và dọn dữ liệu giữa các test bằng cách rẻ nhất mà vẫn đúng với loại test đó.</p>
+<ol class="list">
+<li><strong>Khởi động:</strong> Testcontainers (thư viện điều khiển Docker từ code test) chạy image <code>mysql:8.4</code> trước toàn bộ test. Module MySQL bản 12.2.1 bắt buộc truyền image, mặc định database <code>test</code>, user <code>test</code>, mật khẩu <code>test</code>, chờ khởi động tối đa 120 giây.</li>
+<li><strong>Schema:</strong> chạy đúng migration của production, không dùng <code>synchronize</code> của ORM. Test bắt được migration hỏng.</li>
+<li><strong>Song song:</strong> mỗi worker (Jest có biến <code>JEST_WORKER_ID</code>) dùng database <code>test_1</code>, <code>test_2</code>… tạo từ cùng migration, nên các worker không giẫm dữ liệu nhau.</li>
+<li><strong>Giữa các test:</strong> chọn một cách trong bảng dưới.</li>
+</ol>
+</div>
+<div class="frame" id="iso">
+  <div class="ph"><strong>Cô lập dữ liệu giữa các test: chi phí và giới hạn</strong><span class="meta" id="isMeta"></span></div>
+  <div class="bd">
+    <div class="calc">
+      <label>Cách cô lập<select id="isS">
+        <option value="rb">Bọc mỗi test trong transaction, rollback</option>
+        <option value="del" selected>DELETE các bảng đã chạm</option>
+        <option value="trunc">TRUNCATE mọi bảng</option>
+        <option value="db">Database mới cho mỗi test</option>
+        <option value="uniq">Không dọn, mỗi test dùng dữ liệu riêng (id, email ngẫu nhiên)</option>
+      </select></label>
+      <label>Số test chạm database<input id="isN" type="number" min="1" max="20000" value="400"></label>
+      <label>Số bảng<input id="isT" type="number" min="1" max="200" value="10"></label>
+      <label>Số worker song song<input id="isW" type="number" min="1" max="16" value="4"></label>
+    </div>
+    <div class="stats" id="isStats"></div>
+    <div class="tablewrap"><table class="mx" id="isTbl"></table></div>
+    <div class="desc" aria-live="polite" id="isDesc"></div>
+    <p class="fine">Chi phí dọn mỗi test đo trên sandbox (MySQL 8.0.46, mysql2, 10 bảng, 20 dòng mỗi bảng, 30 lần lặp, độ bền mặc định): rollback gần như 0; <code>DELETE</code> khoảng 0,7 ms mỗi bảng; <code>TRUNCATE</code> khoảng 10,6 ms mỗi bảng; tạo database và 10 bảng khoảng 118 ms; dữ liệu riêng 0. Phần khởi động container (khoảng 20 giây) là ước lượng, chưa đo (E56).</p>
+  </div>
+</div>
+
+<div class="prose">
+<h3>Test cho đồng thời và bất biến</h3>
+<p>Ý chính: lỗi đồng thời chỉ hiện ra khi hai việc thật sự chồng lên nhau. Có hai cách làm chúng hiện ra trong test: bắn nhiều request cùng lúc và lặp lại đủ nhiều lần, hoặc ép thứ tự xen kẽ một cách xác định.</p>
+<ul>
+<li><strong>Bắn cùng lúc:</strong> mở N kết nối riêng, chuẩn bị N lời gọi, thả chúng cùng một lúc (<code>Promise.all</code> sau một "rào chắn"), rồi kiểm tra bất biến: số dư không âm, tổng bút toán bằng 0. Rẻ để viết; có thể phải lặp nhiều lần mới bắt được.</li>
+<li><strong>Xen kẽ xác định:</strong> session A khoá dòng; test chờ tới khi session B thật sự đang chờ khoá (đọc <code>performance_schema.data_lock_waits</code>); rồi mới cho A commit. Viết lâu hơn, nhưng đỏ đúng một lần là đủ.</li>
+<li><strong>Chứng minh test có răng:</strong> cố ý bỏ <code>FOR UPDATE</code> hoặc điều kiện của câu <code>UPDATE</code> và chạy lại. Test phải đỏ. Đây chính là tiêu chí hoàn thành của Month 2.</li>
+</ul>
+<p>Với cách bắn cùng lúc, cần chạy bao nhiêu lần? Thử dưới đây.</p>
+</div>
+<div class="frame" id="race">
+  <div class="ph"><strong>Cần lặp test đồng thời bao nhiêu lần</strong><span class="meta" id="raMeta"></span></div>
+  <div class="bd">
+    <div class="calc">
+      <label>Request bắn cùng lúc<input id="raK" type="number" min="2" max="200" value="2"></label>
+      <label>Khoảng hở giữa đọc và ghi (ms)<input id="raW" type="number" min="0.1" max="1000" step="0.1" value="2"></label>
+      <label>Độ lệch thời điểm bắt đầu (ms)<input id="raJ" type="number" min="0.1" max="5000" step="0.1" value="20"></label>
+    </div>
+    <svg id="raSvg" viewBox="0 0 680 140" role="img" aria-label="Xác suất bắt được lỗi theo số lần chạy test"></svg>
+    <div class="stats" id="raStats"></div>
+    <div class="desc" aria-live="polite" id="raDesc"></div>
+    <p class="fine">Mô hình đơn giản: thời điểm bắt đầu của các request rải đều trong khoảng lệch; lỗi hiện ra khi có hai request bắt đầu cách nhau ít hơn khoảng hở. Các lần chạy độc lập. Chỉ để cảm nhận độ lớn; chưa đo (E57).</p>
+  </div>
+</div>
+</section>
+
+<!-- 3 -->
+<section id="s3">
+<header><span class="num">03</span><h2>Vì sao thiết kế như vậy</h2></header>
+<div class="prose">
+<p><strong>Vì sao không theo kim tự tháp test (nhiều unit, ít integration)?</strong> Kim tự tháp ra đời khi test với database thật chậm và khó dựng. Với container, một test trên MySQL thật mất vài mili giây tới vài chục mili giây. Với một backend mà phần lớn rủi ro nằm ở SQL và đồng thời, nhiều test trên database thật và ít unit test cho logic thuần cho tỉ lệ lỗi bắt được trên mỗi phút CI tốt hơn.</p>
+<p><strong>Vì sao không dùng SQLite cho nhanh?</strong> SQLite là một database khác. Nó khác MySQL ở collation, kiểu dữ liệu, cách khoá, <code>GROUP BY</code>, transaction. Test xanh trên SQLite chỉ nói code chạy trên SQLite.</p>
+<p><strong>Vì sao vẫn cần unit test?</strong> Logic thuần có nhiều nhánh (làm tròn, chia tiền, chuyển trạng thái) cần hàng trăm trường hợp; chạy chúng trong bộ nhớ nhanh hơn nghìn lần và cho thông báo lỗi chính xác hơn.</p>
+<p><strong>Vì sao mock ở biên mà không mock database?</strong> Dịch vụ bên ngoài (cổng thanh toán) không chạy được trong test và không do mình sở hữu: mock hoặc fake nó, và kiểm tra hợp đồng của nó bằng cách khác (contract test, sandbox của nhà cung cấp). Database thì chạy được và do mình định nghĩa: dùng thật.</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Cách có MySQL cho test</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>Testcontainers trong code test</td><td>Một lệnh <code>npm test</code> chạy được ở máy ai cũng như CI; phiên bản ghi trong code</td><td>Cần Docker; khởi động mất vài chục giây</td></tr>
+<tr><td>Service container của CI (GitHub Actions <code>services:</code>) hoặc docker compose</td><td>Đơn giản, khởi động trước test</td><td>Máy local phải tự dựng giống CI</td></tr>
+<tr><td>MySQL dùng chung cho cả team</td><td>Không cần Docker</td><td>Test của người này phá dữ liệu của người kia; phiên bản lệch</td></tr>
+<tr><td>SQLite, H2, mock</td><td>Nhanh, không phụ thuộc gì</td><td>Không bắt được lỗi ở bảng phần 02</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- 4 -->
+<section id="s4">
+<header><span class="num">04</span><h2>Ví dụ</h2></header>
+<div class="prose"><p>Code viết theo Jest, Testcontainers 12 và mysql2 3.x; chưa chạy (sandbox không có Docker). Phần đo chi phí cô lập đã chạy bằng mysql2 trên MySQL 8.0.46 cài thẳng.</p><h3>Một MySQL cho cả lần chạy, một database cho mỗi worker</h3></div>
+<pre><code>// test/global-setup.ts
+import { MySqlContainer } from '@testcontainers/mysql';
+export default async function () {
+  const c = await new MySqlContainer('mysql:8.4')
+    .withCommand(['--innodb-flush-log-at-trx-commit=2', '--skip-log-bin'])  // chỉ cho test: bớt fsync
+    .withTmpFs({ '/var/lib/mysql': 'rw' })
+    .start();
+  process.env.TEST_DB_URL = c.getConnectionUri(true);      // root, để tạo database cho từng worker
+  globalThis.__MYSQL__ = c;
+}
+// test/db.ts: mỗi worker một database, migration chạy một lần cho mỗi database
+export async function workerDb() {
+  const name = `test_${process.env.JEST_WORKER_ID}`;
+  const admin = await mysql.createConnection(process.env.TEST_DB_URL!);
+  await admin.query(`CREATE DATABASE IF NOT EXISTS \`${name}\``);
+  await runMigrations({ uri: process.env.TEST_DB_URL!, database: name });   // migration thật của production
+  return mysql.createPool({ uri: process.env.TEST_DB_URL!, database: name, connectionLimit: 20 });
+}</code></pre>
+
+<div class="prose"><h3>Dọn bằng DELETE theo thứ tự khoá ngoại</h3></div>
+<pre><code>const TABLES_CHILD_FIRST = ['ledger_entries', 'idempotency_keys', 'accounts', 'users'];
+afterEach(async () =&gt; {
+  for (const t of TABLES_CHILD_FIRST) await pool.query(`DELETE FROM \`${t}\``);
+});</code></pre>
+
+<div class="prose"><h3>Test bắt lỗi chỉ MySQL thật mới có</h3></div>
+<pre><code>it('từ chối email trùng khác hoa thường', async () =&gt; {
+  await users.create({ email: 'An@x.com' });
+  await expect(users.create({ email: 'an@x.com' })).rejects.toBeInstanceOf(EmailTakenError);   // service đổi 1062
+});
+it('SUM trả về bigint, không phải chuỗi', async () =&gt; {
+  await seedEntries(accountId, [500n, 700n]);
+  const total = await ledger.sumFor(accountId);
+  expect(typeof total).toBe('bigint');
+  expect(total).toBe(1200n);
+});</code></pre>
+
+<div class="prose"><h3>Test đồng thời: 20 lần rút cùng lúc</h3></div>
+<pre><code>it('số dư không bao giờ âm khi 20 request rút cùng lúc', async () =&gt; {
+  const acc = await accounts.create({ balanceMinor: 100_000n });
+  const go = barrier(20);                                  // promise mở khi đủ 20 người chờ
+  const results = await Promise.allSettled(Array.from({ length: 20 }, async () =&gt; {
+    await go.wait();
+    return service.withdraw(acc.id, 30_000n);              // mỗi lời gọi lấy kết nối riêng từ pool
+  }));
+  const ok = results.filter(r =&gt; r.status === 'fulfilled').length;
+  const bal = await accounts.balance(acc.id);
+  expect(ok).toBe(3);                                      // 3 × 30.000 ≤ 100.000 &lt; 4 × 30.000
+  expect(bal).toBe(10_000n);
+  expect(await ledger.sumFor(acc.id)).toBe(bal);           // I3: số dư bằng tổng bút toán (tài khoản mở bằng một bút toán nạp)
+});</code></pre>
+<p class="prose"><code>accounts.create</code> trong test mở tài khoản bằng một bút toán nạp 100.000, nên số dư phải luôn bằng tổng bút toán. <code>barrier(n)</code> là một promise được giải khi đủ n lời gọi đã tới, để các request thật sự bắt đầu gần nhau thay vì nối đuôi.</p>
+
+<div class="prose"><h3>Xen kẽ xác định: chờ tới khi B thật sự đang chờ khoá</h3></div>
+<pre><code>it('rút tiền thứ hai chờ khoá rồi bị từ chối', async () =&gt; {
+  const a = await pool.getConnection(), probe = await pool.getConnection();
+  await a.query('START TRANSACTION');
+  await a.query('SELECT balance_minor FROM accounts WHERE id = ? FOR UPDATE', [acc.id]);  // A giữ khoá
+  const b = service.withdraw(acc.id, 80_000n);                                         // B sẽ chờ
+  await waitUntil(async () =&gt; {
+    const [rows] = await probe.query('SELECT COUNT(*) AS n FROM performance_schema.data_lock_waits');
+    return rows[0].n &gt; 0;                                                              // B đã đứng chờ
+  });
+  await a.query('UPDATE accounts SET balance_minor = balance_minor - 80000 WHERE id = ?', [acc.id]);
+  await a.query('COMMIT');
+  await expect(b).rejects.toBeInstanceOf(InsufficientFundsError);
+});</code></pre>
+
+<div class="prose"><h3>Chứng minh test có răng</h3></div>
+<pre><code># CI, job chạy hằng đêm: bỏ khoá rồi đòi test phải đỏ
+git apply test/mutations/remove-for-update.patch
+if npm test -- -t 'số dư không bao giờ âm'; then echo "test không bắt được lỗi"; exit 1; fi</code></pre>
+</section>
+
+<!-- 5 -->
+<section id="s5">
+<header><span class="num">05</span><h2>Thí nghiệm</h2></header>
+<div class="prose"><p>Chạy với service của Month 2, MySQL 8.4 trong Docker trên lab. Viết dự đoán trước. E57 là tiêu chí hoàn thành của Month 2.</p></div>
+<details><summary>E55. Danh mục lỗi: mock, SQLite, MySQL</summary>
+<p><strong>Câu hỏi.</strong> Với bảy lỗi ở bảng phần 02, viết một test cho mỗi lỗi ở ba dạng: service với repository mock, repository trên SQLite, repository trên MySQL 8.4. Test nào đỏ? Thêm hai lỗi tự tìm từ code ở công ty.</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e55/prediction.md</code></p>
+<p><strong>Chạy.</strong> <code>npm test</code> ba lần với ba cấu hình.</p>
+<p><strong>Kết quả.</strong> Chưa chạy trong container. Năm dòng MySQL của bảng đã chạy trên sandbox 8.0.46.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+<details><summary>E56. Chi phí của từng cách cô lập trong container</summary>
+<p><strong>Câu hỏi.</strong> Bộ 400 test, 10 bảng, 4 worker. Thời gian khởi động container <code>mysql:8.4</code>; thời gian cả bộ với rollback, <code>DELETE</code>, <code>TRUNCATE</code>, database mới, dữ liệu riêng; mỗi cách với và không với tmpfs và <code>innodb_flush_log_at_trx_commit = 2</code>.</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e56/prediction.md</code></p>
+<p><strong>Chạy.</strong> <code>time npm test</code>; ghi lại thời gian khởi động từ log của Testcontainers.</p>
+<p><strong>Kết quả.</strong> Chưa chạy. Sandbox (không container, độ bền mặc định): chi phí dọn mỗi test ở widget phần 02.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+<details><summary>E57. Đưa vào một vi phạm bất biến, test phải đỏ</summary>
+<p><strong>Câu hỏi.</strong> Ba thay đổi cố ý: bỏ <code>FOR UPDATE</code>; bỏ điều kiện <code>balance_minor &gt;= ?</code>; cho repository tự commit. Với mỗi thay đổi, test nào đỏ, sau bao nhiêu lần chạy (với test bắn cùng lúc), và test xen kẽ xác định có đỏ ngay lần đầu không?</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e57/prediction.md</code></p>
+<p><strong>Chạy.</strong> Script áp từng patch, chạy bộ test 50 lần, đếm số lần đỏ.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+</section>
+
+<!-- 6 -->
+<section id="s6">
+<header><span class="num">06</span><h2>Ảnh hưởng khi chạy production</h2></header>
+<div class="prose">
+<h3>Khi nào dùng gì</h3>
+<ul>
+<li>Mọi repository và service có SQL: test trên MySQL thật, cùng phiên bản và <code>sql_mode</code> với production.</li>
+<li>Mỗi bất biến có ít nhất một test đồng thời, và một lần chứng minh nó đỏ khi bất biến bị phá.</li>
+<li>Logic thuần nhiều nhánh: unit test, thậm chí property test (sinh ngẫu nhiên đầu vào, kiểm tra tính chất như "tổng các phần bằng số ban đầu").</li>
+<li>Mỗi endpoint: vài test HTTP cho status, body lỗi, auth; không lặp lại mọi trường hợp đã có ở tầng dưới.</li>
+</ul>
+<h3>Cái giá</h3>
+<ul>
+<li>Docker trên máy dev và CI; vài chục giây khởi động mỗi lần chạy.</li>
+<li>Test trên database chậm hơn unit test hàng chục tới hàng trăm lần; cần song song theo worker và cách dọn rẻ.</li>
+<li>Test đồng thời có thể không ổn định nếu viết bằng <code>sleep</code>; phải dùng rào chắn và chờ theo điều kiện.</li>
+</ul>
+<h3>Nhận ra trên production bằng gì</h3>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Triệu chứng</th><th>Ý nghĩa cho bộ test</th></tr></thead>
+<tbody>
+<tr><td>Lỗi 1062, 1406, 1055, 3819 lần đầu xuất hiện trên production</td><td>Không có test chạm MySQL thật ở đường đó, hoặc <code>sql_mode</code> của test khác production</td></tr>
+<tr><td>Lỗi đồng thời (số dư âm, trùng) không tái hiện được ở local</td><td>Thiếu test đồng thời; chỉ có test tuần tự</td></tr>
+<tr><td>Test đỏ ngẫu nhiên khi chạy song song</td><td>Các test chia sẻ dữ liệu; cô lập theo worker hoặc theo dữ liệu riêng</td></tr>
+<tr><td>Test xanh, migration hỏng khi deploy</td><td>Test dựng schema bằng <code>synchronize</code> thay vì migration</td></tr>
+<tr><td>CI chậm dần</td><td>Thời gian theo từng file test; <code>TRUNCATE</code> hoặc tạo database cho mỗi test</td></tr>
+</tbody></table></div>
+<div class="senior"><h4>Góc nhìn senior: đo bộ test bằng lỗi nó bắt, không bằng coverage</h4><p>Coverage chỉ nói dòng code đã chạy, không nói nó đã được kiểm tra với điều kiện thật. Senior hỏi ngược lại: với mỗi sự cố production của quý trước, có test nào lẽ ra phải đỏ không? Nếu không, thêm test ở đúng tầng trước khi sửa. Và với mỗi bất biến quan trọng, senior muốn thấy test đó đỏ ít nhất một lần, vì một test chưa bao giờ đỏ có thể không kiểm tra gì.</p></div>
+<div class="prose">
+<h3>Checklist khi review một pull request có SQL</h3>
+<ul>
+<li>Có test chạy câu SQL này trên MySQL thật không, hay chỉ có mock?</li>
+<li>Test có kiểm tra cả trường hợp lỗi của database (trùng, quá dài, vi phạm ràng buộc) và cách nó được đổi thành lỗi nghiệp vụ không?</li>
+<li>Nếu thay đổi chạm một bất biến: có test đồng thời không, và đã thấy nó đỏ khi bỏ khoá chưa?</li>
+<li>Test có phụ thuộc thứ tự chạy hay dữ liệu của test khác không?</li>
+<li>Code được test có tự mở transaction không? Nếu có, test không được dùng cách cô lập bằng rollback.</li>
+</ul>
+</div>
+</section>
+
+<!-- 7 -->
+<section id="s7">
+<header><span class="num">07</span><h2>Hiểu lầm thường gặp</h2></header>
+<div class="prose"><ul>
+<li><strong>Hiểu lầm:</strong> coverage cao nghĩa là ít lỗi. <strong>Vì sao sai:</strong> mock làm mọi dòng chạy mà không gặp MySQL thật (<a href="#s1">phần 01</a>). <strong>Quy tắc:</strong> đo bằng lỗi bắt được.</li>
+<li><strong>Hiểu lầm:</strong> SQLite đủ giống MySQL cho test. <strong>Vì sao sai:</strong> khác collation, độ dài chuỗi, <code>GROUP BY</code>, khoá. <strong>Quy tắc:</strong> test trên đúng phiên bản MySQL của production.</li>
+<li><strong>Hiểu lầm:</strong> rollback sau mỗi test luôn an toàn. <strong>Vì sao sai:</strong> code tự mở transaction làm commit ngầm; dữ liệu rò sang test sau. <strong>Quy tắc:</strong> chỉ dùng rollback cho code không tự quản lý transaction.</li>
+<li><strong>Hiểu lầm:</strong> test đồng thời xanh một lần là đủ. <strong>Vì sao sai:</strong> lỗi đồng thời có thể chỉ hiện ra một lần trong nhiều lần chạy. <strong>Quy tắc:</strong> xen kẽ xác định, hoặc lặp đủ nhiều, và cho thấy test đỏ khi bỏ khoá.</li>
+<li><strong>Hiểu lầm:</strong> test với database thật quá chậm. <strong>Vì sao sai:</strong> một test với <code>DELETE</code> 10 bảng tốn khoảng 7 ms dọn trên sandbox; container khởi động một lần. <strong>Quy tắc:</strong> đo, rồi tối ưu cách dọn và song song.</li>
+</ul></div>
+</section>
+
+<!-- 8 -->
+<section id="s8">
+<header><span class="num">08</span><h2>Câu hỏi ôn tập</h2></header>
+<p class="prose">Viết ngày 2026-10-22. Đánh số Q113 đến Q118.</p>
+<details><summary><span class="tag">Dự đoán</span>Q113. Email trùng trên SQLite</summary>
+<p>Repository được test trên SQLite in-memory với <code>UNIQUE(email)</code>. Test chèn <code>An@x.com</code> rồi <code>an@x.com</code>. Kết quả trên SQLite và trên MySQL 8.4 với collation mặc định?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>SQLite: cả hai thành công, vì collation mặc định BINARY phân biệt hoa thường. MySQL: lần thứ hai lỗi 1062, vì <code>utf8mb4_0900_ai_ci</code> không phân biệt hoa thường. Test xanh trên SQLite, production lỗi 500 nếu service không đổi 1062 thành lỗi nghiệp vụ.</p></details></details>
+<details><summary><span class="tag">Dự đoán</span>Q114. Rollback không rollback</summary>
+<p>Mỗi test chạy <code>START TRANSACTION</code> trước và <code>ROLLBACK</code> sau. Test gọi <code>transfer()</code>, hàm tự chạy <code>START TRANSACTION … COMMIT</code>. Test sau thấy gì?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Thấy dữ liệu của test trước. <code>START TRANSACTION</code> trong <code>transfer()</code> commit ngầm transaction của test, rồi <code>transfer()</code> commit phần của nó. <code>ROLLBACK</code> cuối test không còn gì để rollback. Test sau có thể đỏ hoặc xanh tuỳ thứ tự chạy.</p></details></details>
+<details><summary><span class="tag">Giải thích</span>Q115. Mock ở đâu</summary>
+<p>Service chuyển tiền gọi MySQL và gọi API cổng thanh toán. Trong test integration, mock cái nào, dùng thật cái nào, và vì sao?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>MySQL dùng thật: nó chạy được trong container, do mình định nghĩa, và là nơi rủi ro nằm (SQL, ràng buộc, khoá). Cổng thanh toán mock hoặc fake: không chạy được trong test, không do mình sở hữu. Hợp đồng với cổng được kiểm tra riêng, bằng contract test hoặc sandbox của nhà cung cấp.</p></details></details>
+<details><summary><span class="tag">Chẩn đoán</span>Q116. Test đỏ ngẫu nhiên</summary>
+<p>Bộ test xanh khi chạy một worker, đỏ ngẫu nhiên vài test khi chạy 4 worker. Các test dùng cùng database và tạo user với email <code>test@x.com</code>. Vì sao, và sửa hai cách?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Các worker chạy cùng lúc trên cùng database: một worker chèn <code>test@x.com</code> trong khi worker khác vừa chèn hoặc vừa xoá nó. Sửa: mỗi worker một database (<code>test_${JEST_WORKER_ID}</code>), hoặc mỗi test sinh dữ liệu riêng (email ngẫu nhiên) và không dựa vào bảng rỗng.</p></details></details>
+<details><summary><span class="tag">Giải thích</span>Q117. Test chưa bao giờ đỏ</summary>
+<p>Vì sao một test đồng thời cần được thấy đỏ ít nhất một lần, và làm sao để thấy?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Một test đồng thời có thể xanh vì nó không tạo được chồng lấn (request nối đuôi nhau), không phải vì code đúng. Cố ý phá bất biến (bỏ <code>FOR UPDATE</code>) và chạy lại: nếu test vẫn xanh, nó không kiểm tra gì. Có thể tự động hoá bằng một job áp patch phá bất biến và đòi test đỏ.</p></details></details>
+<details><summary><span class="tag">Dự đoán</span>Q118. Chi phí dọn</summary>
+<p>400 test, 10 bảng. Theo số đo sandbox (<code>DELETE</code> khoảng 0,7 ms mỗi bảng, <code>TRUNCATE</code> khoảng 10,6 ms mỗi bảng), mỗi cách tốn thêm bao nhiêu thời gian cho cả bộ, chạy một worker?</p>
+<details class="answer"><summary>Xem đáp án</summary><p><code>DELETE</code>: 400 × 10 × 0,7 ms ≈ 2,8 giây. <code>TRUNCATE</code>: 400 × 10 × 10,6 ms ≈ 42 giây. <code>TRUNCATE</code> là drop rồi tạo lại bảng, nên đắt với bảng nhỏ; <code>DELETE</code> rẻ khi mỗi test chỉ để lại vài dòng. Với 4 worker, chia khoảng 4 lần. Đây là số sandbox với độ bền mặc định; trong container có tmpfs sẽ khác (E56).</p></details></details>
+</section>
+
+<!-- 9 -->
+<section id="s9">
+<header><span class="num">09</span><h2>Bài toán thực tế</h2></header>
+<div class="prose">
+<p>Mỗi bài là một vòng phỏng vấn system design cấp senior, khoảng 30–45 phút. Cách dùng:</p>
+<ol class="list">
+<li>Đọc bối cảnh và câu hỏi của interviewer. Bối cảnh là những gì interviewer nói lúc đầu: hệ thống, cách đang làm, quy mô, chuyện đã xảy ra. Viết ra những gì bạn sẽ hỏi thêm trước khi thiết kế, rồi mới mở "Hỏi lại interviewer" để xem câu hỏi nên hỏi và câu trả lời của interviewer: con số chính xác, yêu cầu, ràng buộc. Các con số ở đó dùng cho những câu sau.</li>
+<li>Với mỗi follow-up, tự trả lời (nói to hoặc viết ra) trong vài phút, rồi mới mở đáp án. Follow-up cuối luôn là triển khai và kiểm chứng: thiết kế đã chọn được làm ra sao, test gì, theo dõi gì, lùi lại thế nào.</li>
+<li>Cuối bài, dùng rubric để tự chấm: câu trả lời của bạn giống cột "mid" hay cột "senior", và có rơi vào red flag nào không.</li>
+</ol>
+<p>Đáp án là lập luận từ tài liệu, không phải số đo; con số trong đó là ước lượng. Viết ngày 2026-10-22.</p>
+</div>
+
+<!-- C37 -->
+<div class="case" id="c37">
+<h3>C37. CI mất 25 phút, team muốn bỏ test với database</h3>
+<p class="src">Dựa trên: phần 02 của trang này (cô lập, container).</p>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> Monolith NestJS, 12 kỹ sư, khoảng 40 pull request mỗi ngày.</li><li><strong>Đang làm:</strong> 2.800 test; 1.900 chạm MySQL. Mỗi test tạo database mới và chạy toàn bộ migration (180 file). Chạy một worker.</li><li><strong>Đã xảy ra:</strong> CI mất 25 phút. Team đề xuất mock repository cho mọi test, chỉ giữ 50 test e2e.</li></ul></div>
+<blockquote class="q">"Bạn có đồng ý không? Nếu không, bạn đưa CI về dưới 8 phút thế nào?"</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>Thời gian đi vào đâu?</td><td>Chưa đo theo phần. Một test chạm database trung bình 650 ms.</td><td>Phải đo trước khi sửa.</td></tr>
+<tr><td>Migration chạy bao lâu trên database rỗng?</td><td>Khoảng 550 ms.</td><td>Phần lớn của 650 ms.</td></tr>
+<tr><td>Máy CI có mấy lõi?</td><td>8 lõi, 16 GB.</td><td>Song song được.</td></tr>
+<tr><td>Bao nhiêu lỗi production quý trước được test database bắt trước khi merge?</td><td>Không ai thống kê; ước chừng 2–3 lỗi mỗi tháng.</td><td>Giá trị của những test này.</td></tr>
+<tr><td>Test có phụ thuộc nhau không?</td><td>Không rõ; chưa bao giờ chạy song song.</td><td>Rủi ro khi bật song song.</td></tr>
+<tr><td>MySQL test chạy thế nào?</td><td>Service container của CI, <code>mysql:8.4</code> mặc định.</td><td>Có thể chỉnh cấu hình cho test.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> hỏi thời gian đi vào đâu. 650 ms cho một test là bất thường; 550 ms trong đó là migration lặp lại 1.900 lần.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Phân tích 25 phút.</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>1.900 × 650 ms ≈ 1.235 giây ≈ 20,6 phút cho test chạm database; trong đó 1.900 × 550 ms ≈ 17,4 phút là migration (ước lượng từ số interviewer cho).</li>
+<li>900 test còn lại cộng khởi động: khoảng 4 phút.</li>
+<li>Vậy vấn đề không phải "test với database chậm" mà là "chạy migration 1.900 lần trên một worker".</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> So đề xuất của team với cách khác.</p>
+<details class="answer"><summary>Đáp án</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>A. Mock repository, giữ 50 e2e</td><td>CI nhanh</td><td>Mất 2–3 lỗi bắt được mỗi tháng; lỗi SQL lọt tới production</td></tr>
+<tr><td>B. Migration một lần mỗi worker, dọn bằng <code>DELETE</code> giữa các test</td><td>Bỏ 17 phút migration; giữ MySQL thật</td><td>Phải dọn đúng thứ tự khoá ngoại; test phụ thuộc nhau sẽ lộ ra</td></tr>
+<tr><td>C. B cộng 6 worker, mỗi worker một database</td><td>Chia thời gian còn lại cho 6</td><td>Cần sửa test dùng dữ liệu cố định</td></tr>
+<tr><td>D. C cộng tmpfs, <code>innodb_flush_log_at_trx_commit = 2</code>, tắt binlog cho MySQL test</td><td>Bớt fsync</td><td>Cấu hình test khác production ở độ bền (không ảnh hưởng đúng sai của SQL)</td></tr>
+</tbody></table></div>
+<p><strong>Chọn B, C, D.</strong> Không đồng ý với A: nó đổi một vấn đề cấu hình CI lấy việc mất khả năng bắt lỗi. <strong>Khi nào đổi ý:</strong> nếu sau khi tối ưu, test database vẫn chiếm phần lớn thời gian và hiếm khi bắt lỗi ở một module, có thể chuyển phần logic thuần của module đó sang unit test.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> Ước lượng thời gian CI sau B, C, D.</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Test chạm database: còn khoảng 100 ms mỗi test (650 − 550). Dọn bằng <code>DELETE</code>: sandbox đo khoảng 0,7 ms mỗi bảng; giả sử mỗi test dọn 10 bảng là khoảng 7 ms. Tổng khoảng 1.900 × 107 ms ≈ 203 giây.</li>
+<li>Chia 6 worker: khoảng 34 giây. Cộng migration 6 lần (song song, khoảng 0,6 giây) và khởi động container (khoảng 20–30 giây, ước lượng).</li>
+<li>900 test còn lại: khoảng 4 phút trên một worker, khoảng 40 giây trên 6.</li>
+<li>Tổng khoảng 2 phút. Kể cả khi ước lượng lệch gấp ba, vẫn dưới 8 phút. Đo lại sau mỗi bước.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> Bật song song làm 30 test đỏ. Bạn xử lý thế nào mà không chặn team?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Các test này phụ thuộc dữ liệu của test khác hoặc giả định bảng rỗng. Đánh dấu chúng chạy tuần tự trong một project riêng của Jest; phần còn lại chạy song song ngay.</li>
+<li>Sửa dần: sinh dữ liệu riêng cho mỗi test (factory với id và email ngẫu nhiên), không đếm cả bảng mà đếm theo id đã tạo.</li>
+<li>Đặt chủ sở hữu và hạn cho danh sách tuần tự để nó không lớn dần.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai và kiểm chứng thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ol class="list">
+<li>Đo trước: thời gian mỗi test, tách migration và phần còn lại (Jest reporter có thời gian từng test).</li>
+<li>Global setup chạy migration cho 6 database; <code>afterEach</code> dọn bằng <code>DELETE</code> theo thứ tự con trước cha.</li>
+<li>Bật 6 worker; tách nhóm tuần tự cho test đỏ.</li>
+<li>Cấu hình MySQL test: tmpfs, <code>--innodb-flush-log-at-trx-commit=2</code>, <code>--skip-log-bin</code>; giữ nguyên <code>sql_mode</code> và collation như production.</li>
+<li>Kiểm chứng giá trị của bộ test: áp ba patch phá bất biến (bỏ khoá, bỏ điều kiện, đổi collation cột email) và đòi test đỏ.</li>
+<li>Theo dõi: thời gian CI p50, p95 theo tuần; số test trong nhóm tuần tự; số lỗi production lẽ ra test phải bắt.</li>
+</ol>
+</details>
+</div>
+
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Chẩn đoán</td><td>"Test database chậm"</td><td>Đo; migration lặp 1.900 lần là phần lớn</td></tr>
+<tr><td>Quyết định</td><td>Đồng ý mock để nhanh</td><td>Giữ MySQL thật, sửa cách dựng và dọn</td></tr>
+<tr><td>Ước lượng</td><td>Không có</td><td>Tính theo phần, theo worker, nêu rõ là ước lượng</td></tr>
+<tr><td>Song song</td><td>Bật rồi để đỏ</td><td>Tách nhóm tuần tự có hạn, sửa dữ liệu theo test</td></tr>
+<tr><td>Giá trị</td><td>Không nhắc</td><td>Chứng minh bộ test còn bắt được lỗi bằng patch phá bất biến</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> thay MySQL bằng SQLite để nhanh; đổi <code>sql_mode</code> của MySQL test cho dễ qua; tắt test đỏ khi bật song song mà không theo dõi.</p>
+</details>
+</div>
+
+<!-- C38 -->
+<div class="case" id="c38">
+<h3>C38. Test đồng thời xanh, production vẫn bán quá số vé</h3>
+<p class="src">Dựa trên: phần 02 của trang này (test đồng thời); <a href="../concurrency-control-strategies/index.html">Kiểm soát ghi đồng thời</a>.</p>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> Bán vé sự kiện, NestJS, MySQL 8.4. Mỗi suất có <code>capacity</code>; service đếm vé đã bán rồi chèn vé mới nếu còn chỗ.</li><li><strong>Đang làm:</strong> Có một test "đồng thời": vòng <code>for</code> gọi <code>buy()</code> 10 lần với <code>await</code>, kiểm tra không vượt <code>capacity</code>. Test xanh.</li><li><strong>Đã xảy ra:</strong> Lần mở bán gần nhất, một suất 500 chỗ bán ra 517 vé.</li></ul></div>
+<blockquote class="q">"Vì sao test không bắt được, và bạn viết lại test thế nào trước khi sửa code?"</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td><code>buy()</code> làm gì, chính xác?</td><td>Transaction: <code>SELECT COUNT(*) FROM tickets WHERE show_id = ?</code>; nếu nhỏ hơn <code>capacity</code> thì <code>INSERT</code>; commit.</td><td>Check-then-act trên một đếm.</td></tr>
+<tr><td>Test chạy trên gì?</td><td>MySQL thật trong container.</td><td>Database đúng; cách gọi sai.</td></tr>
+<tr><td>Vòng lặp test trông thế nào?</td><td><code>for (…) await service.buy(showId)</code>.</td><td>Các lời gọi nối đuôi, không chồng lên nhau.</td></tr>
+<tr><td>Lúc mở bán có bao nhiêu request?</td><td>Khoảng 2.000 request mỗi giây cho suất đó trong 10 giây đầu.</td><td>Mức chồng lấn thật.</td></tr>
+<tr><td>Mỗi lần mua mất bao lâu?</td><td>Khoảng 8 ms, trong đó khoảng 3 ms giữa đếm và chèn.</td><td>Kích thước khoảng hở của race.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> hỏi vòng lặp trong test trông thế nào. Test "đồng thời" có <code>await</code> trong vòng <code>for</code> là test tuần tự.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Vì sao test xanh, và vì sao production bán quá?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li><strong>Test:</strong> <code>await</code> trong vòng <code>for</code> chờ lần mua trước commit xong rồi mới bắt đầu lần sau. Không có hai transaction nào chồng nhau, nên check-then-act luôn đúng.</li>
+<li><strong>Production:</strong> dưới REPEATABLE READ, <code>SELECT COUNT(*)</code> là đọc nhất quán, không khoá. Hai transaction cùng đếm 499, cùng chèn. 2.000 request mỗi giây, mỗi request có khoảng hở 3 ms: trung bình 6 request cùng nằm trong một khoảng hở (2.000 × 0,003), nên chồng lấn gần như chắc chắn ở cuối suất.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> Viết lại test. So các cách.</p>
+<details class="answer"><summary>Đáp án</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>A. <code>Promise.all</code> 50 lời gọi, capacity 10</td><td>Dễ viết; tạo chồng lấn thật</td><td>Có thể cần lặp nhiều lần; pool kết nối nhỏ làm lời gọi xếp hàng</td></tr>
+<tr><td>B. A cộng rào chắn và pool đủ 50 kết nối, lặp 20 lần</td><td>Xác suất bắt cao</td><td>Chậm hơn, vẫn là xác suất</td></tr>
+<tr><td>C. Xen kẽ xác định: hai session, chờ cả hai đã đếm xong rồi mới cho chèn (hook trong service cho test, hoặc dùng khoá ngoài)</td><td>Đỏ chắc chắn với code sai</td><td>Cần một điểm chèn hook; viết lâu hơn</td></tr>
+</tbody></table></div>
+<p><strong>Chọn B và C.</strong> C chứng minh đúng race này; B bắt các race khác chưa nghĩ tới. Chạy cả hai trước khi sửa code và thấy chúng đỏ.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> Với B, ước lượng số lần lặp cần để chắc chắn tới 99% là bắt được.</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Giả sử với 50 request thả cùng lúc qua rào chắn, độ lệch thời điểm bắt đầu khoảng 20 ms, khoảng hở 3 ms: xác suất có ít nhất hai request rơi vào cùng một khoảng hở trong một lần chạy gần như bằng 1 (mô hình ở widget phần 02).</li>
+<li>Nhưng bán quá chỉ xảy ra khi chồng lấn rơi đúng lúc còn 1 chỗ. Với capacity 10 và 50 request, chỗ cuối luôn bị tranh nên vẫn rất dễ bắt.</li>
+<li>Nếu một lần chạy chỉ có xác suất 10%, cần khoảng 44 lần để đạt 99% (1 − 0,9<sup>44</sup> ≈ 0,99). Đó là lý do có C.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> Sau khi có test đỏ, sửa code thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Cách 1: khoá dòng suất diễn: <code>SELECT … FROM shows WHERE id = ? FOR UPDATE</code> rồi mới đếm và chèn. Mọi lần mua của một suất nối đuôi nhau; 8 ms mỗi lần, khoảng 125 lần mua mỗi giây cho một suất (ước lượng).</li>
+<li>Cách 2: cột <code>sold</code> trên <code>shows</code> và <code>UPDATE shows SET sold = sold + 1 WHERE id = ? AND sold &lt; capacity</code>; 0 dòng nghĩa là hết. Khoá ngắn hơn.</li>
+<li>Cách 3: tạo sẵn 500 dòng ghế, mỗi lần mua <code>UPDATE seats SET buyer = ? WHERE show_id = ? AND buyer IS NULL LIMIT 1</code> hoặc giữ ghế cụ thể bằng <code>UNIQUE</code>.</li>
+<li>Chọn cách 2 cho vé không có ghế cụ thể. Chạy lại B và C: phải xanh.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai và kiểm chứng thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ol class="list">
+<li>Viết B và C; chạy trên code hiện tại; ghi lại rằng chúng đỏ (ảnh chụp kết quả trong PR).</li>
+<li>Sửa theo cách 2; B và C xanh; thêm patch phá bất biến (bỏ <code>AND sold &lt; capacity</code>) vào job hằng đêm.</li>
+<li>Thêm kiểm tra bất biến định kỳ trên production: suất nào có <code>COUNT(tickets) &gt; capacity</code> hoặc khác <code>sold</code>.</li>
+<li>Load test trước lần mở bán sau: 2.000 request mỗi giây vào một suất 500 chỗ; đúng 500 vé, p99 thời gian mua.</li>
+<li>Xử lý 17 vé thừa: liên hệ khách, hoàn tiền hoặc chuyển suất, theo quyết định của nghiệp vụ.</li>
+</ol>
+</details>
+</div>
+
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Chẩn đoán test</td><td>"Test chưa đủ nhiều"</td><td><code>await</code> trong vòng lặp làm test tuần tự</td></tr>
+<tr><td>Chẩn đoán code</td><td>"Race condition"</td><td>Đếm bằng đọc nhất quán không khoá; tính được mức chồng lấn</td></tr>
+<tr><td>Test mới</td><td><code>Promise.all</code></td><td>Rào chắn, đủ kết nối, lặp có tính toán, và xen kẽ xác định</td></tr>
+<tr><td>Quy trình</td><td>Sửa rồi viết test</td><td>Test đỏ trước, sửa, test xanh, patch phá bất biến hằng đêm</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> thêm <code>sleep</code> ngẫu nhiên vào test; dùng pool 5 kết nối cho 50 request "song song"; sửa code trước khi có test đỏ.</p>
+</details>
+</div>
+
+<!-- C39 -->
+<div class="case" id="c39">
+<h3>C39. Một bug double-spend được báo, chưa tái hiện được</h3>
+<p class="src">Dựa trên: phần 02 và 04 của trang này; <a href="../idempotency-retries/index.html">Idempotency và retry</a>; <a href="../layering-business-invariants/index.html">Phân tầng và bất biến</a>.</p>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> Ví điện tử, <code>POST /transfers</code> có idempotency key, worker xử lý hoàn tiền qua BullMQ, MySQL 8.4.</li><li><strong>Đã xảy ra:</strong> Ba khách hàng trong một tháng có hai bút toán trừ tiền cho cùng một lần chuyển. Log không đủ để biết đường nào gây ra. Team chưa tái hiện được ở local.</li><li><strong>Đang làm:</strong> Có test cho từng hàm, đều xanh.</li></ul></div>
+<blockquote class="q">"Bạn dùng test để tìm và chặn bug này thế nào?"</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>Hai bút toán có cùng idempotency key không?</td><td>Có cùng <code>transfer_request_id</code> trong metadata; bảng idempotency chỉ có một dòng cho key đó.</td><td>Một request, hai lần ghi.</td></tr>
+<tr><td>Khoảng cách thời gian giữa hai bút toán?</td><td>Lần lượt 31 giây, 32 giây và 30 giây.</td><td>Gần đúng 30 giây: gợi ý một timeout hoặc stalled job.</td></tr>
+<tr><td>Ai ghi bút toán thứ hai?</td><td>Cả hai có <code>source = 'worker'</code>.</td><td>Không phải API, mà là worker xử lý sau.</td></tr>
+<tr><td>Worker làm gì?</td><td>Job "hoàn tất chuyển tiền": gọi ngân hàng (có thể chậm), rồi ghi bút toán. Không kiểm tra bút toán đã có.</td><td>Việc ghi không idempotent.</td></tr>
+<tr><td>Ngân hàng chậm bao lâu khi chậm?</td><td>Đôi khi 40–60 giây.</td><td>Lâu hơn lock 30 giây của BullMQ.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> nhìn khoảng cách thời gian. 30 giây là <code>lockDuration</code> mặc định của BullMQ (trang BullMQ); con số tròn trong dữ liệu sự cố thường là một cấu hình.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Giả thuyết của bạn là gì?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p>Worker gọi ngân hàng, chờ 45 giây. Nếu lời gọi đó chặn event loop (client HTTP đồng bộ, hoặc xử lý nặng sau khi nhận), lock 30 giây không được gia hạn; job bị coi là stalled và giao cho worker khác. Worker thứ hai gọi lại ngân hàng và ghi bút toán. Worker đầu xong và cũng ghi. Nếu không chặn event loop thì khả năng khác là job được thử lại sau lỗi timeout trong khi lời gọi đầu vẫn thành công. Cả hai giải thích đều cần một điều: việc ghi bút toán không idempotent.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> Viết test tái hiện nó thế nào? So các cách.</p>
+<details class="answer"><summary>Đáp án</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>A. Unit test với mock ngân hàng trả chậm</td><td>Nhanh</td><td>Không có BullMQ, không có lock, không có MySQL: không tái hiện được</td></tr>
+<tr><td>B. Integration: Redis và MySQL thật, BullMQ thật với <code>lockDuration</code> và <code>stalledInterval</code> nhỏ (1–2 giây), fake ngân hàng chặn event loop 3 giây</td><td>Tái hiện đúng cơ chế trong vài giây</td><td>Phải dựng Redis, rút ngắn thời gian cấu hình</td></tr>
+<tr><td>C. B, cộng một biến thể: fake ngân hàng không chặn nhưng trả lỗi timeout cho client sau khi đã ghi nhận</td><td>Kiểm tra giả thuyết thứ hai</td><td>Thêm một test</td></tr>
+</tbody></table></div>
+<p><strong>Chọn B và C.</strong> Cả hai kiểm tra cùng bất biến: mỗi <code>transfer_request_id</code> có đúng một bút toán trừ. Chúng phải đỏ trên code hiện tại.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> Sửa ở đâu để cả hai giả thuyết đều không còn gây hại?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Ràng buộc: <code>UNIQUE (transfer_request_id, kind)</code> trên bảng bút toán. Lần ghi thứ hai gặp 1062, worker coi là "đã xong" và bỏ qua.</li>
+<li>Gọi ngân hàng với idempotency key của ngân hàng (nếu có), cùng <code>transfer_request_id</code>.</li>
+<li>Không chặn event loop: client HTTP bất đồng bộ có timeout; xử lý nặng đưa vào sandboxed processor.</li>
+<li>Trạng thái của chuyển tiền trong MySQL (<code>pending_bank</code>, <code>completed</code>), cập nhật có điều kiện; job chạy lại đọc trạng thái trước khi gọi ngân hàng.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> Làm sao để loại bug này bị bắt trước khi lên production lần sau, kể cả ở một job khác?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Một bộ test "chạy hai lần" chung cho mọi job: mỗi job chạy cùng một input hai lần (tuần tự và song song), kiểm tra hiệu ứng chỉ xảy ra một lần. Job mới phải có test này để merge.</li>
+<li>Test bất biến ở mức dữ liệu chạy sau mọi test integration: không có hai bút toán trùng <code>transfer_request_id</code>; số dư khớp tổng bút toán.</li>
+<li>Trên production: job đối soát mỗi giờ tìm bút toán trùng; alert ngay.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai và kiểm chứng thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ol class="list">
+<li>Dựng Redis và MySQL bằng Testcontainers cho bộ test worker.</li>
+<li>Viết B và C; xác nhận chúng đỏ với code hiện tại; lưu kết quả trong PR.</li>
+<li>Migration thêm <code>UNIQUE (transfer_request_id, kind)</code>: kiểm tra trước là không có dòng vi phạm (ngoài ba trường hợp đã biết, được xử lý trước).</li>
+<li>Sửa worker; B và C xanh; thêm patch bỏ ràng buộc vào job phá bất biến hằng đêm.</li>
+<li>Hoàn tiền cho ba khách; theo dõi số lần worker gặp 1062 (nghĩa là ràng buộc đang chặn một lần chạy trùng) và số sự kiện stalled.</li>
+</ol>
+</details>
+</div>
+
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Đọc dữ liệu sự cố</td><td>Xem log</td><td>Nhận ra khoảng 30 giây là lock của BullMQ</td></tr>
+<tr><td>Tái hiện</td><td>Thử lại ở local</td><td>Test với Redis và MySQL thật, rút ngắn cấu hình để tái hiện trong vài giây</td></tr>
+<tr><td>Sửa</td><td>Thêm kiểm tra trong code</td><td>Ràng buộc <code>UNIQUE</code>, trạng thái trong MySQL, không chặn event loop</td></tr>
+<tr><td>Phòng ngừa</td><td>Review job kỹ hơn</td><td>Test "chạy hai lần" bắt buộc cho mọi job; đối soát trên production</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> tăng <code>lockDuration</code> lên 5 phút và đóng ticket; viết test với mock BullMQ; sửa mà chưa có test đỏ.</p>
+</details>
+</div>
+</section>
+
+<!-- 10 -->
+<section id="s10">
+<header><span class="num">10</span><h2>Câu hỏi còn mở</h2></header>
+<p class="prose">Số thứ tự trùng với Open questions trong <code>.claude/docs/LEARNING_LOG.md</code>. Log là bản gốc.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>#</th><th>Câu hỏi</th><th>Trạng thái</th></tr></thead>
+<tbody>
+<tr><td>45</td><td>Trên lab, container <code>mysql:8.4</code> khởi động mất bao lâu tới khi nhận kết nối, và tmpfs cộng <code>innodb_flush_log_at_trx_commit = 2</code> giảm thời gian bộ test bao nhiêu so với cấu hình mặc định?</td><td>Mở. E56.</td></tr>
+<tr><td>46</td><td>Testcontainers <code>withReuse()</code> giữ lại container theo hash của cấu hình tạo container (đọc trong mã nguồn 12.2.1). Khi chuyển giữa các branch có migration khác nhau, dùng lại container có an toàn không, và làm sao biết schema trong đó đúng với branch hiện tại?</td><td>Mở.</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- 11 -->
+<section id="s11">
+<header><span class="num">11</span><h2>Tài liệu tham khảo</h2></header>
+<div class="prose"><ul>
+<li>MySQL 8.4 Reference Manual: Statements That Cause an Implicit Commit; Server SQL Modes (<code>STRICT_TRANS_TABLES</code>, <code>ONLY_FULL_GROUP_BY</code>); Unicode Character Sets (<code>utf8mb4_0900_ai_ci</code>); CHECK Constraints; the <code>data_lock_waits</code> table</li>
+<li>Testcontainers for Node.js 12.2.1, mã nguồn: <code>@testcontainers/mysql</code> (<code>mysql-container.js</code>: mặc định database, user, mật khẩu, thời gian chờ), <code>generic-container.js</code> (<code>withReuse</code>, <code>withTmpFs</code>)</li>
+<li>SQLite documentation: Datatypes In SQLite (độ dài <code>VARCHAR</code> không được thực thi), Collating Sequences (BINARY mặc định), Transactions</li>
+<li>Jest documentation: <code>globalSetup</code>, <code>JEST_WORKER_ID</code></li>
+<li>Kent C. Dodds, "The Testing Trophy"; Martin Fowler, "Test Pyramid" và "Mocks Aren't Stubs"</li>
+</ul></div>
+<h3>Mức kiểm chứng</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>Khẳng định</th><th>Nguồn</th></tr></thead>
+<tbody>
+<tr><td>1062 cho email khác hoa thường; 1406; 3819; 1055; commit ngầm khi <code>START TRANSACTION</code> lồng</td><td>sandbox của Claude, MySQL 8.0.46; chưa chạy trên 8.4 trong container (E55)</td></tr>
+<tr><td><code>SUM(bigint)</code> là <code>DECIMAL</code>, mysql2 trả chuỗi</td><td>sandbox 8.0.46 và mã nguồn mysql2 3.24.6</td></tr>
+<tr><td>Chi phí dọn mỗi test: rollback, <code>DELETE</code>, <code>TRUNCATE</code>, database mới, dữ liệu riêng</td><td>đo trên sandbox (mysql2, 10 bảng, 30 lần lặp); chưa đo trong container (E56)</td></tr>
+<tr><td>Hành vi của SQLite trong bảng phần 02</td><td>tài liệu SQLite; chưa chạy</td></tr>
+<tr><td>Mặc định của module MySQL của Testcontainers; <code>withReuse</code> theo hash cấu hình</td><td>mã nguồn Testcontainers 12.2.1</td></tr>
+<tr><td>Xác suất bắt race theo số lần chạy</td><td>mô hình; chưa đo (E57)</td></tr>
+</tbody></table></div>
+</section>
+</main>
+
+</div>
+
+<script>
+const DEFS=`<defs><marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>`;
+function B(x,y,w,h,cls,t,sub){
+  const tx=x+w/2;
+  return `<g class="n ${cls||''}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="5"/>`+
+  `<text class="tb" x="${tx}" y="${y+(sub?h/2-8:h/2)}" text-anchor="middle" dominant-baseline="central">${t}</text>`+
+  (sub?`<text class="ts" x="${tx}" y="${y+h/2+10}" text-anchor="middle" dominant-baseline="central">${sub}</text>`:'')+`</g>`;
+}
+const A=(d,cls)=>`<path d="${d}" class="edge ${cls||''}" marker-end="url(#arw)"/>`;
+const T=(x,y,t,anchor,cls)=>`<text class="${cls||'lbl'}" x="${x}" y="${y}" text-anchor="${anchor||'start'}">${t}</text>`;
+const $=id=>document.getElementById(id);
+const fmt=n=>Math.round(n).toLocaleString('vi-VN');
+const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+// Mounts a stepper into <div class="frame" id="ID"></div>; steps may be replaced via the returned set().
+function stepper(id,{title,vb,steps,draw,after,extra}){
+  const el=document.getElementById(id);
+  el.innerHTML=`<div class="ph"><strong>${title}</strong><span class="meta"></span></div><div class="bd">
+  ${extra||''}<h4 class="st-t"></h4>
+  <svg viewBox="${vb}" role="img"></svg>
+  <div class="desc" aria-live="polite"><div class="st-d"></div><pre hidden></pre></div>
+  <div class="nav"><button data-d="-1">Trước</button><button data-d="1" class="primary">Tiếp</button></div></div>`;
+  const svg=el.querySelector('svg'),t=el.querySelector('.st-t'),d=el.querySelector('.st-d'),pre=el.querySelector('pre'),meta=el.querySelector('.meta');
+  const [pv,nx]=el.querySelectorAll('.nav button');let i=0;
+  function render(){const s=steps[i];svg.innerHTML=DEFS+draw(s,i);svg.setAttribute('aria-label',s.t);t.textContent=s.t;d.textContent=s.d;
+    pre.hidden=!s.c;pre.textContent=s.c||'';meta.textContent=`bước ${i+1} / ${steps.length}`;pv.disabled=i===0;nx.disabled=i===steps.length-1;after&&after(s,el);}
+  function go(k){i=Math.max(0,Math.min(steps.length-1,i+k));render();}
+  pv.onclick=()=>go(-1);nx.onclick=()=>go(1);
+  el.tabIndex=0;el.addEventListener('keydown',e=>{if(e.target.closest('select,input'))return;if(e.key==='ArrowRight')go(1);if(e.key==='ArrowLeft')go(-1);});
+  render();
+  return {set(ns){steps=ns;i=0;render();},el};
+}
+
+/* ---------- 01: which bugs does the suite catch ---------- */
+const KINDS=[
+  ['unit','Unit test, repository bị mock',300,2],
+  ['sqlite','Test repository trên SQLite in-memory',150,4],
+  ['mysql','Integration trên MySQL 8.4 thật',150,15],
+  ['conc','Test đồng thời trên MySQL (20 request qua rào chắn)',10,1500],
+  ['http','Test HTTP: app thật, MySQL thật',40,60]
+];
+// c = caught, p = partial / only sometimes or only if the test checks it
+const BUGS=[
+  ['Phí làm tròn sai ở x,5',{unit:'c',sqlite:'c',mysql:'c',http:'c'}],
+  ['Email trùng khác hoa thường (1062)',{mysql:'c',http:'c'}],
+  ['Ghi chú 300 ký tự vào VARCHAR(200) (1406)',{mysql:'c',http:'c'}],
+  ['Số dư âm khi hai request rút cùng lúc',{conc:'c'}],
+  ['GROUP BY không hợp lệ với ONLY_FULL_GROUP_BY (1055)',{mysql:'c',http:'c'}],
+  ['Repository tự commit, lỗi giữa chừng để lại nửa giao dịch',{mysql:'c',sqlite:'p',conc:'p'}],
+  ['SUM trả chuỗi, cộng thành nối chuỗi',{mysql:'c',http:'c'}],
+  ['?active=false thành true do ép kiểu ngầm',{http:'c'}],
+  ['Trùng dữ liệu trả 500 thay vì 409',{http:'c',mysql:'p'}],
+  ['Deadlock khi hai lần chuyển ngược chiều',{conc:'p'}]
+];
+const WHY={
+  unit:'mock trả đúng điều người viết test nghĩ',sqlite:'SQLite khác collation, độ dài chuỗi, GROUP BY',mysql:'chạy SQL thật nhưng tuần tự, không qua HTTP',
+  conc:'chỉ nhìn bất biến khi chạy song song',http:'đi qua pipe, filter và MySQL thật'};
+$('suOpts').innerHTML=KINDS.map(([k,t])=>`<label><input type="checkbox" id="su_${k}"${k==='unit'?' checked':''}><span>${esc(t)}</span></label>`).join('');
+function su(){
+  const on=KINDS.map(k=>k[0]).filter(k=>$('su_'+k).checked);
+  let caught=0,part=0;
+  const rows=BUGS.map(([n,m],i)=>{
+    const by=on.filter(k=>m[k]==='c'),pb=on.filter(k=>m[k]==='p');
+    let cls,res,why;
+    if(by.length){cls='ok';res='bắt được';why=by.map(k=>KINDS.find(x=>x[0]===k)[1].split(',')[0].split(' (')[0]).join('; ');caught++;}
+    else if(pb.length){cls='warn';res='đôi khi';why=pb.map(k=>KINDS.find(x=>x[0]===k)[1].split(',')[0].split(' (')[0]).join('; ');part++;}
+    else{cls='bad';res='bỏ sót';why=on.length?'không loại test nào đang bật chạm tới chỗ này':'chưa có test nào';}
+    return `<tr class="${cls}"><td>${i+1}. ${esc(n)}</td><td>${res}</td><td>${esc(why)}</td></tr>`;
+  });
+  $('suTbl').innerHTML=`<thead><tr><th>Lỗi</th><th>Kết quả</th><th>Nhờ loại test nào</th></tr></thead><tbody>${rows.join('')}</tbody>`;
+  let sec=0;KINDS.forEach(([k,,n,ms])=>{if(on.includes(k))sec+=n*ms/1000;});
+  if(on.some(k=>['mysql','conc','http'].includes(k)))sec+=20;
+  $('suStats').innerHTML=[['Lỗi bắt được',`${caught} / ${BUGS.length}`,caught>=8?'good':'bad'],['Chỉ đôi khi',part,''],['Thời gian CI (ước lượng)',sec<60?`${Math.round(sec)} giây`:`${(sec/60).toFixed(1)} phút`,'']]
+    .map(([k,v,c])=>`<div class="stat"><span>${k}</span><b${c?` class="${c}"`:''}>${v}</b></div>`).join('');
+  let d;
+  if(on.length===1&&on[0]==='unit')d='Chỉ unit test với mock: bắt được lỗi công thức, bỏ sót mọi lỗi nằm ở chỗ code gặp MySQL, ở HTTP và ở đồng thời. Đây là bộ test "92% coverage" của phần mở đầu.';
+  else if(on.includes('sqlite')&&!on.includes('mysql'))d='SQLite cho cảm giác có database, nhưng nó khác MySQL ở đúng những chỗ gây lỗi: collation, độ dài chuỗi, GROUP BY. Lỗi 2, 3, 5, 7 vẫn lọt.';
+  else if(caught+part===BUGS.length&&!on.includes('unit'))d='Bắt được hết, nhưng thiếu unit test thì các trường hợp biên của logic thuần (hàng trăm giá trị làm tròn) phải chạy qua database, chậm và khó đọc lỗi.';
+  else if(caught===BUGS.length-1&&part===1)d='Gần đủ. Deadlock chỉ đôi khi hiện ra trong test bắn cùng lúc; thêm một test xen kẽ xác định cho cặp chuyển ngược chiều.';
+  else{const miss=BUGS.map((b,i)=>[b,i]).filter(([b])=>!on.some(k=>b[1][k]));d=miss.length?`Còn bỏ sót: ${miss.map(([b,i])=>i+1).join(', ')}. ${miss.some(([b])=>b[1].conc)?'Lỗi đồng thời cần test chạy song song thật. ':''}${miss.some(([b])=>b[1].http&&!b[1].mysql)?'Lỗi ép kiểu ở pipe chỉ test HTTP mới thấy.':''}`:'Mọi lỗi đều được ít nhất một loại test bắt.';}
+  $('suDesc').textContent=d;$('suMeta').textContent=`${caught} / ${BUGS.length} lỗi`;
+}
+KINDS.forEach(([k])=>$('su_'+k).addEventListener('change',su));su();
+
+/* ---------- 02: nested transaction trap ---------- */
+const NS=[
+ {t:'Test mở transaction',d:'Ý chính: test bọc mọi thứ trong một transaction và định rollback ở cuối. Bảng đang rỗng.',c:'-- beforeEach\nSTART TRANSACTION;',st:{acc:'none',led:'none'}},
+ {t:'Test tạo tài khoản',d:'Dòng accounts đã ghi trong transaction của test, chưa commit. Theo kế hoạch, ROLLBACK cuối test sẽ xoá nó.',c:"INSERT INTO accounts (id, balance_minor) VALUES (1, 100000);",st:{acc:'hot',led:'none'}},
+ {t:'transfer() mở transaction của nó',d:'MySQL không có transaction lồng nhau. START TRANSACTION trong khi một transaction đang mở sẽ commit transaction đó trước. Dòng accounts của test vừa được commit, không ai hay biết.',c:'-- bên trong transfer()\nSTART TRANSACTION;   -- commit ngầm transaction của test',st:{acc:'row',led:'none'}},
+ {t:'transfer() ghi',d:'Bút toán và số dư mới nằm trong transaction của transfer(), chưa commit.',c:'INSERT INTO ledger_entries …;\nUPDATE accounts SET balance_minor = 30000 WHERE id = 1;',st:{acc:'hot',led:'hot'}},
+ {t:'transfer() commit',d:'transfer() làm đúng việc của nó: commit. Giờ không còn transaction nào đang mở.',c:'COMMIT;',st:{acc:'row',led:'row'}},
+ {t:'Test rollback, nhưng không còn gì để rollback',d:'ROLLBACK chạy khi không có transaction nào, nên không làm gì. Tài khoản và bút toán còn nguyên trong database. Test vẫn xanh.',c:'-- afterEach\nROLLBACK;   -- không có tác dụng',st:{acc:'miss',led:'miss'}},
+ {t:'Test sau thấy dữ liệu của test trước',d:'Test kế tiếp tạo tài khoản id 1 và nhận lỗi 1062, hoặc đếm sai số dòng. Nó đỏ hay xanh tuỳ thứ tự chạy: một test "flaky" mà nguyên nhân nằm ở test khác. Sửa: với code tự quản lý transaction, dọn bằng DELETE hoặc dùng dữ liệu riêng cho mỗi test.',c:"-- test kế tiếp\nINSERT INTO accounts (id, balance_minor) VALUES (1, 50000);\nERROR 1062 (23000): Duplicate entry '1' for key 'accounts.PRIMARY'",st:{acc:'miss',led:'miss'}}
+];
+stepper('nest',{title:'Rollback sau mỗi test, khi code tự mở transaction',vb:'0 0 680 96',steps:NS,draw:(s)=>{
+  const lab={none:'chưa có',hot:'đã ghi, chưa commit',row:'đã commit',miss:'còn lại sau test'};
+  const cls={none:'dim',hot:'hot',row:'row',miss:'miss'};
+  let g=T(20,18,'accounts','start','tb')+T(360,18,'ledger_entries','start','tb');
+  g+=B(20,30,300,52,cls[s.st.acc],s.st.acc==='none'?'(trống)':`id 1: ${s.st.led==='none'?'100.000':'30.000'}`,lab[s.st.acc]);
+  g+=B(360,30,300,52,cls[s.st.led],s.st.led==='none'?'(trống)':'2 bút toán',lab[s.st.led]);
+  return g;}});
+
+/* ---------- 02: isolation cost ---------- */
+const ISO={
+  rb:{n:'Transaction, rollback',per:()=>0,conc:'không',note:'Hỏng khi code tự mở transaction (commit ngầm); không test được hành vi sau commit, khoá giữa nhiều kết nối, đồng thời.'},
+  del:{n:'DELETE các bảng',per:t=>0.7*t,conc:'có',note:'Xoá theo thứ tự con trước cha (khoá ngoại). Dữ liệu dùng chung (loại tiền) phải nằm trong migration hoặc tạo lại.'},
+  trunc:{n:'TRUNCATE mọi bảng',per:t=>10.6*t,conc:'có',note:'TRUNCATE là xoá rồi tạo lại bảng: đắt với bảng nhỏ, commit ngầm, đặt lại AUTO_INCREMENT. Cần tắt kiểm tra khoá ngoại.'},
+  db:{n:'Database mới mỗi test',per:t=>11.8*t,conc:'có',note:'Sạch tuyệt đối nhưng đắt nhất. Chỉ hợp cho test của migration.'},
+  uniq:{n:'Dữ liệu riêng, không dọn',per:()=>0,conc:'có',note:'Rẻ nhất và hợp với chạy song song. Test không được đếm cả bảng hay giả định bảng rỗng; mọi truy vấn lọc theo id của chính test.'}
+};
+function iso(){
+  const S=$('isS').value,N=Math.max(1,parseInt($('isN').value,10)||400),Tn=Math.max(1,parseInt($('isT').value,10)||10),W=Math.max(1,Math.min(16,parseInt($('isW').value,10)||4));
+  const rows=Object.entries(ISO).map(([k,v])=>{const per=v.per(Tn),tot=N*per/W/1000;
+    return `<tr class="${k===S?'sel':''}"><td>${v.n}</td><td>${per<0.05?'≈ 0':per.toFixed(1)+' ms'}</td><td>${tot<0.05?'≈ 0':tot.toFixed(1)+' s'}</td><td>${v.conc}</td></tr>`;}).join('');
+  $('isTbl').innerHTML=`<thead><tr><th>Cách</th><th>Dọn mỗi test</th><th>Dọn cả bộ (${W} worker)</th><th>Dùng cho test đồng thời</th></tr></thead><tbody>${rows}</tbody>`;
+  const v=ISO[S],per=v.per(Tn),tot=N*per/W/1000,fixed=20+W*0.6;
+  $('isStats').innerHTML=[['Dọn mỗi test',per<0.05?'≈ 0 ms':`${per.toFixed(1)} ms`,''],['Dọn cả bộ',`${tot.toFixed(1)} s`,tot>60?'bad':''],['Khởi động và migration (ước lượng)',`${fixed.toFixed(0)} s`,'']]
+    .map(([k,x,c])=>`<div class="stat"><span>${k}</span><b${c?` class="${c}"`:''}>${x}</b></div>`).join('');
+  $('isDesc').textContent=v.note;$('isMeta').textContent=v.n;
+}
+['isS','isN','isT','isW'].forEach(id=>$(id).addEventListener('input',iso));iso();
+
+/* ---------- 02: race reproduction ---------- */
+function ra(){
+  const k=Math.max(2,Math.min(200,parseInt($('raK').value,10)||2));
+  const W=Math.max(0.1,parseFloat($('raW').value)||2),J=Math.max(0.1,parseFloat($('raJ').value)||20);
+  const q=Math.max(0,1-(k-1)*W/J),p=1-Math.pow(q,k);
+  const need=p>=0.999999?1:p<=0?Infinity:Math.ceil(Math.log(0.01)/Math.log(1-p));
+  const L=60,Wd=600,H=110,TOP=24,maxN=50;let g=`<line class="axis" x1="${L}" y1="${H}" x2="${L+Wd}" y2="${H}"/><line class="axis" x1="${L}" y1="${TOP}" x2="${L}" y2="${H}"/>`;
+  g+=T(L-6,TOP+4,'100%','end','ts')+T(L-6,H,'0%','end','ts')+T(L,H+18,'1 lần','start','ts')+T(L+Wd,H+18,`${maxN} lần chạy`,'end','ts');
+  let d='';for(let n=1;n<=maxN;n++){const y=H-(1-Math.pow(1-p,n))*(H-TOP);const x=L+(n-1)/(maxN-1)*Wd;d+=(n===1?'M':'L')+x.toFixed(1)+' '+y.toFixed(1)+' ';}
+  g+=`<path d="${d}" class="curve"/>`;
+  const y99=H-0.99*(H-TOP);g+=`<line class="tick" x1="${L}" y1="${y99}" x2="${L+Wd}" y2="${y99}"/>`+T(L+Wd,y99-6,'mốc 99%','end','ts');
+  $('raSvg').innerHTML=g;
+  $('raStats').innerHTML=[['Xác suất bắt trong một lần chạy',`${(p*100).toFixed(p<0.01?2:0)}%`,p<0.2?'bad':''],['Số lần chạy để chắc 99%',need===Infinity?'không bao giờ':fmt(need),need>20?'bad':'good']]
+    .map(([a,b,c])=>`<div class="stat"><span>${a}</span><b${c?` class="${c}"`:''}>${b}</b></div>`).join('');
+  $('raDesc').textContent=p>=0.99?`Với ${k} request thả trong ${J} ms và khoảng hở ${W} ms, gần như lần nào cũng có hai request chồng lên nhau. Một lần chạy là đủ để test đỏ nếu code sai.`
+    :`Mỗi lần chạy chỉ có khoảng ${(p*100).toFixed(1)}% khả năng hai request rơi vào cùng khoảng hở. Cần khoảng ${need===Infinity?'vô hạn':fmt(need)} lần để chắc 99% là bắt được. Thu hẹp độ lệch bằng rào chắn, tăng số request, hoặc viết test xen kẽ xác định (luôn đỏ ngay lần đầu).`;
+  $('raMeta').textContent=`${(p*100).toFixed(0)}% mỗi lần`;
+}
+['raK','raW','raJ'].forEach(id=>$(id).addEventListener('input',ra));ra();
+</script>
+</body>
+</html>
