@@ -1,0 +1,1106 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cache và invalidation: nhanh mà không sai</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F2F4F6; --surface:#FFFFFF; --ink:#18203A; --ink-2:#56607A; --ink-3:#8A93A8;
+  --rule:#CCD3DD; --rule-strong:#8C96AB;
+  --struct:#3446B8; --struct-bg:#E6E9FA;            /* cấu trúc index, chrome của trang */
+  --row:#16795F;    --row-bg:#DDF2EA;               /* dữ liệu row thật */
+  --hot:#9A5F00;    --hot-bg:#FCEFD2; --hot-line:#E3A21A;  /* bị ghi, bị chạm, bị lọc */
+  --miss:#B5302B;   --miss-bg:#FBE1DF;              /* đọc từ disk, việc thừa, lỗi */
+  --path:#0B7A8A;   --path-bg:#D8F1F3;              /* đường đi hoặc khoảng đang đọc */
+  --key:#A8327A;    --key-bg:#F8E0EE;               /* con trỏ: PK, TID */
+  --ram:#5B4BB0;    --ram-bg:#E7E3FA;               /* hit trong buffer pool */
+  --grid:rgba(52,70,184,.06);
+  --r-s:4px; --r-m:8px;
+  --sans:"Instrument Sans",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --paper:#0F1320; --surface:#171C2B; --ink:#E6E9F2; --ink-2:#A3ABC0; --ink-3:#6E7790;
+  --rule:#2C3448; --rule-strong:#55607A;
+  --struct:#97A3FF; --struct-bg:#232A55;
+  --row:#5FD0AE;    --row-bg:#123A31;
+  --hot:#F2BE5C;    --hot-bg:#3B2C0E; --hot-line:#E3A21A;
+  --miss:#FF8A84;   --miss-bg:#3E1A1A;
+  --path:#5ED3E0;   --path-bg:#113A40;
+  --key:#F28DC4;    --key-bg:#3E1A2E;
+  --ram:#B7A8FF;    --ram-bg:#2A2350;
+  --grid:rgba(151,163,255,.05);
+}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important;animation:none!important}}
+body{margin:0;color:var(--ink);font:400 17px/1.65 var(--sans);
+  background-color:var(--paper);
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:24px 24px}
+a{color:var(--struct)}
+:focus-visible{outline:2px solid var(--struct);outline-offset:2px}
+
+/* layout */
+.shell{display:grid;grid-template-columns:230px minmax(0,1fr);gap:56px;max-width:1180px;margin:0 auto;padding:0 32px}
+nav.toc{position:sticky;top:0;align-self:start;height:100vh;padding:48px 0;overflow:auto}
+nav.toc p{font-weight:600;margin:0 0 12px;font-size:15px}
+nav.toc ol,.mobile-toc ol{list-style:none;margin:0;padding:0;counter-reset:s}
+nav.toc li,.mobile-toc li{counter-increment:s;margin:0}
+nav.toc a,.mobile-toc a{display:grid;grid-template-columns:28px 1fr;padding:5px 0;color:var(--ink-2);text-decoration:none;font-size:14.5px;line-height:1.4}
+nav.toc a::before,.mobile-toc a::before{content:counter(s,decimal-leading-zero);font:500 12px/1.9 var(--mono);color:var(--ink-3)}
+nav.toc a:hover,nav.toc a.on{color:var(--struct)}
+main{min-width:0;padding:56px 0 120px}
+.prose{max-width:720px}
+section{padding-top:72px}
+section>header{display:grid;grid-template-columns:auto 1fr;gap:0 18px;align-items:baseline;max-width:720px;margin-bottom:12px}
+section>header .num{font:500 15px var(--mono);color:var(--struct);border:1.5px solid var(--struct);border-radius:var(--r-s);padding:2px 7px;transform:translateY(-4px)}
+h1,h2,h3,h4{line-height:1.2;letter-spacing:-.015em;margin:0}
+h1{font-size:clamp(2.3rem,5.4vw,3.9rem);font-weight:700;letter-spacing:-.03em;line-height:1.02;max-width:14ch;margin-bottom:20px}
+.lede{font-size:19px;color:var(--ink-2);max-width:56ch;margin-bottom:28px}
+h2{font-size:clamp(1.6rem,3vw,2.1rem);font-weight:650}
+h3{font-size:1.2rem;font-weight:600;margin:36px 0 8px}
+p{margin:0 0 14px}
+ul,ol.list{margin:0 0 16px;padding-left:22px}
+li{margin:4px 0}
+code{font:0.88em var(--mono);background:var(--struct-bg);color:var(--ink);padding:1px 5px;border-radius:3px}
+pre{font:13.5px/1.6 var(--mono);background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:var(--r-s);padding:14px 16px;overflow-x:auto;margin:0 0 18px;max-width:720px}
+pre code{background:none;padding:0}
+.tablewrap{overflow-x:auto;max-width:720px;margin:0 0 20px}
+table{border-collapse:collapse;width:100%;max-width:720px;margin:0 0 20px;font-size:15px;background:var(--surface)}
+.tablewrap table{margin:0;min-width:560px}
+th,td{text-align:left;padding:9px 12px;border:1px solid var(--rule);vertical-align:top}
+th{font-weight:600;background:var(--struct-bg)}
+
+/* widget frame: styled like a page, header strip = page header */
+.frame{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);margin:22px 0 28px;max-width:920px;overflow:hidden}
+.frame>.ph{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:9px 16px;border-bottom:1px solid var(--rule);background:var(--struct-bg);font-size:14px}
+.frame>.ph strong{font-weight:600}
+.frame>.ph .meta{margin-left:auto;font:500 12.5px var(--mono);color:var(--ink-2)}
+.frame .bd{padding:16px;min-width:0}
+.frame svg{display:block;width:100%;height:auto}
+.st-t{font:600 16px var(--sans);margin:0 0 8px}
+.desc{background:var(--paper);border-radius:var(--r-s);padding:12px 14px;margin-top:12px;min-height:84px;font-size:15.5px;color:var(--ink-2)}
+.desc pre{margin:10px 0 0;font-size:12.5px;border-left-color:var(--rule-strong)}
+.nav{display:flex;gap:8px;margin-top:12px;align-items:center}
+button{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 14px;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--struct);color:var(--struct)}
+button:disabled{opacity:.4;cursor:default}
+button.primary,button[aria-pressed="true"]{background:var(--struct);border-color:var(--struct);color:var(--surface)}
+button.primary:hover:not(:disabled),button[aria-pressed="true"]:hover{color:var(--surface);filter:brightness(1.1)}
+input,select{font:500 14px var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r-s);padding:6px 10px}
+input[type=number]{width:84px}
+input[type=range],input[type=checkbox]{accent-color:var(--struct)}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-top:12px}
+.stat{background:var(--paper);border-radius:var(--r-s);padding:8px 12px}
+.stat span{display:block;font-size:13px;color:var(--ink-2)}
+.stat b{font:600 20px var(--sans);font-variant-numeric:tabular-nums}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;color:var(--ink-2);margin-top:12px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:14px;height:14px;border-radius:3px;border:2px solid;display:inline-block}
+.fine{font-size:13.5px;color:var(--ink-2);margin:10px 0 0}  /* chú thích nhỏ dưới widget */
+
+/* svg text */
+.tb{font:600 14px var(--sans)} .t{font:400 13px var(--sans)} .ts{font:400 12px var(--sans)} .tm{font:500 12.5px var(--mono)}
+.lbl{fill:var(--ink-2);font:400 12.5px var(--sans)}
+
+/* callouts */
+.note{border-left:3px solid var(--hot-line);background:var(--hot-bg);padding:12px 16px;border-radius:0 var(--r-s) var(--r-s) 0;margin:18px 0;max-width:720px;font-size:16px}
+.note strong{color:var(--hot)}
+.senior{border:1.5px solid var(--struct);border-radius:var(--r-m);padding:14px 18px;margin:22px 0;max-width:720px;background:var(--surface)}
+.senior h4{font-size:16px;margin-bottom:6px;color:var(--struct)}
+.senior p:last-child,.senior ul:last-child{margin-bottom:0}
+details{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-s);padding:10px 14px;margin:10px 0;max-width:720px}
+details summary{cursor:pointer;font-weight:600}
+details[open] summary{margin-bottom:8px}
+details.answer{background:var(--paper);border-style:dashed;margin:10px 0 0}
+details.answer summary{font-weight:500;color:var(--struct)}
+.tag{display:inline-block;font:500 12px var(--sans);color:var(--ink-2);border:1px solid var(--rule-strong);border-radius:999px;padding:0 8px;margin-right:6px;vertical-align:1px}
+
+/* hero brief: mục tiêu, cần biết trước, trạng thái */
+.brief{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px 24px;background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-m);padding:14px 18px;max-width:920px;margin:0 0 8px;font-size:15px}
+.brief h4{font-size:14px;color:var(--struct);margin:0 0 4px}
+.brief ul{margin:0;padding-left:18px}
+.brief p{margin:0}
+
+.mobile-toc{display:none}
+@media (max-width:900px){
+  .shell{grid-template-columns:1fr;padding:0 16px;gap:0}
+  nav.toc{display:none}
+  .mobile-toc{display:block;margin-top:20px}
+  main{padding-top:32px}
+  .frame .bd{padding:12px}
+  body{font-size:16px}
+}
+
+
+/* bài toán thực tế: dạng phỏng vấn */
+.case{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--struct);border-radius:0 var(--r-m) var(--r-m) 0;padding:16px 20px;margin:22px 0;max-width:720px}
+.case>h3{margin:0 0 6px;font-size:1.15rem}
+.case .src{font-size:13.5px;color:var(--ink-2);margin:0 0 12px}
+.case .ctx{background:var(--paper);border:1px solid var(--rule);border-radius:var(--r-m);padding:10px 14px;margin:8px 0 0;font-size:15px}
+.case .ctx-h{margin:0 0 4px;font-weight:600;color:var(--struct)}
+.case .ctx ul{margin:0;padding-left:20px}
+.case .ctx li{margin:2px 0}
+.case .q{margin:10px 0 4px;padding:8px 0 8px 14px;border-left:3px solid var(--key);font-size:1.06rem;font-weight:500;color:var(--ink);max-width:none}
+.case details{max-width:none;margin:12px 0 0}
+.case details.answer[open]{background:var(--surface)}
+.case details.clar>summary,.case details.rubric>summary{color:var(--key)}
+.case .fu{margin:18px 0 0;padding-top:14px;border-top:1px solid var(--rule)}
+.case .fq{margin:0;font-weight:500}
+.case .fq b{color:var(--struct);margin-right:4px}
+.ah{font-size:15.5px;color:var(--struct);margin:20px 0 6px}
+.answer .tablewrap{max-width:none}
+@media (max-width:900px){.case{padding:14px}}
+
+/* ---- page widgets ---- */
+.n rect{fill:var(--surface);stroke:var(--rule-strong);stroke-width:1}
+.n text{fill:var(--ink)}
+.n.struct rect{fill:var(--struct-bg);stroke:var(--struct)} .n.struct text{fill:var(--struct)}
+.n.row rect{fill:var(--row-bg);stroke:var(--row);stroke-width:1.6} .n.row text{fill:var(--row)}
+.n.hot rect{fill:var(--hot-bg);stroke:var(--hot);stroke-width:2} .n.hot text{fill:var(--hot)}
+.n.miss rect{fill:var(--miss-bg);stroke:var(--miss);stroke-width:2} .n.miss text{fill:var(--miss)}
+.n.path rect{fill:var(--path-bg);stroke:var(--path);stroke-width:2} .n.path text{fill:var(--path)}
+.n.ram rect{fill:var(--ram-bg);stroke:var(--ram);stroke-width:2} .n.ram text{fill:var(--ram)}
+.n.dim rect{fill:var(--paper);stroke:var(--rule);stroke-dasharray:4 3} .n.dim text{fill:var(--ink-3)}
+.edge{stroke:var(--rule-strong);stroke-width:1.2;fill:none}
+.edge.path{stroke:var(--path);stroke-width:2.4}
+.edge.hot{stroke:var(--hot);stroke-width:2.4}
+.edge.miss{stroke:var(--miss);stroke-width:2.4;stroke-dasharray:5 4}
+.edge.row{stroke:var(--row);stroke-width:2.4}
+.axis{stroke:var(--rule-strong);stroke-width:1}
+.capline{stroke:var(--miss);stroke-width:1.6;stroke-dasharray:6 4}
+.curve{fill:none;stroke:var(--path);stroke-width:2.4}
+.dot{fill:var(--struct)}
+.bar{fill:var(--path)} .bar.db{fill:var(--miss)} .bar.ok{fill:var(--row)}
+.exp{stroke:var(--struct);stroke-width:1.5;stroke-dasharray:3 3}
+.lg-path{border-color:var(--path);background:var(--path-bg)} .lg-row{border-color:var(--row);background:var(--row-bg)}
+.lg-miss{border-color:var(--miss);background:var(--miss-bg)} .lg-hot{border-color:var(--hot);background:var(--hot-bg)}
+.lg-ram{border-color:var(--ram);background:var(--ram-bg)} .lg-db{border-color:var(--miss);background:var(--miss)}
+.lg-line{border-color:var(--path);background:var(--path)} .lg-cap{border-color:var(--miss);background:transparent;border-style:dashed}
+.lg-exp{border-color:var(--struct);background:transparent;border-style:dashed}
+.calc{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px 14px;margin-bottom:12px}
+.calc label{display:flex;flex-direction:column;gap:4px;font-size:13.5px;color:var(--ink-2)}
+.calc input[type=range]{width:100%}
+.calc input[type=number]{width:100%;max-width:170px}
+.stat b.bad{color:var(--miss)} .stat b.good{color:var(--row)} .stat b.warn{color:var(--hot)}
+</style>
+</head>
+<body>
+
+<div class="shell">
+<nav class="toc" aria-label="Mục lục">
+  <p>Cache và invalidation</p>
+  <ol>
+    <li><a href="#s1">Bản chất vấn đề</a></li>
+    <li><a href="#s2">Cơ chế hoạt động</a></li>
+    <li><a href="#s3">Vì sao thiết kế như vậy</a></li>
+    <li><a href="#s4">Ví dụ</a></li>
+    <li><a href="#s5">Thí nghiệm</a></li>
+    <li><a href="#s6">Ảnh hưởng khi chạy production</a></li>
+    <li><a href="#s7">Hiểu lầm thường gặp</a></li>
+    <li><a href="#s8">Câu hỏi ôn tập</a></li>
+    <li><a href="#s9">Bài toán thực tế</a></li>
+    <li><a href="#s10">Câu hỏi còn mở</a></li>
+    <li><a href="#s11">Tài liệu tham khảo</a></li>
+  </ol>
+</nav>
+
+<main>
+<div class="hero">
+<h1>Cache và invalidation: nhanh mà không sai</h1>
+<p class="lede">Thêm cache trước database thì dễ: trang nhanh gấp mười, database nhẹ hẳn. Khó là giữ cache đúng. Giá đã đổi mà khách vẫn thấy giá cũ, hoặc một key hết hạn đúng giờ cao điểm làm database sập. Bài này đi qua các kiểu race làm cache giữ giá trị cũ, cách chặn chúng, và cách tránh "đàn trâu" request cùng lao vào database khi một key nóng hết hạn.</p>
+<div class="brief">
+  <div><h4>Mục tiêu</h4><ul>
+    <li>Chọn được kiểu cache (cache-aside, read-through, write-through, write-behind) cho một tình huống, và nói được mỗi kiểu mất gì.</li>
+    <li>Chỉ ra được race nào làm cache giữ giá trị cũ cho từng cách ghi, và chặn được bằng xoá sau khi ghi, TTL, version hoặc lease.</li>
+    <li>Thiết kế được cách chống stampede cho một key nóng: khoá một người tính lại, trả bản cũ trong lúc làm mới, làm mới sớm theo xác suất, TTL có jitter.</li>
+    <li>Tính được hit ratio giảm vài phần trăm làm tải database tăng bao nhiêu lần.</li>
+  </ul></div>
+  <div><h4>Cần biết trước</h4><ul>
+    <li><a href="../capacity-estimation/index.html">Ước lượng capacity</a>: QPS đỉnh, tải trên một key.</li>
+    <li><a href="../idempotency-retries/index.html">Idempotency và retry</a>: retry storm, jitter.</li>
+    <li><a href="../transactional-outbox/index.html">Transactional outbox</a>: phát event sau khi ghi.</li>
+  </ul></div>
+  <div><h4>Trạng thái</h4><p>Level 2 (prov.). Hành vi Redis (mặc định <code>noeviction</code>, lệnh <code>SET … NX PX</code>, script Lua kiểm tra version) đã thử trên Redis 7.0.15 trong sandbox của Claude. Các widget là mô hình; chưa đo trên lab (E38–E40).</p></div>
+</div>
+<details class="mobile-toc"><summary>Mục lục</summary><ol><li><a href="#s1">Bản chất vấn đề</a></li><li><a href="#s2">Cơ chế hoạt động</a></li><li><a href="#s3">Vì sao thiết kế như vậy</a></li><li><a href="#s4">Ví dụ</a></li><li><a href="#s5">Thí nghiệm</a></li><li><a href="#s6">Ảnh hưởng khi chạy production</a></li><li><a href="#s7">Hiểu lầm thường gặp</a></li><li><a href="#s8">Câu hỏi ôn tập</a></li><li><a href="#s9">Bài toán thực tế</a></li><li><a href="#s10">Câu hỏi còn mở</a></li><li><a href="#s11">Tài liệu tham khảo</a></li></ol></details>
+</div>
+
+<!-- 1 -->
+<section id="s1">
+<header><span class="num">01</span><h2>Bản chất vấn đề</h2></header>
+<div class="prose">
+<p>Trang sản phẩm nhận 20.000 lượt đọc mỗi giây; database chịu được khoảng 2.000. Team đặt Redis phía trước theo kiểu cache-aside: đọc cache trước, trượt (miss) thì đọc database rồi ghi vào cache với TTL 30 phút. Database nhẹ hẳn. Một tuần sau, admin đổi giá từ 100 thành 120, mà một phần khách vẫn thấy 100 trong suốt 30 phút.</p>
+<p>Vấn đề là cache và database là hai nơi lưu, không có transaction chung. Mỗi lần ghi, code phải làm hai việc: ghi database và làm gì đó với cache. Giống ghi đôi ở <a href="../transactional-outbox/index.html">trang outbox</a>, mỗi thứ tự làm đều có một cách chen ngang khiến cache giữ giá trị cũ. Khác ở chỗ: cache có TTL, nên sai lệch tự hết sau một thời gian. Câu hỏi thật là sai bao lâu, và có chấp nhận được không.</p>
+<p>Hình dung tấm bảng giá dán ở cửa hàng, còn giá thật nằm trong máy tính tiền. Đổi giá trong máy mà quên thay bảng, hoặc thay bảng trước khi đổi máy rồi có người chép lại giá cũ lên bảng, thì khách thấy một giá, trả một giá khác. Chọn cách ghi dưới đây và bấm qua từng bước.</p>
+</div>
+<div class="frame" id="race"></div>
+</section>
+
+<!-- 2 -->
+<section id="s2">
+<header><span class="num">02</span><h2>Cơ chế hoạt động</h2></header>
+<div class="prose">
+<h3>Bốn kiểu cache</h3>
+<p>Ý chính: khác nhau ở chỗ ai đọc và ghi database, và lúc nào. Cache-aside là mặc định trong phần lớn service, vì cache hỏng thì service vẫn chạy được, chỉ chậm hơn.</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Kiểu</th><th>Đọc</th><th>Ghi</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>Cache-aside</td><td>App đọc cache; miss thì app đọc DB rồi ghi vào cache</td><td>App ghi DB, rồi xoá key</td><td>Đơn giản; cache chết thì vẫn chạy (chậm hơn)</td><td>Race khi ghi; miss đầu tiên chậm; stampede</td></tr>
+<tr><td>Read-through</td><td>App chỉ đọc cache; thư viện cache tự đọc DB khi miss</td><td>Như cache-aside</td><td>Code app gọn</td><td>Phụ thuộc thư viện; vẫn các race như cache-aside</td></tr>
+<tr><td>Write-through</td><td>Như read-through</td><td>Ghi qua cache, cache ghi DB đồng bộ</td><td>Cache luôn có bản mới sau khi ghi</td><td>Ghi chậm hơn; dữ liệu ít đọc cũng chiếm cache</td></tr>
+<tr><td>Write-behind (write-back)</td><td>Như read-through</td><td>Ghi vào cache, DB được cập nhật sau, theo lô</td><td>Ghi rất nhanh; gom được nhiều lần ghi</td><td>Cache chết là mất dữ liệu chưa xuống DB; khó đúng; cache thành nguồn sự thật tạm thời</td></tr>
+</tbody></table></div>
+
+<div class="prose">
+<h3>Hit ratio quyết định tải database</h3>
+<p>Ý chính: tải xuống database tỉ lệ với tỉ lệ miss, không phải với tỉ lệ hit. Hit ratio từ 99% xuống 95% nghe như giảm ít, nhưng miss tăng từ 1% lên 5%, tức tải database gấp 5 lần.</p>
+<p>Hit ratio có thể tụt vì nhiều lý do: cache bị xoá khi deploy, bộ nhớ đầy nên Redis đuổi key (eviction), người dùng chuyển sang xem nội dung ít phổ biến, hoặc một job quét qua hàng triệu key ít dùng. Kéo thanh trượt để thấy tải database và độ trễ trung bình thay đổi thế nào.</p>
+</div>
+<div class="frame" id="hit">
+  <div class="ph"><strong>Hit ratio, tải database và độ trễ</strong><span class="meta" id="htMeta"></span></div>
+  <div class="bd">
+    <div class="calc">
+      <label>Lượt đọc mỗi giây<input id="htQ" type="number" min="1" max="10000000" value="20000"></label>
+      <label>Độ trễ cache (ms)<input id="htC" type="number" min="0.01" max="1000" step="0.01" value="0.5"></label>
+      <label>Độ trễ database (ms)<input id="htD" type="number" min="0.1" max="10000" step="0.1" value="8"></label>
+      <label>Database chịu được (đọc/giây)<input id="htK" type="number" min="1" max="10000000" value="2000"></label>
+      <label>Hit ratio: <span id="htHv">95%</span><input id="htH" type="range" min="500" max="999" value="950"></label>
+    </div>
+    <svg id="htSvg" viewBox="0 0 680 230" role="img" aria-label="Tải database theo hit ratio, kèm ngưỡng chịu được"></svg>
+    <div class="stats" id="htStats"></div>
+    <div class="desc" aria-live="polite" id="htDesc"></div>
+    <div class="legend"><span><i class="lg-line"></i>đọc xuống database mỗi giây</span><span><i class="lg-cap"></i>database chịu được</span></div>
+    <p class="fine">Độ trễ khi miss = cache + database (đọc cache, trượt, rồi đọc database). Bỏ qua thời gian ghi lại vào cache. Mô hình; chưa đo (E40).</p>
+  </div>
+</div>
+
+<div class="prose">
+<h3>Ghi vào database thì làm gì với cache</h3>
+<p>Ý chính: ghi database trước, commit, rồi <strong>xoá</strong> key. Không cập nhật key bằng giá trị mới. Luôn đặt TTL để mọi sai lệch đều có hạn. Nếu cần chặt hơn, thêm version hoặc lease để lần ghi vào cache của người đọc chậm bị từ chối.</p>
+<p>Widget ở phần 01 cho thấy năm cách. Tóm lại:</p>
+<ul>
+<li><strong>Cập nhật cache sau khi ghi:</strong> hai người ghi đè nhau theo thứ tự ngược, cache giữ giá trị của người ghi trước. Sai tới lần ghi sau hoặc tới khi hết TTL.</li>
+<li><strong>Xoá cache rồi mới ghi:</strong> trong lúc transaction ghi chưa commit, người đọc miss đọc bản cũ đã commit và ghi nó lại vào cache. Cửa sổ race dài bằng cả transaction ghi, nên xảy ra thường.</li>
+<li><strong>Ghi rồi xoá:</strong> vẫn có race, nhưng cần người đọc đọc database <em>trước</em> khi ghi commit và ghi vào cache <em>sau</em> khi xoá. Cửa sổ rất hẹp. Đây là cách mặc định.</li>
+<li><strong>Ghi rồi xoá, có version:</strong> người ghi tăng version trước khi xoá; người đọc chỉ ghi vào cache nếu version chưa đổi kể từ lúc nó bắt đầu. Đây là ý tưởng "lease" của memcache ở Facebook, làm lại trên Redis bằng một script Lua.</li>
+<li><strong>Xoá hai lần</strong> (lần hai sau vài trăm ms): giới hạn sai lệch ở vài trăm ms thay vì cả TTL. Rẻ, nhưng chỉ là xác suất.</li>
+</ul>
+</div>
+<div class="note"><strong>Lỗi hay gặp:</strong> đọc database từ replica để ghi vào cache. Replica trễ vài trăm ms tới vài giây so với primary. Người đọc miss ngay sau một lần ghi đọc được bản cũ từ replica, rồi ghi bản cũ đó vào cache, kể cả khi người ghi đã xoá key đúng thứ tự. Quy tắc: đọc để ghi vào cache sau khi miss thì đọc từ primary, hoặc dùng version để chặn; xem thêm trang replication.</div>
+
+<div class="prose">
+<h3>Stampede: khi một key nóng hết hạn</h3>
+<p>Ý chính: một key được đọc 2.000 lần mỗi giây và cần 300 ms để tính lại. Khi nó hết hạn, mọi request đến trong 300 ms đó đều miss và cùng chạy câu truy vấn: 600 câu cùng lúc cho cùng một kết quả. Database chậm đi, câu truy vấn lâu hơn, cửa sổ dài hơn, càng nhiều request miss hơn.</p>
+<p>Hiện tượng này gọi là cache stampede (hay dogpile, thundering herd). Bốn cách xử lý:</p>
+<ul>
+<li><strong>Khoá một người tính lại</strong> (single flight): request đầu tiên lấy khoá bằng <code>SET lock:k 1 NX PX 5000</code> và tính lại; các request khác chờ rồi đọc lại cache.</li>
+<li><strong>Trả bản cũ trong lúc làm mới</strong> (stale-while-revalidate): lưu thêm "hạn mềm". Qua hạn mềm, một request làm mới ở nền, mọi request khác vẫn nhận bản cũ ngay.</li>
+<li><strong>Làm mới sớm theo xác suất</strong> (XFetch): mỗi request tự tung xúc xắc; càng gần hạn càng dễ trúng, và người trúng tính lại trước khi key hết hạn. Không cần khoá.</li>
+<li><strong>Không để nhiều key hết hạn cùng lúc:</strong> cộng một khoảng ngẫu nhiên (jitter) vào TTL.</li>
+</ul>
+</div>
+<div class="frame" id="stamp">
+  <div class="ph"><strong>Một key nóng hết hạn: số câu truy vấn xuống database</strong><span class="meta" id="spMeta"></span></div>
+  <div class="bd">
+    <div class="calc">
+      <label>Cách xử lý<select id="spS">
+        <option value="none" selected>Không làm gì</option>
+        <option value="lock">Khoá một người tính lại</option>
+        <option value="swr">Trả bản cũ trong lúc làm mới</option>
+        <option value="xf">Làm mới sớm theo xác suất (XFetch, β = 1)</option>
+      </select></label>
+      <label>Lượt đọc key này mỗi giây<input id="spL" type="number" min="1" max="100000" value="2000"></label>
+      <label>Thời gian tính lại (ms)<input id="spT" type="number" min="1" max="10000" value="300"></label>
+    </div>
+    <svg id="spSvg" viewBox="0 0 680 220" role="img" aria-label="Số câu truy vấn xuống database theo thời gian quanh lúc key hết hạn"></svg>
+    <div class="stats" id="spStats"></div>
+    <div class="desc" aria-live="polite" id="spDesc"></div>
+    <div class="nav"><button id="spSeed">Chạy lại với số ngẫu nhiên khác</button></div>
+    <div class="legend"><span><i class="lg-db"></i>câu truy vấn xuống database (mỗi khoảng 100 ms)</span><span><i class="lg-exp"></i>lúc key hết hạn</span></div>
+    <p class="fine">Mô hình: request đến đều nhau; thời gian tính lại cố định, không tăng khi database bận (thực tế sẽ tăng, nên "không làm gì" còn tệ hơn hình). XFetch theo công thức của Vattani và cộng sự (VLDB 2015), δ bằng thời gian tính lại. Chưa đo (E39).</p>
+  </div>
+</div>
+
+<div class="prose">
+<h3>Hết hạn đồng loạt và jitter</h3>
+<p>Ý chính: nếu 50.000 key được nạp cùng một lúc (sau deploy, sau khi Redis khởi động lại, hoặc do một job làm nóng cache) với cùng TTL, chúng hết hạn cùng một giây. Database nhận 50.000 câu truy vấn trong một giây. Cộng jitter vào TTL trải chúng ra.</p>
+</div>
+<div class="frame" id="jit">
+  <div class="ph"><strong>Key nạp cùng lúc, hết hạn khi nào</strong><span class="meta" id="jtMeta"></span></div>
+  <div class="bd">
+    <div class="calc">
+      <label>Số key nạp cùng lúc<input id="jtN" type="number" min="1" max="10000000" value="50000"></label>
+      <label>TTL (giây)<input id="jtT" type="number" min="1" max="1000000" value="600"></label>
+      <label>Jitter: ± <span id="jtJv">0%</span><input id="jtJ" type="range" min="0" max="50" value="0"></label>
+    </div>
+    <svg id="jtSvg" viewBox="0 0 680 170" role="img" aria-label="Số key hết hạn mỗi giây"></svg>
+    <div class="stats" id="jtStats"></div>
+    <div class="desc" aria-live="polite" id="jtDesc"></div>
+    <p class="fine">Jitter phân phối đều trong khoảng TTL × (1 ± j). Lần hết hạn thứ hai trở đi tự lệch nhau thêm vì mỗi key được nạp lại vào lúc khác nhau.</p>
+  </div>
+</div>
+
+<div class="prose">
+<h3>Bộ nhớ đầy: Redis đuổi key nào</h3>
+<p>Ý chính: khi chạm <code>maxmemory</code>, Redis làm theo <code>maxmemory-policy</code>. Mặc định là <code>noeviction</code>: không đuổi key nào, mà báo lỗi cho các lệnh ghi thêm dữ liệu. Với Redis chỉ dùng làm cache, nên chọn <code>allkeys-lru</code> hoặc <code>allkeys-lfu</code>.</p>
+<ul>
+<li>Redis 7.0.15 trong sandbox: <code>maxmemory-policy</code> = <code>noeviction</code>, <code>maxmemory</code> = 0 (không giới hạn), <code>maxmemory-samples</code> = 5.</li>
+<li>LRU của Redis là xấp xỉ: nó lấy mẫu vài key rồi đuổi key lâu chưa dùng nhất trong mẫu, không theo dõi chính xác toàn bộ.</li>
+<li><code>volatile-*</code> chỉ đuổi key có TTL; nếu không key nào có TTL, chúng cư xử như <code>noeviction</code>.</li>
+<li>Không dùng chung một Redis cho cache và cho hàng đợi việc (BullMQ cần <code>noeviction</code>, xem <a href="../bullmq-workers-resumable/index.html">trang BullMQ</a>). Hai nhu cầu cần hai chính sách ngược nhau.</li>
+</ul>
+</div>
+</section>
+
+<!-- 3 -->
+<section id="s3">
+<header><span class="num">03</span><h2>Vì sao thiết kế như vậy</h2></header>
+<div class="prose">
+<p><strong>Vì sao xoá thay vì cập nhật?</strong> Xoá là thao tác idempotent và không mang giá trị: xoá hai lần, xoá theo thứ tự nào, kết quả vẫn là "không có". Cập nhật mang theo một giá trị, nên thứ tự đến cache quyết định giá trị cuối, và thứ tự đó không khớp với thứ tự commit trong database. Xoá cũng không tốn công tính giá trị mới cho một key có thể không ai đọc nữa.</p>
+<p><strong>Vì sao luôn đặt TTL?</strong> Mọi cách invalidation đều có kẽ hở: lần xoá bị lỗi mạng, một đường ghi quên xoá, một race hiếm. TTL biến mọi lỗi thành lỗi có hạn. Không có TTL, một lần sai có thể kéo dài vô hạn.</p>
+<p><strong>Vì sao cache không được là nguồn sự thật?</strong> Cache có thể bị đuổi key, khởi động lại, hay bị xoá trắng bất cứ lúc nào. Thiết kế đúng là: mất toàn bộ cache thì hệ thống chậm đi, nhưng không sai. Write-behind phá vỡ điều này, nên chỉ dùng khi thật cần và có cách khôi phục.</p>
+<p><strong>Vì sao Facebook dùng lease?</strong> Ở quy mô của họ, race hiếm cũng xảy ra hàng nghìn lần mỗi ngày. Lease giải hai bài toán cùng lúc: chỉ người giữ lease mới được ghi vào cache (chặn ghi giá trị cũ), và chỉ cấp một lease cho mỗi key trong một khoảng thời gian (chặn stampede).</p>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Cách giữ cache đúng</th><th>Sai lệch tối đa</th><th>Chi phí</th></tr></thead>
+<tbody>
+<tr><td>Chỉ TTL</td><td>Bằng TTL</td><td>Không gì; dùng cho dữ liệu ít đổi, chấp nhận cũ</td></tr>
+<tr><td>Ghi rồi xoá, có TTL</td><td>Thường bằng 0; hiếm khi bằng TTL (race)</td><td>Một lệnh xoá mỗi lần ghi; phải nhớ xoá ở mọi đường ghi</td></tr>
+<tr><td>Ghi rồi xoá hai lần</td><td>Vài trăm ms trong trường hợp race</td><td>Thêm một lệnh xoá trễ (hẹn giờ hoặc hàng đợi)</td></tr>
+<tr><td>Ghi rồi xoá, có version</td><td>Bằng 0 với race kiểu đọc chậm</td><td>Thêm một key version, một script Lua khi ghi vào cache</td></tr>
+<tr><td>Xoá qua event (CDC, outbox)</td><td>Bằng độ trễ của event</td><td>Thêm hạ tầng; nhưng không đường ghi nào bị quên</td></tr>
+<tr><td>Không cache</td><td>0</td><td>Toàn bộ tải xuống database</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- 4 -->
+<section id="s4">
+<header><span class="num">04</span><h2>Ví dụ</h2></header>
+<div class="prose"><p>Viết theo API ioredis và mysql2. Hai lệnh Redis và script Lua đã chạy thử trên Redis 7.0.15 trong sandbox; phần còn lại chưa chạy.</p><h3>Đọc: cache-aside có version và khoá</h3></div>
+<pre><code>const TTL = 1800;                                   // 30 phút
+const ttl = () =&gt; Math.round(TTL * (0.9 + Math.random() * 0.2));   // jitter ±10%
+
+// chỉ SET nếu version chưa đổi kể từ lúc bắt đầu đọc
+const FILL = `local v = redis.call('GET', KEYS[2]) or '0'
+if v == ARGV[2] then return redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[3]) end
+return false`;
+
+async function getProduct(id: number) {
+  const key = `product:${id}`, verKey = `ver:product:${id}`;
+  const hit = await redis.get(key);
+  if (hit) return JSON.parse(hit);
+
+  const ver = (await redis.get(verKey)) ?? '0';      // nhớ version TRƯỚC khi đọc DB
+  const gotLock = await redis.set(`lock:${key}`, '1', 'PX', 5000, 'NX');
+  if (!gotLock) {                                     // người khác đang tính lại
+    await sleep(50);
+    return JSON.parse((await redis.get(key)) ?? 'null') ?? readFromPrimary(id);
+  }
+  const row = await readFromPrimary(id);              // primary, không phải replica
+  await redis.eval(FILL, 2, key, verKey, JSON.stringify(row), ver, ttl());
+  return row;
+}</code></pre>
+
+<div class="prose"><h3>Ghi: commit rồi tăng version và xoá</h3></div>
+<pre><code>async function updatePrice(id: number, price: number) {
+  await pool.execute('UPDATE products SET price = ? WHERE id = ?', [price, id]);  // autocommit
+  await redis.multi()
+    .incr(`ver:product:${id}`)                         // chặn mọi lần SET của người đọc chậm
+    .del(`product:${id}`)
+    .exec();
+}</code></pre>
+<p class="prose">Nếu lệnh Redis lỗi sau khi database đã commit, cache sai tới hết TTL. Muốn chắc hơn, phát event "sản phẩm đã đổi" qua outbox và để một consumer xoá key; consumer thử lại tới khi được.</p>
+
+<div class="prose"><h3>Làm mới sớm theo xác suất (XFetch)</h3></div>
+<pre><code>// lưu kèm: delta = thời gian tính lại (ms), expiry = lúc hết hạn (ms)
+async function getXFetch(key: string, recompute: () =&gt; Promise&lt;unknown&gt;, beta = 1) {
+  const raw = await redis.get(key);
+  const item = raw &amp;&amp; JSON.parse(raw);
+  if (!item || Date.now() - item.delta * beta * Math.log(Math.random()) &gt;= item.expiry) {
+    const t0 = Date.now();
+    const value = await recompute();
+    const delta = Date.now() - t0;
+    await redis.set(key, JSON.stringify({ value, delta, expiry: Date.now() + TTL * 1000 }), 'EX', TTL);
+    return value;
+  }
+  return item.value;
+}</code></pre>
+
+<div class="prose"><h3>Cấu hình và theo dõi Redis</h3></div>
+<pre><code>CONFIG SET maxmemory 4gb
+CONFIG SET maxmemory-policy allkeys-lru     # mặc định là noeviction
+INFO stats       # keyspace_hits, keyspace_misses, evicted_keys
+INFO memory      # used_memory, maxmemory</code></pre>
+</section>
+
+<!-- 5 -->
+<section id="s5">
+<header><span class="num">05</span><h2>Thí nghiệm</h2></header>
+<div class="prose"><p>Chạy với Redis và MySQL 8.4 của lab. Viết dự đoán trước.</p></div>
+<details><summary>E38. Tái hiện race khi ghi</summary>
+<p><strong>Câu hỏi.</strong> Với năm cách ghi ở phần 01: chèn <code>sleep</code> để ép đúng thứ tự trong widget, cách nào để lại giá trị cũ trong cache? Sau đó bỏ <code>sleep</code>, chạy 20 người đọc và 2 người ghi trong 5 phút trên 100 key: đếm số lần cache khác database lâu hơn 1 giây, cho từng cách. Đọc fill từ replica thì con số đổi thế nào?</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e38/prediction.md</code></p>
+<p><strong>Chạy.</strong> Script Node; một luồng kiểm tra mỗi 200 ms so sánh từng key giữa Redis và database.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+<details><summary>E39. Stampede trên một key nóng</summary>
+<p><strong>Câu hỏi.</strong> Một key đọc 2.000 lần mỗi giây, câu tính lại mất khoảng 300 ms (<code>SELECT SLEEP(0.3)</code> cộng truy vấn thật). Cho key hết hạn: mỗi cách ở phần 02 tạo bao nhiêu câu truy vấn xuống database, p99 của người đọc bao nhiêu? Khi database chậm lên vì tải, "không làm gì" tệ hơn mô hình bao nhiêu?</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e39/prediction.md</code></p>
+<p><strong>Chạy.</strong> k6 tốc độ cố định; đếm câu truy vấn bằng <code>Com_select</code> hoặc một bộ đếm trong code.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+<details><summary>E40. Hit ratio theo kích thước cache và chính sách đuổi</summary>
+<p><strong>Câu hỏi.</strong> 1 triệu key, truy cập theo phân phối Zipf (s = 1): với <code>maxmemory</code> đủ cho 1%, 5%, 20% số key, hit ratio là bao nhiêu với <code>allkeys-lru</code> và <code>allkeys-lfu</code>? Một job quét 200.000 key hiếm thì hit ratio tụt bao nhiêu với mỗi chính sách?</p>
+<p><strong>Dự đoán.</strong> <code>lab/mysql/experiments/e40/prediction.md</code></p>
+<p><strong>Chạy.</strong> Script tạo truy cập Zipf; đọc <code>keyspace_hits</code> và <code>keyspace_misses</code> trước và sau.</p>
+<p><strong>Kết quả.</strong> Chưa chạy.</p>
+<p><strong>Chỗ lệch.</strong> –</p></details>
+</section>
+
+<!-- 6 -->
+<section id="s6">
+<header><span class="num">06</span><h2>Ảnh hưởng khi chạy production</h2></header>
+<div class="prose">
+<h3>Khi nào cache, khi nào không</h3>
+<ul>
+<li>Cache khi: đọc nhiều hơn ghi rất nhiều; chấp nhận cũ trong vài giây tới vài phút; tính ra tốn (truy vấn nặng, gọi API ngoài).</li>
+<li>Không cache, hoặc chỉ cache để hiển thị, khi: dữ liệu quyết định tiền hay quyền (giá lúc thanh toán, số dư, quyền truy cập). Đọc thẳng từ nguồn sự thật ở bước quyết định.</li>
+<li>Thử trước bằng index và câu truy vấn tốt hơn. Một cache thêm vào để che câu truy vấn thiếu index sẽ sập theo cache.</li>
+</ul>
+<h3>Cái giá</h3>
+<ul>
+<li>Một hệ thống nữa để vận hành, theo dõi và dự trù bộ nhớ.</li>
+<li>Mọi đường ghi phải nhớ invalidation; quên một chỗ là có lỗi khó tái hiện.</li>
+<li>Khi cache mất (deploy, khởi động lại), database nhận toàn bộ tải. Database phải chịu được, hoặc phải có cách làm nóng cache dần.</li>
+</ul>
+<h3>Nhận ra trên production bằng gì</h3>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Triệu chứng</th><th>Xem ở đâu</th></tr></thead>
+<tbody>
+<tr><td>Database tăng tải đột ngột</td><td><code>keyspace_misses</code> tăng; <code>evicted_keys</code> tăng; Redis vừa khởi động lại (<code>uptime_in_seconds</code>)</td></tr>
+<tr><td>Đỉnh câu truy vấn giống hệt nhau cùng lúc</td><td>Stampede: <code>performance_schema.events_statements_summary_by_digest</code>, cùng một digest tăng vọt trong vài giây</td></tr>
+<tr><td>Khách thấy dữ liệu cũ</td><td>So sánh có lấy mẫu giữa cache và database cho các key vừa ghi; log các lần lệnh xoá cache bị lỗi</td></tr>
+<tr><td>Redis báo lỗi khi ghi</td><td><code>OOM command not allowed</code>: đã chạm <code>maxmemory</code> với <code>noeviction</code></td></tr>
+<tr><td>Độ trễ đọc tăng dần</td><td><code>used_memory</code>, key lớn (<code>redis-cli --bigkeys</code>), lệnh chậm (<code>SLOWLOG GET</code>)</td></tr>
+</tbody></table></div>
+<div class="senior"><h4>Góc nhìn senior: ghi ra "cũ tối đa bao lâu" cho từng loại dữ liệu</h4><p>Trước khi chọn TTL hay cách invalidation, senior hỏi product: dữ liệu này được phép cũ bao lâu? Mô tả sản phẩm: 10 phút. Giá hiển thị: 30 giây, và giá lúc thanh toán: 0, nên đọc database. Quyền truy cập: 0 hoặc vài giây. Con số đó quyết định thiết kế, không phải ngược lại. Kèm theo là câu hỏi thứ hai: nếu toàn bộ cache mất lúc cao điểm, database có chịu được không, và nếu không thì làm nóng cache thế nào.</p></div>
+<div class="prose">
+<h3>Checklist khi review code có cache</h3>
+<ul>
+<li>Key có TTL không? Có jitter không?</li>
+<li>Mọi đường ghi (API, admin, job, import) có xoá key không? Có cách nào không phụ thuộc vào việc nhớ xoá (event, CDC) không?</li>
+<li>Thứ tự là ghi database, commit, rồi xoá? Không có "cập nhật cache bằng giá trị mới"?</li>
+<li>Fill sau khi miss đọc từ primary hay replica?</li>
+<li>Key nóng có chống stampede không?</li>
+<li>Dữ liệu dùng để quyết định tiền hay quyền có đọc từ nguồn sự thật không?</li>
+<li>Redis cho cache có <code>maxmemory</code> và chính sách đuổi phù hợp, và có tách khỏi Redis cho hàng đợi không?</li>
+</ul>
+</div>
+</section>
+
+<!-- 7 -->
+<section id="s7">
+<header><span class="num">07</span><h2>Hiểu lầm thường gặp</h2></header>
+<div class="prose"><ul>
+<li><strong>Hiểu lầm:</strong> cập nhật cache bằng giá trị mới thì cache luôn mới nhất. <strong>Vì sao sai:</strong> hai người ghi có thể đến cache theo thứ tự ngược với thứ tự commit (<a href="#s1">phần 01</a>). <strong>Quy tắc:</strong> xoá, không cập nhật.</li>
+<li><strong>Hiểu lầm:</strong> xoá cache trước khi ghi là an toàn hơn. <strong>Vì sao sai:</strong> người đọc miss ghi lại bản cũ trong lúc transaction ghi chưa commit. <strong>Quy tắc:</strong> ghi, commit, rồi mới xoá.</li>
+<li><strong>Hiểu lầm:</strong> đã xoá đúng thứ tự thì không bao giờ cũ. <strong>Vì sao sai:</strong> còn race đọc chậm và đọc từ replica trễ. <strong>Quy tắc:</strong> TTL luôn có; version hoặc lease nếu cần chặt.</li>
+<li><strong>Hiểu lầm:</strong> hit ratio 95% là tốt. <strong>Vì sao sai:</strong> có thể đủ hoặc không; điều quan trọng là tải miss so với sức của database. 95% so với 99% là gấp 5 lần tải. <strong>Quy tắc:</strong> tính tải database ở hit ratio xấu nhất có thể xảy ra.</li>
+<li><strong>Hiểu lầm:</strong> Redis tự đuổi key cũ khi đầy. <strong>Vì sao sai:</strong> mặc định là <code>noeviction</code>, tức báo lỗi khi ghi. <strong>Quy tắc:</strong> đặt <code>maxmemory</code> và chính sách cho Redis làm cache.</li>
+<li><strong>Hiểu lầm:</strong> cache giúp hệ thống chịu tải cao hơn trong mọi trường hợp. <strong>Vì sao sai:</strong> khi cache mất, database phải chịu toàn bộ tải. <strong>Quy tắc:</strong> thiết kế cho lúc cache trống.</li>
+</ul></div>
+</section>
+
+<!-- 8 -->
+<section id="s8">
+<header><span class="num">08</span><h2>Câu hỏi ôn tập</h2></header>
+<p class="prose">Viết ngày 2026-10-20. Đánh số Q71 đến Q76.</p>
+<details><summary><span class="tag">Dự đoán</span>Q71. Hit ratio tụt</summary>
+<p>50.000 lượt đọc mỗi giây, hit ratio 99%. Sau một deploy, hit ratio xuống 90% trong 10 phút. Tải database thay đổi bao nhiêu lần?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Miss từ 1% lên 10%: từ 500 lên 5.000 câu mỗi giây, gấp 10 lần. Nếu database chỉ chịu được 2.000, nó quá tải gấp 2,5 lần trong 10 phút đó.</p></details></details>
+<details><summary><span class="tag">Giải thích</span>Q72. Vì sao xoá thay vì cập nhật</summary>
+<p>Hai admin cùng sửa giá một sản phẩm, mỗi người ghi database rồi <code>SET</code> cache bằng giá mình vừa ghi. Mô tả một thứ tự làm cache lệch với database.</p>
+<details class="answer"><summary>Xem đáp án</summary><p>A ghi database 120. B ghi database 130. B <code>SET</code> cache 130. A (chậm vì GC hay mạng) <code>SET</code> cache 120. Database 130, cache 120, sai tới lần ghi sau hoặc tới khi hết TTL. Nếu cả hai xoá thay vì <code>SET</code>, cache trống và người đọc tiếp theo lấy 130 từ database.</p></details></details>
+<details><summary><span class="tag">Dự đoán</span>Q73. Stampede</summary>
+<p>Key đọc 5.000 lần mỗi giây, tính lại mất 400 ms. Không có chống stampede. Khi key hết hạn, khoảng bao nhiêu câu truy vấn xuống database? Với khoá một người tính lại thì sao?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Mọi request trong 400 ms đều miss: khoảng 5.000 × 0,4 = 2.000 câu cho cùng một kết quả, nhiều hơn nữa nếu database chậm đi vì chính tải đó. Với khoá: 1 câu; khoảng 2.000 request phải chờ tới 400 ms (hoặc nhận bản cũ nếu dùng stale-while-revalidate).</p></details></details>
+<details><summary><span class="tag">Chẩn đoán</span>Q74. Lỗi khi ghi vào Redis</summary>
+<p>Sau 3 tháng, log báo <code>OOM command not allowed when used memory &gt; 'maxmemory'</code> ở mọi lệnh <code>SET</code>, trong khi <code>GET</code> vẫn chạy. Vì sao, và sửa thế nào?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Redis có <code>maxmemory</code> nhưng chính sách là <code>noeviction</code> (mặc định), nên khi đầy nó từ chối lệnh ghi thêm dữ liệu, còn lệnh đọc vẫn chạy. Với Redis làm cache, đặt <code>allkeys-lru</code> hoặc <code>allkeys-lfu</code>, và kiểm tra key không có TTL đang chiếm chỗ. Nếu Redis này còn chứa hàng đợi, tách hàng đợi ra một instance khác giữ <code>noeviction</code>.</p></details></details>
+<details><summary><span class="tag">Chẩn đoán</span>Q75. Vẫn cũ dù đã xoá đúng thứ tự</summary>
+<p>Code ghi database, commit, rồi xoá key. Vẫn có khiếu nại "vừa sửa xong mà vẫn thấy cũ" vài lần mỗi ngày, mỗi lần kéo dài đúng 30 phút (bằng TTL). Database có hai replica. Nghi ngờ gì?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Fill sau khi miss đọc từ replica. Ngay sau khi người ghi xoá key, một người đọc miss, đọc từ replica chưa kịp nhận thay đổi, rồi ghi bản cũ vào cache với TTL 30 phút. Thời gian sai đúng bằng TTL là dấu hiệu rõ. Sửa: fill đọc từ primary, hoặc dùng version để người ghi chặn lần fill đó, hoặc xoá lần hai sau khoảng thời gian lớn hơn độ trễ replica.</p></details></details>
+<details><summary><span class="tag">Giải thích</span>Q76. Write-behind</summary>
+<p>Vì sao write-behind làm ghi rất nhanh, và vì sao nó nguy hiểm cho dữ liệu đơn hàng?</p>
+<details class="answer"><summary>Xem đáp án</summary><p>Ghi chỉ chạm cache trong RAM, database được cập nhật sau theo lô, nên ghi nhanh và gom được nhiều lần ghi vào một. Nhưng trong khoảng trễ đó, cache là bản duy nhất của dữ liệu. Cache chết hay bị đuổi key là mất đơn đã báo "thành công" cho khách. Với đơn hàng, ghi phải xuống nguồn sự thật bền vững trước khi trả lời.</p></details></details>
+</section>
+
+<!-- 9 -->
+<section id="s9">
+<header><span class="num">09</span><h2>Bài toán thực tế</h2></header>
+<div class="prose">
+<p>Mỗi bài là một vòng phỏng vấn system design cấp senior, khoảng 30–45 phút. Cách dùng:</p>
+<ol class="list">
+<li>Đọc bối cảnh và câu hỏi của interviewer. Bối cảnh là những gì interviewer nói lúc đầu: hệ thống, cách đang làm, quy mô, chuyện đã xảy ra. Viết ra những gì bạn sẽ hỏi thêm trước khi thiết kế, rồi mới mở "Hỏi lại interviewer" để xem câu hỏi nên hỏi và câu trả lời của interviewer: con số chính xác, yêu cầu, ràng buộc. Các con số ở đó dùng cho những câu sau.</li>
+<li>Với mỗi follow-up, tự trả lời (nói to hoặc viết ra) trong vài phút, rồi mới mở đáp án. Follow-up cuối luôn là triển khai và kiểm chứng: thiết kế đã chọn được làm ra sao, test gì, theo dõi gì, lùi lại thế nào.</li>
+<li>Cuối bài, dùng rubric để tự chấm: câu trả lời của bạn giống cột "mid" hay cột "senior", và có rơi vào red flag nào không.</li>
+</ol>
+<p>Đáp án là lập luận từ tài liệu, không phải số đo; con số trong đó là ước lượng. Viết ngày 2026-10-21.</p>
+</div>
+
+<!-- C16 -->
+<div class="case" id="c16">
+<h3>C16. Giá trên trang khác giá lúc thanh toán</h3>
+<p class="src">Dựa trên: phần 01–03 của trang này; <a href="../transactional-outbox/index.html">Transactional outbox</a>.</p>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> Sàn thương mại, 30 pod API. Giá sản phẩm được cache hai tầng: cache trong bộ nhớ mỗi pod (TTL 10 phút) trước Redis (TTL 30 phút) trước MySQL.</li><li><strong>Đang làm:</strong> Giá được đổi từ ba nơi: trang admin, job đồng bộ giá từ nhà cung cấp mỗi giờ, API cho đối tác. Trang sản phẩm và thanh toán dùng chung một hàm đọc giá.</li><li><strong>Đã xảy ra:</strong> Sau đợt giảm giá lúc 12:00, khách thấy giá cũ tới 12:40; vài đơn bị tính tiền theo giá cũ, vài đơn theo giá mới, tuỳ pod.</li></ul></div>
+<blockquote class="q">"Bạn điều tra và sửa thế nào?"</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>Giá được cache ở những tầng nào?</td><td>30 pod API, mỗi pod có cache trong bộ nhớ (LRU, TTL 10 phút) đặt trước Redis (TTL 30 phút), đặt trước MySQL.</td><td>Mỗi tầng là một nơi giữ giá cũ.</td></tr>
+<tr><td>Giá được đổi từ đâu?</td><td>Ba nơi: trang admin, job đồng bộ giá từ nhà cung cấp mỗi giờ, API cho đối tác.</td><td>Đếm số đường ghi.</td></tr>
+<tr><td>Đường nào có xoá cache?</td><td>Chỉ trang admin xoá key Redis. Không nơi nào xoá cache trong pod.</td><td>Thiếu invalidation ở hai đường và một tầng.</td></tr>
+<tr><td>Thanh toán lấy giá từ đâu?</td><td>Cùng hàm đọc giá với trang sản phẩm, qua cache.</td><td>Lỗi nặng nhất.</td></tr>
+<tr><td>Tải đọc? Database chịu bao nhiêu?</td><td>20.000 lượt đọc trang sản phẩm mỗi giây; database khoảng 2.000.</td><td>Không bỏ được cache.</td></tr>
+<tr><td>Yêu cầu?</td><td>Giá thanh toán luôn đúng; giá hiển thị đúng trong 30 giây sau khi đổi. Có Kafka và outbox.</td><td>Hai yêu cầu nhất quán khác nhau.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> hỏi "có bao nhiêu đường ghi, và đường nào có xoá cache". Invalidation thường hỏng ở đường ghi mà không ai nhớ tới.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Vì sao giá cũ kéo dài tới 40 phút?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li><strong>Thiếu invalidation:</strong> đợt giảm giá nhiều khả năng đi qua job đồng bộ hoặc API đối tác, không xoá gì cả.</li>
+<li><strong>Hai tầng TTL cộng dồn:</strong> Redis vừa được nạp lúc 11:59 với TTL 30 phút, giữ giá cũ tới 12:29. Một pod nạp lại từ Redis lúc 12:29 với TTL 10 phút, giữ tới khoảng 12:39–12:40. Khớp sự cố.</li>
+<li>Kể cả khi Redis được xoá, một pod có thể vừa nạp giá cũ từ Redis ngay trước đó và giữ thêm 10 phút.</li>
+</ul>
+<p>"Cũ tối đa bao lâu" của nhiều tầng cache là tổng TTL các tầng, không phải TTL lớn nhất.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> Việc đầu tiên bạn làm là gì?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p><strong>Cho thanh toán đọc giá từ database (primary), không qua cache.</strong> Đây là thay đổi quan trọng nhất và rẻ nhất: tiền không được dựa vào bản cũ.</p>
+<ul>
+<li>Thanh toán giả sử 1% số lượt xem, khoảng 200 lượt mỗi giây ở đỉnh: nhỏ so với sức 2.000 của database.</li>
+<li>Lưu giá (và phiên bản giá) trên dòng đơn hàng tại lúc đặt, để đối soát.</li>
+<li>Nếu giá lúc thanh toán khác giá đã hiển thị trong giỏ, hiện cảnh báo để khách xác nhận lại.</li>
+</ul>
+<p>Senior sửa phần làm sai tiền trước, rồi mới sửa phần làm khách khó chịu.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> Đồng nghiệp đề xuất thêm lệnh xoá Redis vào hai đường ghi còn thiếu. Đủ chưa?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p>Sửa được hôm nay, nhưng chờ lần quên tiếp theo (đường ghi thứ tư), và không đụng tới cache trong pod.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>A. Thêm lệnh xoá vào hai đường còn thiếu</td><td>Nhanh</td><td>Phụ thuộc việc nhớ xoá; không xử lý cache trong pod</td></tr>
+<tr><td>B. Bỏ cache trong pod</td><td>Chỉ còn một tầng</td><td>Thêm một vòng mạng mỗi lượt đọc</td></tr>
+<tr><td>C. TTL trong pod ngắn (15 giây)</td><td>Giới hạn sai lệch tầng pod, không cần cơ chế xoá</td><td>Thêm tải lên Redis (nhỏ)</td></tr>
+<tr><td>D. Xoá qua event: outbox phát <code>PriceChanged</code>; consumer xoá Redis; pod nghe pub/sub</td><td>Không đường ghi nào bị quên</td><td>Pub/sub của Redis không bền; pod mất kết nối là lỡ tin</td></tr>
+<tr><td>E. Key có version (<code>product:42:v17</code>)</td><td>Key cũ tự bị bỏ</td><td>Phải đọc version mỗi request</td></tr>
+</tbody></table></div>
+<p><strong>Chọn D cho Redis, C cho pod.</strong> Mọi đường ghi phát <code>PriceChanged</code> qua outbox trong cùng transaction; consumer xoá key Redis và thử lại tới khi được. Pod: TTL 15 giây có jitter, cộng pub/sub để xoá sớm khi có thể; lỡ tin thì TTL vẫn giữ mục tiêu 30 giây. <strong>Khi nào đổi ý:</strong> Redis gần quá tải sau khi TTL pod ngắn lại thì E cho sản phẩm nóng nhất.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> Consumer xoá Redis xong, nhưng một request đọc database cũ ngay trước đó rồi ghi giá cũ lại vào Redis. Có xảy ra không?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p>Có: đó là cuộc đua kinh điển của cache-aside (widget về cuộc đua ở đầu trang này). Request A miss, đọc giá cũ từ database (hoặc replica trễ); giá được cập nhật và key bị xoá; A ghi giá cũ vào Redis, giữ nó trọn TTL 30 phút.</p>
+<ul>
+<li>Ghi lại có điều kiện theo version: giá trong cache mang version; lần nạp chỉ ghi nếu version mới hơn bản đang có (Lua script, như trên trang này).</li>
+<li>Hoặc xoá hai lần: consumer xoá ngay, và xoá lại sau vài giây.</li>
+<li>Hoặc TTL Redis ngắn hơn cho giá (ví dụ 5 phút) để giới hạn thiệt hại.</li>
+<li>Không nạp cache từ replica cho dữ liệu vừa đổi: độ trễ replica làm cửa sổ đua dài ra.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai và kiểm chứng thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li><strong>Tuần 1:</strong> thanh toán đọc giá từ primary; TTL cache trong pod còn 15 giây ± 20%.</li>
+<li><strong>Tuần 2:</strong> outbox <code>PriceChanged</code> ở cả ba đường ghi; consumer xoá Redis; kênh pub/sub <code>price-invalidate</code> cho pod; nạp cache theo version.</li>
+<li>Kiểm tra định kỳ: lấy mẫu 1.000 sản phẩm vừa đổi giá, so cache với database 60 giây sau khi đổi; tỉ lệ lệch phải gần 0.</li>
+<li>Metric: độ trễ từ lúc commit giá tới lúc consumer xoá key.</li>
+<li>Test: đổi giá qua cả ba đường; đo thời gian tới khi mọi pod hiển thị giá mới (dưới 30 giây).</li>
+<li>Đối soát đơn: giá trên đơn bằng giá trong database tại lúc đặt.</li>
+</ul>
+</details>
+</div>
+
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Chẩn đoán</td><td>"TTL dài quá"</td><td>Thiếu invalidation ở hai đường ghi; TTL hai tầng cộng dồn ra đúng 40 phút</td></tr>
+<tr><td>Ưu tiên</td><td>Sửa cache trước</td><td>Thanh toán đọc từ database trước</td></tr>
+<tr><td>Invalidation</td><td>Thêm lệnh xoá</td><td>Event qua outbox cho mọi đường ghi; TTL ngắn ở pod làm lưới</td></tr>
+<tr><td>Cuộc đua</td><td>Không nhắc</td><td>Nạp lại giá cũ sau khi xoá; version hoặc xoá hai lần</td></tr>
+<tr><td>Kiểm chứng</td><td>Không có</td><td>Lấy mẫu so cache với database; đối soát đơn</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> để thanh toán đọc giá qua cache; quên cache trong pod khi tính "cũ tối đa bao lâu"; dựa vào Redis pub/sub như kênh tin cậy.</p>
+</details>
+</div>
+
+<!-- C17 -->
+<div class="case" id="c17">
+<h3>C17. Trang chủ chậm đúng 9:00 mỗi sáng</h3>
+<p class="src">Dựa trên: phần 02 của trang này (stampede, jitter); <a href="../capacity-estimation/index.html">Ước lượng capacity</a>.</p>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> App tin tức. Trang chủ ghép từ 12 khối (tin nổi bật, chuyên mục, xu hướng…); mỗi khối là một key Redis, tính bằng một câu truy vấn tổng hợp mất 1–3 giây.</li><li><strong>Đang làm:</strong> Mỗi key có TTL 1 giờ. Một job làm nóng cache chạy lúc 8:00 mỗi sáng.</li><li><strong>Đã xảy ra:</strong> Từ khoảng 8:59:58 tới 9:00:30 mỗi ngày, CPU database lên 100% và p99 trang chủ lên 12 giây. 9:00 cũng là giờ đỉnh.</li></ul></div>
+<blockquote class="q">"Bạn đoán chuyện gì đang xảy ra, và sửa thế nào?"</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>Trang chủ được ghép thế nào?</td><td>12 khối (tin nổi bật, chuyên mục, xu hướng…). Mỗi khối là một key Redis, TTL 1 giờ, tính bằng một câu truy vấn tổng hợp 1–3 giây.</td><td>12 key cùng TTL.</td></tr>
+<tr><td>Có gì chạy theo lịch không?</td><td>Job làm nóng cache lúc 8:00 nạp cả 12 key cùng lúc.</td><td>8:00 + 1 giờ = 9:00.</td></tr>
+<tr><td>Database lúc đó?</td><td>CPU 100% từ 8:59:58 tới 9:00:30.</td><td>Xác nhận stampede.</td></tr>
+<tr><td>Tải lúc 9:00?</td><td>Giờ đỉnh: 6.000 lượt xem trang chủ mỗi giây.</td><td>Hết hạn đúng giờ đỉnh.</td></tr>
+<tr><td>Nội dung được cũ bao lâu?</td><td>Tới 5 phút.</td><td>Không cần tính lại khi có người đọc.</td></tr>
+<tr><td>Làm câu truy vấn nhanh hơn được không?</td><td>Không trong quý này. p99 trang chủ phải dưới 300 ms cả ngày.</td><td>Người đọc không được chờ câu 1–3 giây.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> nghe "đúng một giờ mỗi ngày" là hỏi ngay "có gì chạy theo lịch, TTL bao nhiêu". Sự cố theo đồng hồ gần như luôn có nguyên nhân theo đồng hồ.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Giải thích bằng con số.</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>12 key nạp cùng lúc lúc 8:00, cùng TTL 1 giờ, nên cùng hết hạn lúc 9:00, đúng giờ đỉnh: stampede nhân 12.</li>
+<li>Khi một key hết hạn, mọi request trong 1–3 giây tính lại đều miss: 6.000 × 2 giây ≈ 12.000 câu cho mỗi key, nhân 12 khối là khoảng 144.000 câu truy vấn nặng trong vài giây.</li>
+<li>Database chậm đi, câu truy vấn lâu hơn 3 giây, cửa sổ miss dài ra, vòng lặp tự nuôi nhau tới khi request timeout và người dùng bỏ đi.</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> Thêm jitter vào TTL có đủ không? Còn khoá "một người tính lại"?</p>
+<details class="answer"><summary>Đáp án</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>A. Jitter TTL</td><td>Không còn 12 key hết hạn cùng giây</td><td>Mỗi key vẫn bị stampede riêng</td></tr>
+<tr><td>B. Khoá một người tính lại</td><td>Mỗi lần hết hạn chỉ 1 câu truy vấn</td><td>Người đọc chờ 1–3 giây; vượt p99 300 ms</td></tr>
+<tr><td>C. Stale-while-revalidate</td><td>Người đọc không chờ; 1 câu mỗi lần làm mới</td><td>Cần hạn mềm và khoá cho việc làm mới</td></tr>
+<tr><td>D. Làm mới theo lịch ở nền</td><td>Đường đọc không bao giờ chạm database; tải dự đoán được</td><td>Làm mới cả khi không ai xem; job chết thì nội dung cũ dần</td></tr>
+<tr><td>E. XFetch</td><td>Không cần khoá, không cần job</td><td>Người trúng xúc xắc vẫn chờ 1–3 giây</td></tr>
+</tbody></table></div>
+<p>A một mình không đủ: 6.000 request mỗi giây vẫn dồn vào từng key khi nó hết hạn. B đúng về tải nhưng sai về độ trễ: mục tiêu là p99 300 ms, không phải "database không sập". Phải đọc kỹ yêu cầu: người đọc không bao giờ được chờ câu truy vấn.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> Vậy bạn chọn gì?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p><strong>D, có C làm dự phòng, cộng jitter.</strong></p>
+<ul>
+<li>Nội dung được cũ 5 phút và chỉ có 12 key: làm mới mỗi key mỗi 2 phút, lệch giờ nhau. 12 câu mỗi 2 phút là 0,1 câu mỗi giây, không đáng kể. Đường đọc chỉ đọc Redis.</li>
+<li>Key có TTL cứng 15 phút làm lưới an toàn: job làm mới chết thì còn 15 phút để người trực sửa; khi đó C chạy: request đầu tiên sau hạn mềm làm mới ở nền, mọi người khác vẫn nhận bản cũ.</li>
+<li>Bỏ job làm nóng lúc 8:00; job làm mới thay nó.</li>
+</ul>
+<p><strong>Khi nào đổi ý:</strong> số key lên hàng nghìn (trang cá nhân hoá theo người dùng) thì làm mới theo lịch thành lãng phí; dùng C hoặc E cho từng key.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> Nếu cả Redis bị xoá sạch (khởi động lại không có dữ liệu) đúng lúc 9:00 thì sao?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Đường đọc không được gọi câu truy vấn nặng khi cache trống: trả khối rỗng có thông báo ("đang cập nhật"), không phải gọi database với 6.000 request mỗi giây.</li>
+<li>Job làm mới thấy key thiếu thì làm ngay (có khoá <code>NX</code> chặn trùng), 12 câu trong vài giây, trang đầy đủ trở lại trong khoảng 2 phút hoặc nhanh hơn.</li>
+<li>Đây là nguyên tắc thiết kế: cache là tối ưu, nhưng đường đọc phải có hành vi rõ ràng khi cache không có, và hành vi đó không được là "đổ tải lên database".</li>
+</ul>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai và kiểm chứng thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
+<pre><code>// worker, mỗi 10 giây kiểm tra; mỗi khối có lịch riêng
+for (const block of BLOCKS) {
+  if (Date.now() &lt; nextRefresh[block.id]) continue;
+  const gotLock = await redis.set(`lock:home:${block.id}`, '1', 'PX', 30_000, 'NX');
+  if (!gotLock) continue;                          // một worker khác đang làm
+  const data = await block.compute();             // 1–3 giây
+  await redis.set(`home:${block.id}`,
+    JSON.stringify({ data, softExpiry: Date.now() + 300_000 }), 'EX', 900);
+  nextRefresh[block.id] = Date.now() + 120_000 + Math.random() * 20_000;
+}</code></pre>
+<ul>
+<li>Đường đọc: <code>GET home:{id}</code>; quá <code>softExpiry</code> thì vẫn trả dữ liệu và đẩy một job làm mới khối đó.</li>
+<li>Metric: tuổi của từng khối (cảnh báo khi quá 5 phút); số câu truy vấn tổng hợp mỗi phút (khoảng 6); p99 trang chủ lúc 9:00.</li>
+<li>Test ở staging: xoá cả 12 key lúc tải đỉnh; trang vẫn trả trong 300 ms với khối rỗng, các khối được làm mới trong 2 phút.</li>
+<li>Rủi ro: một khối tính sai và bị cache 15 phút. Có nút xoá khối thủ công.</li>
+</ul>
+</details>
+</div>
+
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Chẩn đoán</td><td>"Database yếu lúc đỉnh"</td><td>Job 8:00 + TTL 1 giờ; stampede nhân 12, có con số</td></tr>
+<tr><td>Đọc yêu cầu</td><td>Giải quyết tải database</td><td>Thấy p99 300 ms loại bỏ khoá chờ</td></tr>
+<tr><td>Thiết kế</td><td>Jitter</td><td>Làm mới theo lịch, hạn mềm, TTL cứng làm lưới</td></tr>
+<tr><td>Cache trống</td><td>Không nhắc</td><td>Đường đọc không đổ tải xuống database</td></tr>
+<tr><td>Kiểm chứng</td><td>Không có</td><td>Xoá key lúc đỉnh ở staging; metric tuổi khối</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> chỉ thêm jitter; dùng khoá mà để người đọc chờ; làm nóng cache cùng lúc với cùng TTL; để đường đọc gọi câu truy vấn nặng khi cache trống.</p>
+</details>
+</div>
+
+<!-- C18 -->
+<div class="case" id="c18">
+<h3>C18. Khoá tài khoản mà người dùng vẫn truy cập được 15 phút</h3>
+<p class="src">Dựa trên: phần 03 và 06 của trang này.</p>
+<div class="ctx"><p class="ctx-h">Bối cảnh</p><ul><li><strong>Hệ thống:</strong> Ứng dụng B2B với 40 service. Đăng nhập cấp JWT (hết hạn 15 phút) và refresh token (30 ngày). Mỗi service kiểm tra quyền qua service auth, kết quả cache trong Redis 15 phút.</li><li><strong>Quy mô:</strong> Khoảng 30.000 lần kiểm tra quyền mỗi giây.</li><li><strong>Đã xảy ra:</strong> Một nhân viên bị sa thải lúc 14:00, admin khoá tài khoản ngay, nhưng người đó vẫn tải được dữ liệu khách hàng tới 14:13.</li></ul></div>
+<blockquote class="q">"Bộ phận an ninh muốn khoá tài khoản có hiệu lực trong 5 giây. Bạn làm thế nào?"</blockquote>
+
+<details class="answer clar"><summary>Hỏi lại interviewer: nên hỏi gì, và interviewer trả lời gì</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Câu nên hỏi</th><th>Interviewer trả lời</th><th>Vì sao câu này quan trọng</th></tr></thead>
+<tbody>
+<tr><td>Các service kiểm tra quyền thế nào?</td><td>40 service. Mỗi service gọi service auth; kết quả cache trong Redis 15 phút theo <code>perm:{userId}</code>. Khoá tài khoản không xoá key này.</td><td>Nơi thứ nhất giữ quyền cũ.</td></tr>
+<tr><td>Token là gì, sống bao lâu?</td><td>Access token JWT, hết hạn 15 phút; refresh token 30 ngày.</td><td>JWT tự chứa: nơi thứ hai. Refresh token: nơi thứ ba.</td></tr>
+<tr><td>Bao nhiêu lần kiểm tra?</td><td>Khoảng 30.000 lần kiểm tra quyền mỗi giây. Service auth chịu khoảng 3.000.</td><td>Không bỏ được cache.</td></tr>
+<tr><td>"5 giây" áp dụng cho thay đổi nào?</td><td>Khoá tài khoản, rút quyền nhạy cảm, đăng xuất mọi thiết bị. Thêm quyền mới chậm vài phút cũng được.</td><td>Chỉ một loại thay đổi cần nhanh.</td></tr>
+<tr><td>Ngân sách độ trễ?</td><td>Không thêm quá 2 ms vào p99 mỗi request.</td><td>Đủ cho một lệnh Redis.</td></tr>
+<tr><td>Giới hạn?</td><td>Không đổi toàn bộ hệ thống token trong quý này.</td><td>Phải làm việc với JWT hiện có.</td></tr>
+</tbody></table></div>
+<p><strong>Senior thường làm gì ở bước này:</strong> liệt kê mọi nơi "nhớ" quyền, không chỉ cache. Với JWT, chính token là một bản cache không xoá được.</p>
+</details>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 1.</b> Liệt kê mọi chỗ giữ quyền cũ.</p>
+<details class="answer"><summary>Đáp án</summary>
+<ol class="list">
+<li><code>perm:{userId}</code> TTL 15 phút, không bị xoá khi khoá.</li>
+<li>JWT tự chứa, hợp lệ tới khi hết hạn. Kể cả cache được xoá, service nào chỉ kiểm tra chữ ký vẫn cho qua tới 15 phút.</li>
+<li>Refresh token 30 ngày: nếu không bị thu hồi, lấy được access token mới mãi.</li>
+</ol>
+<p>Sự cố 13 phút khớp với (1) hoặc (2). Nếu chỉ sửa một, hai cái còn lại vẫn mở.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 2.</b> Đồng nghiệp đề xuất JWT hết hạn sau 1 phút và bỏ cache quyền. Bạn nghĩ sao?</p>
+<details class="answer"><summary>Đáp án</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Phương án</th><th>Ưu điểm</th><th>Nhược điểm</th></tr></thead>
+<tbody>
+<tr><td>A. Xoá <code>perm:{userId}</code> khi khoá</td><td>Sửa nơi thứ nhất</td><td>JWT vẫn hợp lệ 15 phút</td></tr>
+<tr><td>B. JWT hết hạn sau 1 phút</td><td>Đơn giản</td><td>Refresh gấp 15 lần, tải lên auth; vẫn 60 giây, không phải 5</td></tr>
+<tr><td>C. Kiểm tra "đã bị thu hồi chưa" trong Redis mỗi request (epoch)</td><td>Một lệnh Redis nhỏ; hiệu lực ngay</td><td>Redis thành phụ thuộc bắt buộc</td></tr>
+<tr><td>D. Đẩy sự kiện thu hồi tới mọi pod, giữ trong bộ nhớ</td><td>Không tốn gì mỗi request</td><td>Pub/sub có thể lỡ tin; pod mới phải nạp danh sách</td></tr>
+<tr><td>E. Bỏ cache quyền</td><td>Luôn đúng</td><td>30.000 lần mỗi giây, gấp 10 sức auth: auth sập</td></tr>
+</tbody></table></div>
+<p>Đề xuất của đồng nghiệp là B + E: không đạt 5 giây và làm sập auth. Ý chính: <strong>tách hai câu hỏi</strong>. "Người này còn hợp lệ không" phải mới và rẻ; "người này có quyền gì" có thể cache vài phút. Chỉ câu thứ nhất cần 5 giây, và nó trả lời được bằng một số nguyên.</p>
+<p><strong>Chọn C + A + thu hồi refresh token.</strong> D chỉ là lớp tối ưu sau này nếu lần đọc Redis thành vấn đề.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 3.</b> Mô tả cơ chế epoch. Rút một quyền nhạy cảm thì làm gì? Thêm quyền thì sao?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Mỗi người dùng có <code>auth_epoch</code> (số nguyên). JWT mang epoch lúc được cấp.</li>
+<li>Khoá tài khoản hoặc đăng xuất mọi thiết bị: tăng epoch trong database và Redis.</li>
+<li>Mỗi request: kiểm tra chữ ký, rồi <code>GET epoch:{userId}</code> (dưới 1 ms trong cùng datacenter, vừa ngân sách 2 ms); epoch trong JWT nhỏ hơn thì 401.</li>
+<li>Rút quyền nhạy cảm: tăng epoch luôn, buộc đăng nhập lại. Đơn giản, đúng, và thu hồi là sự kiện hiếm (vài chục lần mỗi ngày).</li>
+<li>Thêm quyền: chỉ xoá <code>perm:{userId}</code>; chậm vài phút cũng được.</li>
+</ul>
+<p>Tải: 30.000 lệnh <code>GET</code> mỗi giây lên Redis, nhỏ so với sức Redis; thu hồi chỉ là vài lần ghi.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 4.</b> Redis không trả lời. Cho request qua hay chặn?</p>
+<details class="answer"><summary>Đáp án</summary>
+<p>Đây là quyết định an ninh, không chỉ kỹ thuật, và senior nói rõ như vậy.</p>
+<ul>
+<li><strong>Chặn (fail closed):</strong> an toàn cho dữ liệu khách hàng; cái giá là Redis sập thì cả 40 service ngừng phục vụ.</li>
+<li><strong>Cho qua (fail open):</strong> hệ thống vẫn chạy; cái giá là trong lúc Redis sập, người vừa bị khoá có thể truy cập lại.</li>
+<li>Có thể chia theo mức nhạy cảm: endpoint dữ liệu khách hàng chặn; endpoint ít nhạy cảm cho qua. Hoặc hỏi thẳng auth (có giới hạn tốc độ) làm dự phòng.</li>
+</ul>
+<p>Ghi lựa chọn vào tài liệu thiết kế và để bộ phận an ninh duyệt. Điều tệ nhất là không ai quyết định, và hành vi được quyết bởi cách thư viện xử lý timeout.</p>
+</details>
+</div>
+
+<div class="fu">
+<p class="fq"><b>Follow-up 5.</b> Bạn triển khai và kiểm chứng thế nào?</p>
+<details class="answer"><summary>Đáp án</summary>
+<ul>
+<li>Bảng <code>users</code> thêm <code>auth_epoch INT NOT NULL DEFAULT 0</code>; Redis <code>epoch:{userId}</code>, không TTL, nạp lại từ database khi thiếu.</li>
+<li>Auth đưa epoch vào JWT khi cấp.</li>
+<li>Middleware dùng chung ở mọi service: kiểm tra chữ ký, rồi epoch; thiếu key thì hỏi auth (hiếm).</li>
+<li>Khoá tài khoản: một transaction cập nhật trạng thái, tăng <code>auth_epoch</code>, ghi outbox <code>UserRevoked</code>. Auth ghi thẳng Redis ngay sau commit để không chờ consumer; consumer đặt lại epoch (phòng lần ghi thẳng lỗi), xoá <code>perm:{userId}</code>, thu hồi refresh token.</li>
+<li>Test: khoá một tài khoản đang gửi request liên tục; đo thời gian tới request bị từ chối đầu tiên ở mọi service (dưới 5 giây).</li>
+<li>Metric: p99 middleware; số request bị từ chối do epoch; số lần Redis không trả lời và đã chặn hay cho qua.</li>
+<li>Rủi ro: một service tự kiểm tra JWT không qua middleware. Rà mọi service, đưa kiểm tra vào thư viện chung.</li>
+</ul>
+</details>
+</div>
+
+<details class="answer rubric"><summary>Rubric: mid, senior, red flag</summary>
+<div class="tablewrap"><table>
+<thead><tr><th>Tiêu chí</th><th>Câu trả lời mức mid</th><th>Câu trả lời mức senior</th></tr></thead>
+<tbody>
+<tr><td>Chẩn đoán</td><td>Cache quyền</td><td>Ba nơi: cache, JWT, refresh token</td></tr>
+<tr><td>Thiết kế</td><td>TTL ngắn cho mọi thứ</td><td>Tách "còn hợp lệ" khỏi "có quyền gì"; epoch rẻ, mới</td></tr>
+<tr><td>Tải</td><td>Không tính</td><td>30.000 so với 3.000; vì sao không đẩy sang auth</td></tr>
+<tr><td>Lỗi Redis</td><td>Không nhắc</td><td>Fail open hay closed là quyết định an ninh, có người duyệt</td></tr>
+<tr><td>Kiểm chứng</td><td>Không có</td><td>Đo thời gian thu hồi thật ở mọi service</td></tr>
+</tbody></table></div>
+<p><strong>Red flag:</strong> chỉ xoá cache quyền, quên JWT và refresh token; giảm TTL mọi thứ xuống vài giây, đẩy hết tải sang auth; không quyết định rõ khi Redis lỗi.</p>
+</details>
+</div>
+</section>
+
+<!-- 10 -->
+<section id="s10">
+<header><span class="num">10</span><h2>Câu hỏi còn mở</h2></header>
+<p class="prose">Số thứ tự trùng với Open questions trong <code>.claude/docs/LEARNING_LOG.md</code>. Log là bản gốc.</p>
+<div class="tablewrap"><table>
+<thead><tr><th>#</th><th>Câu hỏi</th><th>Trạng thái</th></tr></thead>
+<tbody>
+<tr><td>31</td><td>Khi fill sau miss đọc từ replica, tần suất cache giữ bản cũ là bao nhiêu với độ trễ replica thật của lab, và lần xoá thứ hai cần trễ bao lâu để gần như loại hết?</td><td>Mở. Biến thể của E38.</td></tr>
+<tr><td>32</td><td>Với truy cập theo phân phối Zipf, <code>allkeys-lfu</code> hơn <code>allkeys-lru</code> bao nhiêu điểm hit ratio trên Redis 7, và chênh lệch có lớn hơn khi có job quét key hiếm không?</td><td>Mở. E40.</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- 11 -->
+<section id="s11">
+<header><span class="num">11</span><h2>Tài liệu tham khảo</h2></header>
+<div class="prose"><ul>
+<li>Redis, <a href="https://redis.io/docs/latest/develop/reference/eviction/">Key eviction</a>: các chính sách <code>maxmemory-policy</code>, LRU xấp xỉ, hành vi của <code>noeviction</code></li>
+<li>Rajesh Nishtala và cộng sự, "Scaling Memcache at Facebook", NSDI 2013; tóm tắt trong <a href="https://people.csail.mit.edu/alinush/6.824-spring-2015/l16-memcached.html">bài giảng MIT 6.824</a>: lease chặn stale set và thundering herd</li>
+<li>Andrea Vattani, Flavio Chierichetti, Keegan Lowenstein, "Optimal Probabilistic Cache Stampede Prevention", Proceedings of the VLDB Endowment 8(8), 2015; công thức ở <a href="https://en.wikipedia.org/wiki/Cache_stampede">Cache stampede</a></li>
+<li>Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, chương 5 và 11</li>
+</ul></div>
+<h3>Mức kiểm chứng</h3>
+<div class="tablewrap"><table>
+<thead><tr><th>Khẳng định</th><th>Nguồn</th></tr></thead>
+<tbody>
+<tr><td>Mặc định <code>noeviction</code>, <code>maxmemory</code> 0, <code>maxmemory-samples</code> 5</td><td>đọc bằng <code>CONFIG GET</code> trên Redis 7.0.15 trong sandbox của Claude</td></tr>
+<tr><td><code>noeviction</code> báo lỗi khi ghi, đọc vẫn chạy; <code>volatile-*</code> như <code>noeviction</code> khi không key nào có TTL; LRU xấp xỉ</td><td>tài liệu Redis</td></tr>
+<tr><td><code>SET … NX PX</code> và script Lua kiểm tra version</td><td>chạy thử trên Redis 7.0.15 trong sandbox</td></tr>
+<tr><td>Lease của Facebook: lease mất hiệu lực khi key bị xoá; chỉ người giữ lease được ghi; chặn thundering herd</td><td>bài giảng MIT 6.824 tóm tắt bài NSDI 2013</td></tr>
+<tr><td>Công thức XFetch</td><td>Wikipedia, trích bài VLDB 2015</td></tr>
+<tr><td>Các race trong widget phần 01, số câu truy vấn khi stampede</td><td>mô hình; chưa đo (E38, E39)</td></tr>
+</tbody></table></div>
+</section>
+</main>
+
+</div>
+
+<script>
+const DEFS=`<defs><marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>`;
+function B(x,y,w,h,cls,t,sub){
+  const tx=x+w/2;
+  return `<g class="n ${cls||''}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="5"/>`+
+  `<text class="tb" x="${tx}" y="${y+(sub?h/2-8:h/2)}" text-anchor="middle" dominant-baseline="central">${t}</text>`+
+  (sub?`<text class="ts" x="${tx}" y="${y+h/2+10}" text-anchor="middle" dominant-baseline="central">${sub}</text>`:'')+`</g>`;
+}
+const A=(d,cls)=>`<path d="${d}" class="edge ${cls||''}" marker-end="url(#arw)"/>`;
+const T=(x,y,t,anchor,cls)=>`<text class="${cls||'lbl'}" x="${x}" y="${y}" text-anchor="${anchor||'start'}">${t}</text>`;
+const $=id=>document.getElementById(id);
+const vi=(n,d=0)=>Number(n).toLocaleString('vi-VN',{maximumFractionDigits:d});
+const num=(id,a,b,d)=>{let v=parseFloat($(id).value);return isNaN(v)?d:Math.max(a,Math.min(b,v));};
+
+/* ---------- 01: write-path race stepper ---------- */
+// positions: R top-left, W top-right, cache bottom-left, DB bottom-right
+const P={R:[30,14],W:[480,14],C:[100,128],D:[400,128]};
+function drawRace(s){
+  let g='';
+  g+=B(P.R[0],P.R[1],170,52,s.rc||'struct','Người đọc R',s.r||'');
+  g+=B(P.W[0],P.W[1],170,52,s.wc||'struct',s.w2?'Người ghi W1, W2':'Người ghi W',s.w||'');
+  g+=B(P.C[0],P.C[1],180,60,s.cc||'ram','Cache',s.cache);
+  g+=B(P.D[0],P.D[1],180,60,s.dc||'path','Database (đã commit)',s.db);
+  const ctr=(k,dy)=>[P[k][0]+(k==='C'||k==='D'?90:85),P[k][1]+(dy||0)];
+  (s.ar||[]).forEach(([from,to,cls])=>{
+    const a=ctr(from,from==='R'||from==='W'?52:0),b=ctr(to,to==='C'||to==='D'?0:52);
+    g+=A(`M${a[0]} ${a[1]} L${b[0]} ${b[1]-4}`,cls);});
+  if(s.end)g+=T(340,212,s.end,'middle','tb');
+  return g;
+}
+const RACES={
+ setAfter:{name:'Ghi database, rồi SET cache bằng giá trị mới',steps:[
+  {t:'Ban đầu',d:'Giá trong database là 100, cache cũng 100. Hai admin W1 và W2 gần như cùng lúc đổi giá: W1 đặt 120, W2 đặt 130.',db:'giá 100',cache:'giá 100',w2:1},
+  {t:'W1 ghi database',d:'W1 cập nhật giá thành 120 và commit.',db:'giá 120',cache:'giá 100',w:'W1 đã ghi 120',w2:1,ar:[['W','D','path']]},
+  {t:'W2 ghi database',d:'W2 cập nhật giá thành 130 và commit. Theo database, giá cuối cùng là 130.',db:'giá 130',cache:'giá 100',w:'W2 đã ghi 130',w2:1,ar:[['W','D','path']]},
+  {t:'W2 cập nhật cache',d:'W2 SET cache bằng 130. Lúc này cache khớp database.',db:'giá 130',cache:'giá 130',w:'W2 SET 130',w2:1,ar:[['W','C','hot']]},
+  {t:'W1 cập nhật cache, đến muộn',d:'W1 bị chậm (GC, mạng) giữa lúc ghi database và lúc ghi cache. Giờ nó mới SET cache bằng 120, đè lên 130.',db:'giá 130',cache:'giá 120',cc:'miss',w:'W1 SET 120 (muộn)',w2:1,ar:[['W','C','miss']]},
+  {t:'Kết quả: cache sai',d:'Database 130, cache 120. Mọi người đọc thấy 120 cho tới lần ghi sau hoặc tới khi hết TTL. Thứ tự đến cache không khớp với thứ tự commit trong database. Nếu cả hai xoá thay vì SET, cache sẽ trống và người đọc tiếp theo lấy đúng 130.',db:'giá 130',cache:'giá 120',cc:'miss',w2:1,end:'Cache sai tới lần ghi sau hoặc tới khi hết TTL'}
+ ]},
+ delBefore:{name:'Xoá cache, rồi ghi database',steps:[
+  {t:'Ban đầu',d:'Giá 100 ở cả hai nơi. W muốn đổi thành 120.',db:'giá 100',cache:'giá 100'},
+  {t:'W xoá cache trước',d:'W xoá key trước khi ghi, với ý định "để không ai đọc giá cũ".',db:'giá 100',cache:'(trống)',cc:'dim',w:'DEL',ar:[['W','C','hot']]},
+  {t:'W bắt đầu ghi, chưa commit',d:'W mở transaction và UPDATE giá thành 120. Transaction còn làm thêm vài việc nên chưa commit. Người khác vẫn thấy bản đã commit là 100.',db:'giá 100 (120 chưa commit)',cache:'(trống)',cc:'dim',w:'UPDATE, chưa commit',wc:'hot',ar:[['W','D','hot']]},
+  {t:'R đọc cache: miss',d:'Một người đọc đến, cache trống.',db:'giá 100 (120 chưa commit)',cache:'(trống)',cc:'dim',r:'GET: miss',wc:'hot',w:'chưa commit',ar:[['R','C','path']]},
+  {t:'R đọc database: bản cũ',d:'R đọc database và nhận 100, vì 120 chưa được commit.',db:'giá 100 (120 chưa commit)',cache:'(trống)',cc:'dim',r:'đọc 100',wc:'hot',w:'chưa commit',ar:[['R','D','path']]},
+  {t:'R ghi bản cũ vào cache',d:'R SET cache bằng 100 với TTL 30 phút.',db:'giá 100 (120 chưa commit)',cache:'giá 100',cc:'miss',r:'SET 100',wc:'hot',w:'chưa commit',ar:[['R','C','miss']]},
+  {t:'W commit: cache sai',d:'W commit. Database là 120, cache là 100 tới khi hết TTL. Cửa sổ race dài bằng cả transaction ghi, nên trên hệ thống nhiều người đọc, chuyện này xảy ra thường xuyên.',db:'giá 120',cache:'giá 100',cc:'miss',w:'COMMIT',wc:'row',end:'Cache sai tới khi hết TTL'}
+ ]},
+ delAfter:{name:'Ghi database, rồi xoá cache (mặc định)',steps:[
+  {t:'Ban đầu',d:'Giá 100 trong database. Key vừa hết hạn nên cache trống. W muốn đổi thành 120.',db:'giá 100',cache:'(trống)',cc:'dim'},
+  {t:'R đọc cache: miss',d:'R đến, cache trống.',db:'giá 100',cache:'(trống)',cc:'dim',r:'GET: miss',ar:[['R','C','path']]},
+  {t:'R đọc database',d:'R đọc database và nhận 100. Đây vẫn là giá đúng tại thời điểm này.',db:'giá 100',cache:'(trống)',cc:'dim',r:'đọc 100',ar:[['R','D','path']]},
+  {t:'W ghi và commit',d:'Ngay sau đó, W cập nhật giá thành 120 và commit.',db:'giá 120',cache:'(trống)',cc:'dim',r:'đang giữ 100',w:'UPDATE, COMMIT',ar:[['W','D','path']]},
+  {t:'W xoá cache',d:'W xoá key. Key đang trống nên lệnh xoá không có tác dụng gì.',db:'giá 120',cache:'(trống)',cc:'dim',r:'đang giữ 100',w:'DEL',ar:[['W','C','hot']]},
+  {t:'R ghi bản cũ vào cache, đến muộn',d:'R bị chậm giữa lúc đọc database và lúc ghi cache. Giờ nó SET cache bằng 100. Để xảy ra chuyện này, R phải đọc database trước khi W commit, và ghi cache sau khi W xoá. Cửa sổ này hẹp hơn nhiều so với cách "xoá trước".',db:'giá 120',cache:'giá 100',cc:'miss',r:'SET 100 (muộn)',ar:[['R','C','miss']]},
+  {t:'Kết quả: hiếm nhưng vẫn sai',d:'Database 120, cache 100 tới khi hết TTL. Hiếm, nhưng có. TTL giới hạn thời gian sai. Muốn chặn hẳn, xem hai cách tiếp theo.',db:'giá 120',cache:'giá 100',cc:'miss',end:'Hiếm; nếu xảy ra thì sai tới khi hết TTL'}
+ ]},
+ version:{name:'Ghi database, tăng version rồi xoá cache',steps:[
+  {t:'Ban đầu',d:'Giá 100 trong database, cache trống. Có thêm một key version cho sản phẩm này, đang là 0.',db:'giá 100',cache:'(trống) · version 0',cc:'dim'},
+  {t:'R miss và nhớ version',d:'R đọc cache, miss. Trước khi đọc database, R đọc version: 0.',db:'giá 100',cache:'(trống) · version 0',cc:'dim',r:'miss, nhớ version 0',ar:[['R','C','path']]},
+  {t:'R đọc database',d:'R đọc database và nhận 100.',db:'giá 100',cache:'(trống) · version 0',cc:'dim',r:'đọc 100',ar:[['R','D','path']]},
+  {t:'W ghi, commit, tăng version, xoá',d:'W cập nhật giá thành 120 và commit, rồi tăng version lên 1 và xoá key.',db:'giá 120',cache:'(trống) · version 1',cc:'dim',r:'đang giữ 100',w:'COMMIT, INCR, DEL',ar:[['W','D','path'],['W','C','hot']]},
+  {t:'R thử ghi vào cache: bị từ chối',d:'R chạy script: chỉ SET nếu version vẫn là 0. Version giờ là 1, nên lệnh SET không làm gì. Bản cũ không vào được cache.',db:'giá 120',cache:'(trống) · version 1',cc:'dim',r:'SET bị từ chối',rc:'row',ar:[['R','C','row']]},
+  {t:'Người đọc sau lấy đúng giá',d:'Người đọc tiếp theo miss, đọc database được 120, nhớ version 1, và ghi vào cache thành công. Đây là ý tưởng lease của memcache ở Facebook, làm lại trên Redis bằng một script Lua.',db:'giá 120',cache:'giá 120 · version 1',cc:'row',end:'Cache không giữ bản cũ'}
+ ]},
+ double:{name:'Ghi database, xoá, rồi xoá lần hai sau 500 ms',steps:[
+  {t:'Ban đầu',d:'Giống cách "ghi rồi xoá": giá 100, cache trống, W muốn đổi thành 120.',db:'giá 100',cache:'(trống)',cc:'dim'},
+  {t:'R miss và đọc database',d:'R miss, đọc database được 100.',db:'giá 100',cache:'(trống)',cc:'dim',r:'đọc 100',ar:[['R','D','path']]},
+  {t:'W ghi, commit, xoá',d:'W cập nhật giá thành 120, commit, xoá key (đang trống). W hẹn một lần xoá nữa sau 500 ms.',db:'giá 120',cache:'(trống)',cc:'dim',r:'đang giữ 100',w:'COMMIT, DEL, hẹn DEL',ar:[['W','D','path'],['W','C','hot']]},
+  {t:'R ghi bản cũ',d:'R ghi 100 vào cache, đến muộn như ở cách "ghi rồi xoá".',db:'giá 120',cache:'giá 100',cc:'miss',r:'SET 100 (muộn)',w:'chờ 500 ms',ar:[['R','C','miss']]},
+  {t:'Lần xoá thứ hai',d:'500 ms sau, W xoá key lần nữa. Bản cũ bị gỡ.',db:'giá 120',cache:'(trống)',cc:'dim',w:'DEL lần 2',ar:[['W','C','hot']]},
+  {t:'Kết quả: sai tối đa 500 ms',d:'Người đọc tiếp theo lấy 120. Sai lệch kéo dài tối đa bằng khoảng trễ giữa hai lần xoá, thay vì cả TTL. Không chặn được trường hợp R ghi vào cache sau lần xoá thứ hai, nên đây là cách giảm xác suất, không phải bảo đảm.',db:'giá 120',cache:'(trống)',cc:'dim',end:'Sai tối đa 500 ms trong trường hợp race'}
+ ]}
+};
+(function(){
+  const el=$('race');
+  el.innerHTML=`<div class="ph"><strong>Năm cách ghi: cache có giữ giá cũ không</strong><span class="meta"></span></div><div class="bd">
+  <div class="calc"><label>Cách ghi<select id="rcSel">${Object.entries(RACES).map(([k,v])=>`<option value="${k}"${k==='delBefore'?' selected':''}>${v.name}</option>`).join('')}</select></label></div>
+  <h4 class="st-t"></h4><svg viewBox="0 0 680 222" role="img"></svg>
+  <div class="desc" aria-live="polite"><div class="st-d"></div><pre hidden></pre></div>
+  <div class="nav"><button data-d="-1">Trước</button><button data-d="1" class="primary">Tiếp</button></div>
+  <div class="legend"><span><i class="lg-path"></i>đọc, ghi database</span><span><i class="lg-hot"></i>xoá hoặc ghi cache</span><span><i class="lg-miss"></i>cache giữ giá cũ</span><span><i class="lg-row"></i>đúng</span></div>
+  <p class="fine">Thứ tự trong mỗi kịch bản được chọn để cho thấy race có thể xảy ra; phần lớn thời gian các bước không chen nhau như vậy. Chưa đo (E38).</p></div>`;
+  const svg=el.querySelector('svg'),t=el.querySelector('.st-t'),d=el.querySelector('.st-d'),pre=el.querySelector('pre'),meta=el.querySelector('.meta');
+  const [pv,nx]=el.querySelectorAll('.nav button');let i=0,steps=RACES.delBefore.steps;
+  function render(){const s=steps[i];svg.innerHTML=DEFS+drawRace(s);svg.setAttribute('aria-label',s.t);t.textContent=s.t;d.textContent=s.d;
+    pre.hidden=!s.c;pre.textContent=s.c||'';meta.textContent=`bước ${i+1} / ${steps.length}`;pv.disabled=i===0;nx.disabled=i===steps.length-1;}
+  const go=k=>{i=Math.max(0,Math.min(steps.length-1,i+k));render();};
+  pv.onclick=()=>go(-1);nx.onclick=()=>go(1);
+  $('rcSel').onchange=()=>{steps=RACES[$('rcSel').value].steps;i=0;render();};
+  el.tabIndex=0;el.addEventListener('keydown',e=>{if(e.target.closest('select,input'))return;if(e.key==='ArrowRight')go(1);if(e.key==='ArrowLeft')go(-1);});
+  render();
+})();
+
+/* ---------- 02: hit ratio ---------- */
+function ht(){
+  const Q=num('htQ',1,1e7,20000),C=num('htC',0.01,1000,0.5),D=num('htD',0.1,1e4,8),K=num('htK',1,1e7,2000),h=num('htH',500,999,950)/1000;
+  $('htHv').textContent=vi(h*100,1)+'%';
+  const db=x=>(1-x)*Q, lat=x=>x*C+(1-x)*(C+D);
+  const X0=60,W=590,top=12,H=170,lo=0.5,hi=0.999,ymax=Math.max(db(lo),K)*1.05;
+  const sx=x=>X0+(x-lo)/(hi-lo)*W, sy=v=>top+H-Math.min(v,ymax)/ymax*H;
+  let g=`<line class="axis" x1="${X0}" y1="${top+H}" x2="${X0+W}" y2="${top+H}"/><line class="axis" x1="${X0}" y1="${top}" x2="${X0}" y2="${top+H}"/>`;
+  [0.5,0.6,0.7,0.8,0.9,0.95,0.99].forEach(x=>g+=T(sx(x),top+H+16,vi(x*100)+'%','middle','ts'));
+  g+=T(X0-6,top+8,vi(ymax),'end','ts')+T(X0-6,top+H,'0','end','ts');
+  let d='';for(let x=lo;x<=hi;x+=0.002)d+=(d?'L':'M')+sx(x).toFixed(1)+' '+sy(db(x)).toFixed(1);
+  g+=`<path class="curve" d="${d}"/>`;
+  if(K<ymax)g+=`<line class="capline" x1="${X0}" y1="${sy(K)}" x2="${X0+W}" y2="${sy(K)}"/>`+T(X0+W,sy(K)-6,'database chịu được','end','ts');
+  g+=`<circle class="dot" cx="${sx(h)}" cy="${sy(db(h))}" r="5"/>`;
+  $('htSvg').innerHTML=g;
+  const over=db(h)>K;
+  $('htStats').innerHTML=[['Đọc xuống database mỗi giây',vi(db(h)),over?'bad':''],['Database đang dùng',vi(db(h)/K*100)+'%',over?'bad':db(h)/K>0.7?'warn':'good'],['Độ trễ trung bình',vi(lat(h),2)+' ms','']]
+    .map(([k,v,c])=>`<div class="stat"><span>${k}</span><b${c?` class="${c}"`:''}>${v}</b></div>`).join('');
+  const h2=Math.max(0.5,h-0.04);
+  $('htDesc').textContent=`Ở hit ratio ${vi(h*100,1)}%, database nhận ${vi(db(h))} lượt đọc mỗi giây (${vi(db(h)/K*100)}% sức). Nếu hit ratio tụt 4 điểm xuống ${vi(h2*100,1)}%, con số thành ${vi(db(h2))}, gấp ${vi(db(h2)/db(h),1)} lần. `+(over?'Database đang quá tải: hit ratio ở mức này không đủ.':'Hãy hỏi: hit ratio có thể tụt tới đâu lúc deploy hay lúc Redis khởi động lại?');
+  $('htMeta').textContent=`${vi(Q)} đọc/giây`;
+}
+['htQ','htC','htD','htK','htH'].forEach(id=>$(id).addEventListener('input',ht));ht();
+
+/* ---------- 02: stampede ---------- */
+function rng(seed){let s=(seed*2654435761)>>>0||1;return()=>{s=(Math.imul(s,1664525)+1013904223)>>>0;return s/4294967296;};}
+let spSeed=1;
+function stampede(S,L,Tms,seed){
+  const r=rng(seed),T=Tms/1000,E=3,start=0,end=E+1.5,dt=1/L,bucket=0.1;
+  const nb=Math.round((end-start)/bucket),db=new Array(nb).fill(0);
+  let expiry=E,refreshing=false,refreshDone=null,waited=0,maxWait=0,stale=0,dbq=0,xf=0;
+  for(let t=start;t<end;t+=dt){
+    if(refreshing&&t>=refreshDone){refreshing=false;expiry=refreshDone+600;}
+    const b=Math.min(nb-1,Math.floor((t-start)/bucket));
+    const expired=t>=expiry;
+    if(S==='none'){
+      if(expired){db[b]++;dbq++;if(!refreshing){refreshing=true;refreshDone=t+T;}waited++;maxWait=Math.max(maxWait,T);}
+    }else if(S==='lock'){
+      if(expired){if(!refreshing){refreshing=true;refreshDone=t+T;db[b]++;dbq++;}waited++;maxWait=Math.max(maxWait,refreshDone-t);}
+    }else if(S==='swr'){
+      if(expired){if(!refreshing){refreshing=true;refreshDone=t+T;db[b]++;dbq++;}stale++;}
+    }else if(S==='xf'){
+      if(t>=expiry||t-T*Math.log(r())>=expiry){ // XFetch: delta=T, beta=1
+        db[b]++;dbq++;xf++;
+        if(!refreshing){refreshing=true;refreshDone=t+T;}
+        if(t>=expiry){waited++;maxWait=Math.max(maxWait,T);}
+      }
+    }
+  }
+  return {db,dbq,waited,maxWait,stale,nb,bucket,E,start,end,firstRefresh:null};
+}
+function sp(){
+  const S=$('spS').value,L=Math.round(num('spL',1,1e5,2000)),T=num('spT',1,1e4,300);
+  const R=stampede(S,L,T,spSeed);
+  const X0=50,W=600,top=14,H=160,bw=W/R.nb,ymax=Math.max(4,...R.db)*1.1;
+  let g=`<line class="axis" x1="${X0}" y1="${top+H}" x2="${X0+W}" y2="${top+H}"/><line class="axis" x1="${X0}" y1="${top}" x2="${X0}" y2="${top+H}"/>`;
+  g+=T_(X0-6,top+8,vi(ymax),'end')+T_(X0-6,top+H,'0','end');
+  R.db.forEach((v,i)=>{if(!v)return;const h=v/ymax*H;g+=`<rect class="bar db" x="${X0+i*bw+1}" y="${top+H-h}" width="${Math.max(1,bw-2)}" height="${Math.max(1.5,h)}"/>`;});
+  const ex=X0+(R.E-R.start)/(R.end-R.start)*W;
+  g+=`<line class="exp" x1="${ex}" y1="${top}" x2="${ex}" y2="${top+H}"/>`+T_(ex+4,top+12,'hết hạn','start');
+  for(let s=0;s<=4;s++){const x=X0+(s)/(R.end-R.start)*W;g+=T_(x,top+H+16,`${s-3>0?'+':''}${s-3} s`,'middle');}
+  $('spSvg').innerHTML=g;
+  $('spStats').innerHTML=[['Câu truy vấn xuống database',vi(R.dbq),R.dbq>10?'bad':'good'],['Request phải chờ',vi(R.waited),R.waited?'warn':'good'],['Chờ lâu nhất',vi(R.maxWait*1000)+' ms',''],['Request nhận bản cũ',vi(R.stale),'']]
+    .map(([k,v,c])=>`<div class="stat"><span>${k}</span><b${c?` class="${c}"`:''}>${v}</b></div>`).join('');
+  const txt={none:`Mọi request đến trong ${vi(T)} ms sau lúc hết hạn đều miss và cùng chạy câu truy vấn: ${vi(R.dbq)} câu giống hệt nhau. Ngoài đời, database chậm đi vì tải đó, nên cửa sổ dài hơn và con số còn lớn hơn.`,
+    lock:`Request đầu tiên lấy khoá và tính lại: chỉ ${vi(R.dbq)} câu truy vấn. Đổi lại, ${vi(R.waited)} request phải chờ tới ${vi(R.maxWait*1000)} ms.`,
+    swr:`Chỉ ${vi(R.dbq)} câu truy vấn, và không ai phải chờ: ${vi(R.stale)} request nhận bản cũ trong ${vi(T)} ms làm mới. Cần chấp nhận dữ liệu cũ thêm một chút.`,
+    xf:`Một vài request "trúng xúc xắc" trước lúc hết hạn và tính lại sớm: ${vi(R.dbq)} câu truy vấn, rơi vào trước mốc hết hạn. Key được làm mới trước khi hết hạn nên không ai phải chờ. Không cần khoá; đổi lại có thể có vài câu chạy trùng.`}[S];
+  $('spDesc').textContent=txt;
+  $('spMeta').textContent=`seed ${spSeed}`;
+}
+function T_(x,y,t,a){return `<text class="ts" x="${x}" y="${y}" text-anchor="${a}">${t}</text>`;}
+['spS','spL','spT'].forEach(id=>$(id).addEventListener('input',sp));
+$('spSeed').onclick=()=>{spSeed++;sp();};sp();
+
+/* ---------- 02: TTL jitter ---------- */
+function jt(){
+  const N=Math.round(num('jtN',1,1e7,50000)),TTL=num('jtT',1,1e6,600),j=num('jtJ',0,50,0)/100;
+  $('jtJv').textContent=vi(j*100)+'%';
+  const lo=TTL*(1-j),hi=TTL*(1+j),span=Math.max(1,hi-lo),peak=j===0?N:N/span;
+  const X0=50,W=600,top=12,H=110;
+  const xmin=TTL*0.45,xmax=TTL*1.55,sx=v=>X0+(v-xmin)/(xmax-xmin)*W;
+  let g=`<line class="axis" x1="${X0}" y1="${top+H}" x2="${X0+W}" y2="${top+H}"/>`;
+  [0.5,0.75,1,1.25,1.5].forEach(f=>g+=T(sx(TTL*f),top+H+16,vi(TTL*f)+' s','middle','ts'));
+  if(j===0){g+=`<rect class="bar db" x="${sx(TTL)-2}" y="${top}" width="4" height="${H}"/>`;}
+  else{const hgt=Math.max(4,H*Math.min(1,Math.sqrt(peak/N)));g+=`<rect class="bar db" x="${sx(lo)}" y="${top+H-hgt}" width="${Math.max(2,sx(hi)-sx(lo))}" height="${hgt}" opacity=".85"/>`;}
+  $('jtSvg').innerHTML=g;
+  $('jtStats').innerHTML=[['Key hết hạn trong giây đông nhất',vi(Math.ceil(peak)),peak>5000?'bad':peak>500?'warn':'good'],['Khoảng hết hạn',j===0?'1 giây':`${vi(lo)}–${vi(hi)} s`,'']]
+    .map(([k,v,c])=>`<div class="stat"><span>${k}</span><b${c?` class="${c}"`:''}>${v}</b></div>`).join('');
+  $('jtDesc').textContent=j===0?`Cả ${vi(N)} key hết hạn trong cùng một giây, ${vi(TTL)} giây sau lúc nạp. Database nhận ${vi(N)} câu truy vấn trong giây đó.`
+    :`Với jitter ±${vi(j*100)}%, ${vi(N)} key hết hạn rải trong ${vi(span)} giây, khoảng ${vi(Math.ceil(peak))} key mỗi giây. Chiều cao cột vẽ theo thang căn bậc hai để vẫn nhìn thấy khi giá trị nhỏ.`;
+  $('jtMeta').textContent=`TTL ${vi(TTL)} s`;
+}
+['jtN','jtT','jtJ'].forEach(id=>$(id).addEventListener('input',jt));jt();
+</script>
+</body>
+</html>

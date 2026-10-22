@@ -82,6 +82,10 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 | Latency orders of magnitude and what they imply (round trips, RAM vs disk, cross-region) | 2 (prov.) | same, §02 | 2026-10-20 | Measure RTT and buffer-pool hit vs miss latency on the lab and place them on the ladder |
 | Little's law for in-flight requests and connection pool sizing | 2 (prov.) | same, §02 | 2026-10-20 | Exercise E37: compare `Threads_running` with λ × W at several rates |
 | Utilization vs latency (M/M/1), headroom targets | 2 (prov.) | same, §02–§03 | 2026-10-20 | Exercises E36 and E37: find the real knee of the p99 curve on the lab |
+| Cache patterns (cache-aside, read-through, write-through, write-behind) and the cost of each | 2 (prov.) | [caching-invalidation](../topics/caching-invalidation/index.html) §02 | 2026-10-20 | Review one cache at work: pattern, TTL, every write path, what happens when it is empty |
+| Write-path races (set after write, delete before write, write then delete, version/lease, double delete) and stale fills from replicas | 2 (prov.) | same, §01–§03 | 2026-10-20 | Exercise E38: count stale keys for each write path, with and without replica fills |
+| Cache stampede and mass expiry: single flight, stale-while-revalidate, XFetch, TTL jitter | 2 (prov.) | same, §02 | 2026-10-20 | Exercise E39: recompute queries and p99 at expiry for each strategy |
+| Hit ratio vs database load; Redis eviction policies and `maxmemory` | 2 (prov.) | same, §02 | 2026-10-20 | Exercise E40: hit ratio by cache size and policy under a Zipf workload |
 
 "(prov.)" = provisional. Every row above rests on one artifact I wrote myself, with no measurement behind it. Week 1 of Month 1 includes a baseline assessment (TECHNICAL_GROWTH.md Section 11) that should confirm or cut these.
 
@@ -117,6 +121,8 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 28. How long can GC pause the event loop on a worker with a heap of several GB, and is the default 30 s `lockDuration` still safe? Measure with `monitorEventLoopDelay` during E34.
 29. On the lab hardware, does MySQL's p99-vs-utilization curve look like M/M/1 or like a multi-server queue (M/M/c), and from what utilization does p99 double compared with idle? E37.
 30. What is the real "index and overhead" factor of the tables at work? Is the capacity page's default of 2 too low for tables with many secondary indexes? Measure with `information_schema.tables`.
+31. When the fill after a miss reads from a replica, how often does the cache keep an old value at the lab's real replica lag, and how long must the second delete wait to remove nearly all of them? Variant of E38.
+32. Under a Zipf workload, how many points of hit ratio does `allkeys-lfu` gain over `allkeys-lru` on Redis 7, and is the gap larger when a job scans rare keys? E40.
 
 ## Pending verification (from the session's own exercise list)
 
@@ -174,8 +180,40 @@ These are written in the page as exercises; none have been run yet.
 - **E37** — Open-loop reads at 20–95% of max: p50, p99, `Threads_running` vs λ × W, and the knee of the curve.
 - **Q65–Q70** — The six recall questions in section 08 of the capacity page.
 - **C13–C15** — The three real-world cases in section 09 of the capacity page (5 years of wallet ledger on one MySQL, a Black Friday ×8 plan, a viral article's view counter). Solve in writing before opening the answers.
+- **E38** — Five write paths, forced interleavings then free-running readers and writers: stale keys counted, including fills from a replica.
+- **E39** — A 2,000 reads/s key expiring with a 300 ms recompute: recompute queries and p99 for no protection, lock, stale-while-revalidate, XFetch.
+- **E40** — Hit ratio for 1%, 5%, 20% cache sizes under Zipf access, `allkeys-lru` vs `allkeys-lfu`, with a scanning job.
+- **Q71–Q76** — The six recall questions in section 08 of the caching page.
+- **C16–C18** — The three real-world cases in section 09 of the caching page (price shown differs from price charged, a 9:00 homepage stampede, revoking access within 5 seconds). Solve in writing before opening the answers.
 - **Q11–Q16** — The six recall questions in section 08 of the composite-index page (answers are on the page, hidden).
 - **Q1–Q5** — The five check questions at the end of the page (leftmost prefix, `COUNT(*)` and the visibility map, full scan polluting the cache, TOAST, a `sessions` table updated 5,000×/sec). Answer in writing before looking anything up, then verify.
+
+---
+
+## 2026-10-20 — Caching and invalidation
+
+**Topic and objective.** Month 5 topic, written ahead as documentation only (Phase 5 of the documentation plan, 2 of 4): keeping a cache correct when the database changes, and keeping the database alive when the cache misses.
+
+**Output.** [topics/caching-invalidation/index.html](../topics/caching-invalidation/index.html) — 11 sections, including section 09 with cases C16–C18. Widgets: a write-path race stepper with five strategies (set after write, delete before write, write then delete, write then version and delete, double delete); a hit-ratio calculator (database load and mean latency vs hit ratio, with capacity line); a stampede simulator (no protection, lock, stale-while-revalidate, XFetch) plotting recompute queries around expiry; a TTL-jitter histogram for keys loaded at once. Prediction templates for E38–E40.
+
+**What it covers.**
+
+- Cache-aside, read-through, write-through, write-behind; cache must never be the source of truth.
+- Write path: commit, then delete (never set); delete-before-write races with the open transaction; write-then-delete still races with a slow reader; versioned fill via a Lua compare-and-set (the idea of Facebook memcache leases); delayed double delete; fills from a lagging replica.
+- Stampede: single flight with `SET NX PX`, stale-while-revalidate, XFetch (Vattani et al., VLDB 2015), TTL jitter for mass expiry.
+- Hit ratio vs database load (miss rate drives load); Redis eviction policies, approximate LRU, default `noeviction` (read with `CONFIG GET` on Redis 7.0.15 in Claude's sandbox), separate Redis for cache and queues.
+
+**Initial understanding.** TODO — what did I believe about caching before this page? No prior belief was stated in the session.
+
+**Mistakes and misconceptions corrected.** TODO — only I know which. Traps the page writes down: updating the cache keeps it fresh; deleting before the write is safer; correct ordering means never stale; 95% hit ratio is good; Redis evicts by default; a cache always raises capacity.
+
+**Experiments and results.** None measured by me. Claude ran `CONFIG GET` for the eviction defaults and checked `SET … NX PX` and the versioned-fill Lua script on Redis 7.0.15 in its sandbox; that verifies syntax and defaults, not behaviour under load. The race and stampede widgets are models; E38–E40 are the measurements.
+
+**Competency level.** Level 2 provisional on four new matrix rows.
+
+**Remaining questions.** Open questions 31 and 32.
+
+**Next step.** Topic 22 of the plan, replication and read-your-writes.
 
 ---
 
