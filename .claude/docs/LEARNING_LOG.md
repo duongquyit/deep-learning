@@ -90,6 +90,9 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 | Async vs semi-sync (`AFTER_SYNC`, `AFTER_COMMIT`): commit latency, failover data loss, fallback to async on timeout | 2 (prov.) | same, §02–§03 | 2026-10-20 | Exercise E43: commit latency and the timeout fallback when the replica stops |
 | Read-your-writes and monotonic reads: primary window, GTID wait (`session_track_gtids`, `WAIT_FOR_EXECUTED_GTID_SET`), sticky replicas | 2 (prov.) | same, §01–§02, §04 | 2026-10-20 | Exercise E41: stale-read rates by delay and the cost of GTID waits |
 | Measuring replication lag correctly (performance_schema timestamps, heartbeat, limits of `Seconds_Behind_Source`) | 2 (prov.) | same, §02, §04 | 2026-10-20 | Exercise E42; then set up lag alerting on a replica at work |
+| CAP stated precisely (linearizable C, availability of non-failed nodes, choice only under partition) and PACELC (latency vs consistency in normal operation) | 2 (prov.) | [distributed-consistency](../topics/distributed-consistency/index.html) §01–§03 | 2026-10-20 | Exercise E44: Group Replication under a network partition |
+| Consistency models (linearizable, causal, read-your-writes, monotonic reads, eventual) and choosing one per feature | 2 (prov.) | same, §02–§03, §06 | 2026-10-20 | Exercise E45: stale-read rate and latency per `group_replication_consistency` level |
+| Quorums (N, W, R; majority 2f+1) and conflict resolution (LWW, version vectors, CRDTs, single-writer per key); versioned events between services | 2 (prov.) | same, §02, §04 | 2026-10-20 | Write and test a G-counter merge; versioned-event consumer in a service at work |
 
 "(prov.)" = provisional. Every row above rests on one artifact I wrote myself, with no measurement behind it. Week 1 of Month 1 includes a baseline assessment (TECHNICAL_GROWTH.md Section 11) that should confirm or cut these.
 
@@ -129,6 +132,8 @@ Levels: 0 unfamiliar · 1 explain basics with help · 2 implement a standard sol
 32. Under a Zipf workload, how many points of hit ratio does `allkeys-lfu` gain over `allkeys-lru` on Redis 7, and is the gap larger when a job scans rare keys? E40.
 33. During a big transaction, how do heartbeat lag, performance_schema lag and `Seconds_Behind_Source` differ over time? Is applying a 6-million-row update on the replica slower than running it on the primary? E42.
 34. Does `WAIT_FOR_EXECUTED_GTID_SET` accept a fractional timeout on 8.4, and what does it cost the replica when thousands of sessions wait at once? Variant of E41.
+35. With Group Replication and `group_replication_unreachable_majority_timeout` = 0, how long does a client committing on the minority member hang, what error does it get, and is that transaction committed or rolled back after the network heals? E44.
+36. How much read and write latency do `BEFORE` and `AFTER` of `group_replication_consistency` add over `EVENTUAL` on the lab, with and without 20 ms of delay to one member? E45.
 
 ## Pending verification (from the session's own exercise list)
 
@@ -196,8 +201,40 @@ These are written in the page as exercises; none have been run yet.
 - **E43** — Semi-sync `AFTER_SYNC` vs async commit latency; replica stopped: first-commit wait and the switch to async.
 - **Q77–Q82** — The six recall questions in section 08 of the replication page.
 - **C19–C21** — The three real-world cases in section 09 of the replication page (orders missing right after checkout, a nightly 40-minute lag, losing 3 seconds of paid orders in a failover). Solve in writing before opening the answers.
+- **E44** — Group Replication single-primary: disconnect the primary from the majority; behaviour of commits on each side, election time, what happens at heal.
+- **E45** — Stale reads and latency for `EVENTUAL`, `BEFORE`, `AFTER`, with and without 20 ms delay to one member.
+- **Q83–Q88** — The six recall questions in section 08 of the distributed consistency page.
+- **C22–C24** — The three real-world cases in section 09 of the distributed consistency page (concert seats across two regions, one consistency level per feature, an email change drifting across five services). Solve in writing before opening the answers.
 - **Q11–Q16** — The six recall questions in section 08 of the composite-index page (answers are on the page, hidden).
 - **Q1–Q5** — The five check questions at the end of the page (leftmost prefix, `COUNT(*)` and the visibility map, full scan polluting the cache, TOAST, a `sessions` table updated 5,000×/sec). Answer in writing before looking anything up, then verify.
+
+---
+
+## 2026-10-20 — Distributed consistency: CAP, PACELC, quorums
+
+**Topic and objective.** Month 5 topic, written ahead as documentation only (Phase 5 of the documentation plan, 4 of 4): what CAP actually says, what PACELC adds, which consistency model each feature needs, how quorums trade overlap, fault tolerance and latency, and how to resolve conflicts.
+
+**Output.** [topics/distributed-consistency/index.html](../topics/distributed-consistency/index.html) — 11 sections, including section 09 with cases C22–C24. Widgets: a partition stepper (three replicas across two cities, the last seat booked from both sides, majority-required vs always-answer); a history checker (one write, four reads by three clients; toggle the returned values and see which of linearizable, causal, read-your-writes, monotonic reads and eventual hold); a quorum calculator (N, W, R, worst-case overlap, failures tolerated, latency from replica placement). Prediction templates for E44–E45.
+
+**What it covers.**
+
+- CAP definitions and Theorem 1 from Gilbert and Lynch; why "pick 2 of 3" and "CA" mislead.
+- PACELC from Abadi (2012): Dynamo, Cassandra, Riak PA/EL; VoltDB, H-Store PC/EC; PNUTS PC/EL. MySQL rows are the page's own inference, labelled as such.
+- Quorums from Dynamo (R + W > N, sloppy quorum, hinted handoff, vector clocks) and why R + W > N alone is not linearizable.
+- MySQL Group Replication from the 8.4 manual and source: Paxos-based, majority required; `group_replication_consistency` default `BEFORE_ON_PRIMARY_FAILOVER`; `group_replication_unreachable_majority_timeout` default 0.
+- Conflict resolution (LWW, version vectors, CRDT G-counter, single writer per key) and consistency across services with outbox and versioned events.
+
+**Initial understanding.** TODO — what did I believe about CAP and consistency before this page? No prior belief was stated in the session.
+
+**Mistakes and misconceptions corrected.** TODO — only I know which. Traps the page writes down: CAP as "pick 2 of 3"; CAP's C equals ACID's C; R + W > N gives strong consistency; eventual means milliseconds; LWW is a safe merge; more replicas always cost nothing.
+
+**Experiments and results.** None. The widgets are models; E44–E45 need a three-member Group Replication cluster on the lab.
+
+**Competency level.** Level 2 provisional on three new matrix rows.
+
+**Remaining questions.** Open questions 35 and 36.
+
+**Next step.** Run E36–E45 on the lab for the Month 5 pages, starting with E41 and E44, which need replication set up once.
 
 ---
 
