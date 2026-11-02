@@ -102,8 +102,6 @@
     .group-head .t-badge{width:38px;height:38px;font-size:14px}
     .group-head h2{margin:0;font-size:17px;font-weight:700;color:var(--text-0);letter-spacing:-.01em}
     .group-head .count{margin-left:auto;font-size:12.5px;color:var(--text-2);white-space:nowrap}
-    .group-empty{margin:0;padding:14px 16px;border:1px dashed var(--border-strong);border-radius:var(--r-m);
-      color:var(--text-2);font-size:13.5px}
     .t-meta{font-size:12px;color:var(--text-2);line-height:1.4}
     .t-badge.seq{background:var(--card-bg-2);border:1px solid var(--border-strong);color:var(--violet-2)}
 
@@ -136,8 +134,8 @@
       <a href="roadmap.html"><span class="dot"></span>Lộ trình 6 tháng</a>
     </nav>
     <div class="nav-group">
-      <p class="nav-label">Theo tháng của lộ trình</p>
-      <nav class="side-nav" id="month-nav" aria-label="Chủ đề theo tháng"></nav>
+      <p class="nav-label">Theo chủ đề</p>
+      <nav class="side-nav" id="month-nav" aria-label="Chủ đề kiến thức"></nav>
     </div>
     <div class="sidebar-foot">
       <a href="https://github.com/duongquyit/deep-learning">Mã nguồn trên GitHub</a>
@@ -155,7 +153,7 @@
 
     <section class="content">
       <h1>Chủ đề</h1>
-      <p class="lede">Chủ đề được xếp theo sáu tháng của <a href="roadmap.html">lộ trình</a>. Danh sách lấy trực tiếp từ thư mục <code>topics/</code> trên GitHub.</p>
+      <p class="lede">Bài học được nhóm theo mảng kiến thức. Mỗi bài ghi tháng của <a href="roadmap.html">lộ trình</a> mà nó phục vụ.</p>
 
       <div id="groups"></div>
       <p class="status-box" id="status">Đang tải danh sách chủ đề…</p>
@@ -171,43 +169,44 @@
   const TOPICS_DIR = "topics";
   const BADGES = ["grad-a", "grad-b", "grad-c", "grad-d"];
 
-  // Sáu tháng của lộ trình (khớp ROADMAP.md).
-  const MONTHS = [
-    { id: 1, title: "Database internals và tối ưu query", short: "Database internals" },
-    { id: 2, title: "Backend architecture và testing", short: "Architecture và testing" },
-    { id: 3, title: "Transactions và xử lý bất đồng bộ đáng tin cậy", short: "Transactions và async" },
-    { id: 4, title: "Sẵn sàng production và observability", short: "Production" },
-    { id: 5, title: "System design và các đánh đổi nâng cao", short: "System design" },
-    { id: 6, title: "Capstone và đánh giá mức độ sẵn sàng", short: "Capstone" }
+  // Các chủ đề kiến thức, theo thứ tự xuất hiện trong lộ trình.
+  const GROUPS = [
+    { id: "indexes", title: "Database indexes" },
+    { id: "innodb", title: "InnoDB và transactions" },
+    { id: "backend", title: "NestJS và kiến trúc backend" },
+    { id: "async", title: "Concurrency và xử lý bất đồng bộ" },
+    { id: "system", title: "System design" }
   ];
-  const UNSORTED = { id: 0, title: "Chưa xếp vào tháng nào", short: "Chưa xếp" };
+  const OTHER = { id: "other", title: "Chưa phân loại" };
 
-  // Mỗi chủ đề thuộc tháng nào. Thứ tự khai báo là thứ tự hiển thị trong tháng.
-  // Thêm chủ đề mới: thêm một dòng vào đây. Chủ đề chưa có dòng sẽ rơi vào nhóm "Chưa xếp vào tháng nào".
+  // g: chủ đề kiến thức, m: tháng của lộ trình, week: tuần (nếu đã rõ).
+  // Thứ tự khai báo là thứ tự hiển thị trong chủ đề.
+  // Thêm bài mới: thêm một dòng vào đây. Bài chưa có dòng sẽ rơi vào nhóm "Chưa phân loại".
   const TOPIC_META = {
-    "btree-index-internals":          { m: 1, title: "B+tree index internals", week: "Tuần 1 đến 2" },
-    "clustered-vs-secondary-index":   { m: 1, title: "Clustered và secondary index", week: "Tuần 2" },
-    "composite-index-query-plan":     { m: 1, title: "Composite index và query plan", week: "Tuần 2" },
-    "index-write-cost":               { m: 1, title: "Chi phí ghi của index", week: "Tuần 3" },
-    "innodb-buffer-pool-redo-undo":   { m: 1, title: "Buffer pool, redo log và undo log", week: "Tuần 3 đến 4" },
-    "mvcc-read-view":                 { m: 1, title: "MVCC và read view", week: "Tuần 4" },
-    "innodb-locking-deadlock":        { m: 1, title: "Locking và deadlock trong InnoDB", week: "Tuần 4" },
+    "btree-index-internals":          { g: "indexes", m: 1, title: "B+tree index internals", week: "Tuần 1 đến 2" },
+    "clustered-vs-secondary-index":   { g: "indexes", m: 1, title: "Clustered và secondary index", week: "Tuần 2" },
+    "composite-index-query-plan":     { g: "indexes", m: 1, title: "Composite index và query plan", week: "Tuần 2" },
+    "index-write-cost":               { g: "indexes", m: 1, title: "Chi phí ghi của index", week: "Tuần 3" },
+    "pagination-keyset":              { g: "indexes", m: 2, title: "Pagination: offset và keyset" },
 
-    "nestjs-request-lifecycle":       { m: 2, title: "NestJS request lifecycle và DI" },
-    "layering-business-invariants":   { m: 2, title: "Layering và business invariants" },
-    "validation-error-contracts":     { m: 2, title: "Validation và error contract" },
-    "pagination-keyset":              { m: 2, title: "Pagination: offset và keyset" },
-    "test-strategy-real-db":          { m: 2, title: "Test strategy với MySQL thật" },
+    "innodb-buffer-pool-redo-undo":   { g: "innodb", m: 1, title: "Buffer pool, redo log và undo log", week: "Tuần 3 đến 4" },
+    "mvcc-read-view":                 { g: "innodb", m: 1, title: "MVCC và read view", week: "Tuần 4" },
+    "innodb-locking-deadlock":        { g: "innodb", m: 1, title: "Locking và deadlock trong InnoDB", week: "Tuần 4" },
 
-    "concurrency-control-strategies": { m: 3, title: "Concurrency control trên một số dư" },
-    "idempotency-retries":            { m: 3, title: "Idempotency và retry" },
-    "transactional-outbox":           { m: 3, title: "Transactional outbox" },
-    "bullmq-workers-resumable":       { m: 3, title: "BullMQ worker và batch có thể resume" },
+    "nestjs-request-lifecycle":       { g: "backend", m: 2, title: "NestJS request lifecycle và DI" },
+    "layering-business-invariants":   { g: "backend", m: 2, title: "Layering và business invariants" },
+    "validation-error-contracts":     { g: "backend", m: 2, title: "Validation và error contract" },
+    "test-strategy-real-db":          { g: "backend", m: 2, title: "Test strategy với MySQL thật" },
 
-    "capacity-estimation":            { m: 5, title: "Capacity estimation" },
-    "caching-invalidation":           { m: 5, title: "Caching và invalidation" },
-    "replication-read-your-writes":   { m: 5, title: "Replication và read-your-writes" },
-    "distributed-consistency":        { m: 5, title: "Distributed consistency: CAP, PACELC, quorum" }
+    "concurrency-control-strategies": { g: "async", m: 3, title: "Concurrency control trên một số dư" },
+    "idempotency-retries":            { g: "async", m: 3, title: "Idempotency và retry" },
+    "transactional-outbox":           { g: "async", m: 3, title: "Transactional outbox" },
+    "bullmq-workers-resumable":       { g: "async", m: 3, title: "BullMQ worker và batch có thể resume" },
+
+    "capacity-estimation":            { g: "system", m: 5, title: "Capacity estimation" },
+    "caching-invalidation":           { g: "system", m: 5, title: "Caching và invalidation" },
+    "replication-read-your-writes":   { g: "system", m: 5, title: "Replication và read-your-writes" },
+    "distributed-consistency":        { g: "system", m: 5, title: "Distributed consistency: CAP, PACELC, quorum" }
   };
   const RANK = Object.fromEntries(Object.keys(TOPIC_META).map((k, i) => [k, i]));
 
@@ -250,14 +249,15 @@
     }));
   }
 
-  // Gom chủ đề theo tháng, giữ thứ tự học trong tháng.
-  function groupByMonth(topics) {
+  // Gom bài theo chủ đề kiến thức, giữ thứ tự học trong chủ đề.
+  function groupByTheme(topics) {
     const by = new Map();
     for (const t of topics) {
       const meta = TOPIC_META[t.name];
-      const m = meta ? meta.m : 0;
-      if (!by.has(m)) by.set(m, []);
-      by.get(m).push({ ...t, title: meta ? meta.title : prettify(t.name), week: meta && meta.week || "" });
+      const g = meta ? meta.g : OTHER.id;
+      if (!by.has(g)) by.set(g, []);
+      const when = meta ? (meta.week ? `Tháng ${meta.m}, ${meta.week}` : `Tháng ${meta.m}`) : "";
+      by.get(g).push({ ...t, title: meta ? meta.title : prettify(t.name), when });
     }
     for (const list of by.values()) {
       list.sort((a, b) => (RANK[a.name] ?? 1e6) - (RANK[b.name] ?? 1e6) || a.name.localeCompare(b.name));
@@ -266,60 +266,53 @@
   }
 
   function render(topics) {
-    const by = groupByMonth(topics);
-    const groups = MONTHS.concat(by.has(0) ? [UNSORTED] : []);
+    const by = groupByTheme(topics);
+    const groups = GROUPS.concat([OTHER]).filter((g) => (by.get(g.id) || []).length);
     const root = document.getElementById("groups");
     const nav = document.getElementById("month-nav");
     root.innerHTML = "";
     nav.innerHTML = "";
 
     groups.forEach((g, gi) => {
-      const list = by.get(g.id) || [];
+      const list = by.get(g.id);
       const sec = document.createElement("section");
       sec.className = "group";
-      sec.id = g.id ? `m${g.id}` : "m-other";
-      sec.dataset.empty = list.length ? "" : "1";
-      const label = g.id ? `Tháng ${g.id}` : "Khác";
+      sec.id = `g-${g.id}`;
       sec.innerHTML = `
         <div class="group-head">
-          <span class="t-badge ${BADGES[gi % BADGES.length]}">${g.id || "?"}</span>
+          <span class="t-badge ${BADGES[gi % BADGES.length]}">${esc(g.title.charAt(0))}</span>
           <h2>${esc(g.title)}</h2>
-          <span class="count">${list.length ? `${list.length} chủ đề` : "chưa có chủ đề"}</span>
+          <span class="count">${list.length} bài</span>
         </div>`;
-      if (list.length) {
-        const ul = document.createElement("ul");
-        ul.className = "topic-grid";
-        list.forEach((t, i) => {
-          const li = document.createElement("li");
-          li.dataset.key = `${t.name} ${t.title} ${t.week} ${label}`.toLowerCase();
-          li.innerHTML = `
-            <a class="topic-card" href="${esc(t.href)}">
-              <span class="t-badge seq">${i + 1}</span>
-              <span class="t-body">
-                <div class="t-name">${esc(t.title)}</div>
-                <div class="t-meta">${esc(t.week || label)}</div>
-              </span>
-              <span class="t-arrow">›</span>
-            </a>`;
-          ul.appendChild(li);
-        });
-        sec.appendChild(ul);
-      } else {
-        sec.insertAdjacentHTML("beforeend",
-          `<p class="group-empty">Chưa có tài liệu cho tháng này. Chủ đề sẽ hiện ở đây khi được viết xong.</p>`);
-      }
+      const ul = document.createElement("ul");
+      ul.className = "topic-grid";
+      list.forEach((t, i) => {
+        const li = document.createElement("li");
+        li.dataset.key = `${t.name} ${t.title} ${t.when} ${g.title}`.toLowerCase();
+        li.innerHTML = `
+          <a class="topic-card" href="${esc(t.href)}">
+            <span class="t-badge seq">${i + 1}</span>
+            <span class="t-body">
+              <div class="t-name">${esc(t.title)}</div>
+              ${t.when ? `<div class="t-meta">${esc(t.when)}</div>` : ""}
+            </span>
+            <span class="t-arrow">›</span>
+          </a>`;
+        ul.appendChild(li);
+      });
+      sec.appendChild(ul);
       root.appendChild(sec);
 
       const a = document.createElement("a");
       a.href = `#${sec.id}`;
       a.dataset.target = sec.id;
-      a.innerHTML = `<span class="dot"></span>${g.id ? `Tháng ${g.id}: ` : ""}${esc(g.short)}`;
+      a.innerHTML = `<span class="dot"></span>${esc(g.title)}`;
       nav.appendChild(a);
     });
     spy();
   }
 
-  // Đánh dấu tháng đang xem ở sidebar.
+  // Đánh dấu chủ đề đang xem ở sidebar.
   let io;
   function spy() {
     if (io) io.disconnect();
@@ -354,11 +347,11 @@
       render(topics);
       status.hidden = topics.length > 0;
       if (!topics.length) status.textContent = "Chưa có chủ đề nào trong thư mục topics/.";
-      countPill.textContent = `${topics.length} chủ đề`;
+      countPill.textContent = `${topics.length} bài`;
     } catch {
       render(FALLBACK);
       status.textContent = "Không tải được danh sách tự động, đang hiển thị danh sách dự phòng.";
-      countPill.textContent = `${FALLBACK.length} chủ đề (dự phòng)`;
+      countPill.textContent = `${FALLBACK.length} bài (dự phòng)`;
     }
   })();
 </script>
