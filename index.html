@@ -90,6 +90,23 @@
     .t-path{font-size:11.5px;color:var(--text-2);word-break:break-all;line-height:1.4}
     .t-arrow{color:var(--text-2);font-size:15px;flex-shrink:0;margin-top:3px}
 
+
+    .nav-label{font-size:11.5px;color:var(--text-2);padding:0 10px 4px;margin:0}
+    .nav-group{display:flex;flex-direction:column;gap:6px}
+    nav.side-nav a.current{color:var(--text-0)}
+    nav.side-nav a.current .dot{background:var(--pink-2)}
+
+    .group{scroll-margin-top:92px;margin-top:34px}
+    .group:first-of-type{margin-top:0}
+    .group-head{display:flex;align-items:center;gap:12px;margin:0 0 14px}
+    .group-head .t-badge{width:38px;height:38px;font-size:14px}
+    .group-head h2{margin:0;font-size:17px;font-weight:700;color:var(--text-0);letter-spacing:-.01em}
+    .group-head .count{margin-left:auto;font-size:12.5px;color:var(--text-2);white-space:nowrap}
+    .group-empty{margin:0;padding:14px 16px;border:1px dashed var(--border-strong);border-radius:var(--r-m);
+      color:var(--text-2);font-size:13.5px}
+    .t-meta{font-size:12px;color:var(--text-2);line-height:1.4}
+    .t-badge.seq{background:var(--card-bg-2);border:1px solid var(--border-strong);color:var(--violet-2)}
+
     .status-box{background:var(--card-bg-2);border:1px solid var(--border);border-radius:var(--r-s);
       padding:12px 16px;color:var(--text-2);font-size:13.5px;margin-top:14px}
 
@@ -99,7 +116,8 @@
       .sidebar{width:100%;flex-direction:row;align-items:center;overflow-x:auto;padding:14px 16px;gap:16px;
         border-right:none;border-bottom:1px solid var(--border)}
       nav.side-nav{flex-direction:row;gap:4px}
-      .sidebar-foot{display:none}
+      .sidebar-foot,.nav-label{display:none}
+      .nav-group{flex-direction:row;align-items:center;gap:4px}
       .topbar{padding:16px 18px;flex-wrap:wrap}
       .content{padding:20px 18px 32px}
     }
@@ -117,6 +135,10 @@
       <a href="index.html" class="active"><span class="dot"></span>Chủ đề</a>
       <a href="roadmap.html"><span class="dot"></span>Lộ trình 6 tháng</a>
     </nav>
+    <div class="nav-group">
+      <p class="nav-label">Theo tháng của lộ trình</p>
+      <nav class="side-nav" id="month-nav" aria-label="Chủ đề theo tháng"></nav>
+    </div>
     <div class="sidebar-foot">
       <a href="https://github.com/duongquyit/deep-learning">Mã nguồn trên GitHub</a>
     </div>
@@ -133,9 +155,9 @@
 
     <section class="content">
       <h1>Chủ đề</h1>
-      <p class="lede">Chọn một chủ đề để đọc. Danh sách được lấy trực tiếp từ thư mục <code>topics/</code> trên GitHub.</p>
+      <p class="lede">Chủ đề được xếp theo sáu tháng của <a href="roadmap.html">lộ trình</a>. Danh sách lấy trực tiếp từ thư mục <code>topics/</code> trên GitHub.</p>
 
-      <ul id="list" class="topic-grid"></ul>
+      <div id="groups"></div>
       <p class="status-box" id="status">Đang tải danh sách chủ đề…</p>
     </section>
   </main>
@@ -149,35 +171,58 @@
   const TOPICS_DIR = "topics";
   const BADGES = ["grad-a", "grad-b", "grad-c", "grad-d"];
 
-  // Dự phòng khi GitHub API lỗi hoặc hết lượt (60 lần/giờ cho mỗi IP).
-  const FALLBACK = [
-    { name: "btree-index-internals", href: "topics/btree-index-internals/index.html" },
-    { name: "clustered-vs-secondary-index", href: "topics/clustered-vs-secondary-index/index.html" },
-    { name: "composite-index-query-plan", href: "topics/composite-index-query-plan/index.html" },
-    { name: "index-write-cost", href: "topics/index-write-cost/index.html" },
-    { name: "innodb-buffer-pool-redo-undo", href: "topics/innodb-buffer-pool-redo-undo/index.html" },
-    { name: "mvcc-read-view", href: "topics/mvcc-read-view/index.html" },
-    { name: "innodb-locking-deadlock", href: "topics/innodb-locking-deadlock/index.html" },
-    { name: "concurrency-control-strategies", href: "topics/concurrency-control-strategies/index.html" },
-    { name: "idempotency-retries", href: "topics/idempotency-retries/index.html" },
-    { name: "transactional-outbox", href: "topics/transactional-outbox/index.html" },
-    { name: "bullmq-workers-resumable", href: "topics/bullmq-workers-resumable/index.html" },
-    { name: "capacity-estimation", href: "topics/capacity-estimation/index.html" },
-    { name: "caching-invalidation", href: "topics/caching-invalidation/index.html" },
-    { name: "replication-read-your-writes", href: "topics/replication-read-your-writes/index.html" },
-    { name: "distributed-consistency", href: "topics/distributed-consistency/index.html" },
-    { name: "nestjs-request-lifecycle", href: "topics/nestjs-request-lifecycle/index.html" },
-    { name: "layering-business-invariants", href: "topics/layering-business-invariants/index.html" },
-    { name: "validation-error-contracts", href: "topics/validation-error-contracts/index.html" },
-    { name: "pagination-keyset", href: "topics/pagination-keyset/index.html" },
-    { name: "test-strategy-real-db", href: "topics/test-strategy-real-db/index.html" }
+  // Sáu tháng của lộ trình (khớp ROADMAP.md).
+  const MONTHS = [
+    { id: 1, title: "Database internals và tối ưu query", short: "Database internals" },
+    { id: 2, title: "Backend architecture và testing", short: "Architecture và testing" },
+    { id: 3, title: "Transactions và xử lý bất đồng bộ đáng tin cậy", short: "Transactions và async" },
+    { id: 4, title: "Sẵn sàng production và observability", short: "Production" },
+    { id: 5, title: "System design và các đánh đổi nâng cao", short: "System design" },
+    { id: 6, title: "Capstone và đánh giá mức độ sẵn sàng", short: "Capstone" }
   ];
+  const UNSORTED = { id: 0, title: "Chưa xếp vào tháng nào", short: "Chưa xếp" };
+
+  // Mỗi chủ đề thuộc tháng nào. Thứ tự khai báo là thứ tự hiển thị trong tháng.
+  // Thêm chủ đề mới: thêm một dòng vào đây. Chủ đề chưa có dòng sẽ rơi vào nhóm "Chưa xếp vào tháng nào".
+  const TOPIC_META = {
+    "btree-index-internals":          { m: 1, title: "B+tree index internals", week: "Tuần 1 đến 2" },
+    "clustered-vs-secondary-index":   { m: 1, title: "Clustered và secondary index", week: "Tuần 2" },
+    "composite-index-query-plan":     { m: 1, title: "Composite index và query plan", week: "Tuần 2" },
+    "index-write-cost":               { m: 1, title: "Chi phí ghi của index", week: "Tuần 3" },
+    "innodb-buffer-pool-redo-undo":   { m: 1, title: "Buffer pool, redo log và undo log", week: "Tuần 3 đến 4" },
+    "mvcc-read-view":                 { m: 1, title: "MVCC và read view", week: "Tuần 4" },
+    "innodb-locking-deadlock":        { m: 1, title: "Locking và deadlock trong InnoDB", week: "Tuần 4" },
+
+    "nestjs-request-lifecycle":       { m: 2, title: "NestJS request lifecycle và DI" },
+    "layering-business-invariants":   { m: 2, title: "Layering và business invariants" },
+    "validation-error-contracts":     { m: 2, title: "Validation và error contract" },
+    "pagination-keyset":              { m: 2, title: "Pagination: offset và keyset" },
+    "test-strategy-real-db":          { m: 2, title: "Test strategy với MySQL thật" },
+
+    "concurrency-control-strategies": { m: 3, title: "Concurrency control trên một số dư" },
+    "idempotency-retries":            { m: 3, title: "Idempotency và retry" },
+    "transactional-outbox":           { m: 3, title: "Transactional outbox" },
+    "bullmq-workers-resumable":       { m: 3, title: "BullMQ worker và batch có thể resume" },
+
+    "capacity-estimation":            { m: 5, title: "Capacity estimation" },
+    "caching-invalidation":           { m: 5, title: "Caching và invalidation" },
+    "replication-read-your-writes":   { m: 5, title: "Replication và read-your-writes" },
+    "distributed-consistency":        { m: 5, title: "Distributed consistency: CAP, PACELC, quorum" }
+  };
+  const RANK = Object.fromEntries(Object.keys(TOPIC_META).map((k, i) => [k, i]));
+
+  // Dự phòng khi GitHub API lỗi hoặc hết lượt (60 lần/giờ cho mỗi IP).
+  const FALLBACK = Object.keys(TOPIC_META).map((name) => ({
+    name, href: `topics/${name}/index.html`
+  }));
 
   const api = (p) =>
     `https://api.github.com/repos/${OWNER}/${REPO}/contents/${p}?ref=${BRANCH}`;
 
   const prettify = (slug) =>
     slug.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+  const esc = (x) => String(x).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
 
   // Chọn trang đích phù hợp nhất trong một thư mục topic.
   function pickTarget(dir, files) {
@@ -196,39 +241,108 @@
     const res = await fetch(api(TOPICS_DIR));
     if (!res.ok) throw new Error(res.status);
     const dirs = (await res.json()).filter((x) => x.type === "dir");
-    const topics = await Promise.all(dirs.map(async (d) => {
+    return Promise.all(dirs.map(async (d) => {
       const r = await fetch(api(d.path));
       const files = r.ok ? await r.json() : [];
       const href = pickTarget(d.path, files)
         || `https://github.com/${OWNER}/${REPO}/tree/${BRANCH}/${d.path}`;
       return { name: d.name, href };
     }));
-    return topics.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  // Gom chủ đề theo tháng, giữ thứ tự học trong tháng.
+  function groupByMonth(topics) {
+    const by = new Map();
+    for (const t of topics) {
+      const meta = TOPIC_META[t.name];
+      const m = meta ? meta.m : 0;
+      if (!by.has(m)) by.set(m, []);
+      by.get(m).push({ ...t, title: meta ? meta.title : prettify(t.name), week: meta && meta.week || "" });
+    }
+    for (const list of by.values()) {
+      list.sort((a, b) => (RANK[a.name] ?? 1e6) - (RANK[b.name] ?? 1e6) || a.name.localeCompare(b.name));
+    }
+    return by;
   }
 
   function render(topics) {
-    const list = document.getElementById("list");
-    list.innerHTML = "";
-    topics.forEach((t, i) => {
-      const li = document.createElement("li");
-      li.dataset.key = (t.name + " " + prettify(t.name)).toLowerCase();
-      li.innerHTML = `
-        <a class="topic-card" href="${t.href}">
-          <span class="t-badge ${BADGES[i % BADGES.length]}">${prettify(t.name).charAt(0)}</span>
-          <span class="t-body">
-            <div class="t-name">${prettify(t.name)}</div>
-            <div class="t-path">${t.href}</div>
-          </span>
-          <span class="t-arrow">›</span>
-        </a>`;
-      list.appendChild(li);
+    const by = groupByMonth(topics);
+    const groups = MONTHS.concat(by.has(0) ? [UNSORTED] : []);
+    const root = document.getElementById("groups");
+    const nav = document.getElementById("month-nav");
+    root.innerHTML = "";
+    nav.innerHTML = "";
+
+    groups.forEach((g, gi) => {
+      const list = by.get(g.id) || [];
+      const sec = document.createElement("section");
+      sec.className = "group";
+      sec.id = g.id ? `m${g.id}` : "m-other";
+      sec.dataset.empty = list.length ? "" : "1";
+      const label = g.id ? `Tháng ${g.id}` : "Khác";
+      sec.innerHTML = `
+        <div class="group-head">
+          <span class="t-badge ${BADGES[gi % BADGES.length]}">${g.id || "?"}</span>
+          <h2>${esc(g.title)}</h2>
+          <span class="count">${list.length ? `${list.length} chủ đề` : "chưa có chủ đề"}</span>
+        </div>`;
+      if (list.length) {
+        const ul = document.createElement("ul");
+        ul.className = "topic-grid";
+        list.forEach((t, i) => {
+          const li = document.createElement("li");
+          li.dataset.key = `${t.name} ${t.title} ${t.week} ${label}`.toLowerCase();
+          li.innerHTML = `
+            <a class="topic-card" href="${esc(t.href)}">
+              <span class="t-badge seq">${i + 1}</span>
+              <span class="t-body">
+                <div class="t-name">${esc(t.title)}</div>
+                <div class="t-meta">${esc(t.week || label)}</div>
+              </span>
+              <span class="t-arrow">›</span>
+            </a>`;
+          ul.appendChild(li);
+        });
+        sec.appendChild(ul);
+      } else {
+        sec.insertAdjacentHTML("beforeend",
+          `<p class="group-empty">Chưa có tài liệu cho tháng này. Chủ đề sẽ hiện ở đây khi được viết xong.</p>`);
+      }
+      root.appendChild(sec);
+
+      const a = document.createElement("a");
+      a.href = `#${sec.id}`;
+      a.dataset.target = sec.id;
+      a.innerHTML = `<span class="dot"></span>${g.id ? `Tháng ${g.id}: ` : ""}${esc(g.short)}`;
+      nav.appendChild(a);
     });
+    spy();
+  }
+
+  // Đánh dấu tháng đang xem ở sidebar.
+  let io;
+  function spy() {
+    if (io) io.disconnect();
+    const links = [...document.querySelectorAll("#month-nav a")];
+    io = new IntersectionObserver((es) => {
+      es.forEach((e) => {
+        if (e.isIntersecting) links.forEach((a) => a.classList.toggle("current", a.dataset.target === e.target.id));
+      });
+    }, { rootMargin: "-20% 0px -65% 0px" });
+    document.querySelectorAll(".group").forEach((g) => io.observe(g));
   }
 
   document.getElementById("q").addEventListener("input", (e) => {
     const q = e.target.value.trim().toLowerCase();
-    document.querySelectorAll("#list li").forEach((li) => {
-      li.style.display = li.dataset.key.includes(q) ? "" : "none";
+    document.querySelectorAll(".group").forEach((g) => {
+      const items = g.querySelectorAll("li");
+      let shown = 0;
+      items.forEach((li) => {
+        const ok = li.dataset.key.includes(q);
+        li.style.display = ok ? "" : "none";
+        if (ok) shown++;
+      });
+      g.hidden = q !== "" && shown === 0;
     });
   });
 
@@ -240,7 +354,7 @@
       render(topics);
       status.hidden = topics.length > 0;
       if (!topics.length) status.textContent = "Chưa có chủ đề nào trong thư mục topics/.";
-      countPill.textContent = topics.length === 1 ? "1 chủ đề" : `${topics.length} chủ đề`;
+      countPill.textContent = `${topics.length} chủ đề`;
     } catch {
       render(FALLBACK);
       status.textContent = "Không tải được danh sách tự động, đang hiển thị danh sách dự phòng.";
